@@ -216,41 +216,43 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.title("Navigation")
 
-# Add toggle for configuration pages
-show_config = st.sidebar.checkbox(
-    "⚙️ Show Configuration",
-    value=False,
-    help="Show machine and codes configuration (needed only for initial setup)"
-)
-
-st.sidebar.markdown("---")
-
-# Build page list based on whether config is shown
-if show_config:
-    page = st.sidebar.radio(
-        "Select Page:",
+# Use expanders for foldable navigation sections
+with st.sidebar.expander("⚙️ Configuration", expanded=False):
+    config_page = st.radio(
+        "Configuration Pages:",
         [
             "🖥️ Machine Configuration",
             "⚙️ Codes Configuration",
             "🧪 Pseudopotentials Configuration",
-            "🔬 Structure Viewer",
-            "📊 Calculation Setup",
-            "🔄 Workflow Builder",
-            "🚀 Job Submission & Files",
-            "📈 Results & Post-Processing"
-        ]
+        ],
+        key="config_nav",
+        label_visibility="collapsed"
     )
-else:
-    page = st.sidebar.radio(
-        "Select Page:",
+    if st.button("Go to selected", key="go_config"):
+        st.session_state.selected_page = config_page
+
+with st.sidebar.expander("🔬 Workflow", expanded=True):
+    workflow_page = st.radio(
+        "Workflow Pages:",
         [
             "🔬 Structure Viewer",
             "📊 Calculation Setup",
             "🔄 Workflow Builder",
             "🚀 Job Submission & Files",
             "📈 Results & Post-Processing"
-        ]
+        ],
+        key="workflow_nav",
+        label_visibility="collapsed"
     )
+    if st.button("Go to selected", key="go_workflow"):
+        st.session_state.selected_page = workflow_page
+
+# Initialize selected page if not set
+if 'selected_page' not in st.session_state:
+    st.session_state.selected_page = "🔬 Structure Viewer"
+
+# Get the current page
+page = st.session_state.selected_page
 
 # Determine if this is a calculation page (for any page-specific logic later)
 is_calculation_page = page not in ["🖥️ Machine Configuration", "⚙️ Codes Configuration", "🧪 Pseudopotentials Configuration"]
@@ -310,10 +312,10 @@ elif page == "📈 Results & Post-Processing":
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
 ### About
-**xespresso GUI** - Streamlit interface for Quantum ESPRESSO calculations
+**spresso GUI** - Streamlit interface for Quantum ESPRESSO calculations
 
-Version: 1.0.0
+Version: 1.6.0
 
-[Documentation](https://github.com/superstar54/xespresso) | 
-[Report Issue](https://github.com/superstar54/xespresso/issues)
+[Documentation](https://github.com/vsrsousa/spresso) | 
+[Report Issue](https://github.com/vsrsousa/spresso/issues)
 """)

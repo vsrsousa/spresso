@@ -371,7 +371,7 @@ def render_workflow_builder_page():
     config["occupations"] = occupations
 
     # Pseudopotentials - using reusable selector component
-    from xespresso.gui.utils.pseudopotentials_selector import render_pseudopotentials_selector
+    from gui.utils.pseudopotentials_selector import render_pseudopotentials_selector
     
     elements = set(atoms.get_chemical_symbols())
     render_pseudopotentials_selector(elements, config, key_prefix="workflow")
@@ -379,13 +379,13 @@ def render_workflow_builder_page():
     st.markdown("---")
 
     # Magnetic Configuration - optional expandable section
-    from xespresso.gui.utils.magnetic_selector import render_magnetic_selector
+    from gui.utils.magnetic_selector import render_magnetic_selector
     render_magnetic_selector(elements, config, key_prefix="workflow")
 
     st.markdown("---")
 
     # Hubbard Configuration - optional expandable section
-    from xespresso.gui.utils.hubbard_selector import render_hubbard_selector
+    from gui.utils.hubbard_selector import render_hubbard_selector
     render_hubbard_selector(elements, config, key_prefix="workflow")
 
     st.markdown("---")
@@ -683,7 +683,7 @@ def render_workflow_builder_page():
 
     if st.button("🔄 Build Workflow", type="primary"):
         try:
-            from xespresso.gui.workflows import GUIWorkflow
+            from gui.workflows import GUIWorkflow
 
             # Validate configuration
             if not config.get("pseudopotentials"):

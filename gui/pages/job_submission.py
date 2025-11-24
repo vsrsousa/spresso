@@ -224,7 +224,7 @@ def render_dry_run_tab():
 
         with st.spinner("Generating files..."):
             try:
-                from xespresso.gui.calculations import (
+                from gui.calculations import (
                     dry_run_calculation,
                     prepare_calculation_from_gui,
                 )
@@ -856,7 +856,7 @@ def render_job_submission_tab():
 
         with st.spinner("Running calculation..."):
             try:
-                from xespresso.gui.calculations import prepare_calculation_from_gui
+                from gui.calculations import prepare_calculation_from_gui
 
                 # Create output directory if it doesn't exist
                 os.makedirs(full_path, exist_ok=True)

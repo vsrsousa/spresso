@@ -12,7 +12,7 @@ from typing import Dict, Tuple, Optional
 from ase import Atoms
 from xespresso import Espresso
 from xespresso.tools import setup_magnetic_config
-from xespresso.gui.calculations.base import BaseCalculationPreparation
+from gui.calculations.base import BaseCalculationPreparation
 import logging
 
 logger = logging.getLogger(__name__)

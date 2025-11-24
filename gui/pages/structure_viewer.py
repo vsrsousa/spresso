@@ -78,7 +78,7 @@ def render_structure_viewer_page():
 
 def render_upload_tab():
     """Render the file upload tab using structures module."""
-    from xespresso.gui.structures import load_structure_from_upload
+    from gui.structures import load_structure_from_upload
     
     uploaded_file = st.file_uploader(
         "Upload structure file",
@@ -136,7 +136,7 @@ def render_upload_save_to_database(atoms, filename):
     
     # Validate database path
     try:
-        from xespresso.gui.utils.validation import validate_path
+        from gui.utils.validation import validate_path
     except ImportError:
         # Fallback validation
         def validate_path(path, allow_creation=False):
@@ -188,7 +188,7 @@ def render_upload_save_to_database(atoms, filename):
             
             # Import safe utilities
             try:
-                from xespresso.gui.utils.validation import safe_makedirs
+                from gui.utils.validation import safe_makedirs
             except ImportError:
                 def safe_makedirs(path):
                     try:
@@ -242,7 +242,7 @@ def render_upload_save_to_database(atoms, filename):
 
 def render_browse_tab():
     """Render the directory browser tab using structures module."""
-    from xespresso.gui.structures import StructureLoader, load_structure_from_file
+    from gui.structures import StructureLoader, load_structure_from_file
     
     # Use base working directory from session state
     base_workdir = st.session_state.get('working_directory', os.path.expanduser("~"))
@@ -401,7 +401,7 @@ def render_ase_database_tab():
     
     # Validate database path
     try:
-        from xespresso.gui.utils.validation import validate_path, safe_path_exists, safe_makedirs
+        from gui.utils.validation import validate_path, safe_path_exists, safe_makedirs
     except ImportError:
         # Fallback validation
         def validate_path(path, allow_creation=False):
@@ -458,7 +458,7 @@ def render_database_load_section(db_path):
     """
     # Import safe path utilities
     try:
-        from xespresso.gui.utils.validation import safe_path_exists
+        from gui.utils.validation import safe_path_exists
     except ImportError:
         def safe_path_exists(path):
             try:
@@ -552,7 +552,7 @@ def render_database_save_section(db_path):
                 
                 # Import safe path utilities
                 try:
-                    from xespresso.gui.utils.validation import safe_makedirs
+                    from gui.utils.validation import safe_makedirs
                 except ImportError:
                     def safe_makedirs(path):
                         try:
@@ -598,7 +598,7 @@ def render_structure_controls_and_viewer(atoms):
     Args:
         atoms: ASE Atoms object to visualize
     """
-    from xespresso.gui.utils.visualization import render_structure_viewer, display_structure_info
+    from gui.utils.visualization import render_structure_viewer, display_structure_info
     
     # Display structure information
     display_structure_info(atoms)
@@ -673,7 +673,7 @@ def render_structure_controls_and_viewer(atoms):
 
 def render_export_section(atoms):
     """Render the export section using structures module."""
-    from xespresso.gui.structures import export_structure, StructureExporter
+    from gui.structures import export_structure, StructureExporter
     
     col1, col2 = st.columns(2)
     

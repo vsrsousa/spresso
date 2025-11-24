@@ -414,7 +414,7 @@ def render_calculation_setup_page():
             del config["kspacing"]
 
     # Pseudopotentials - using reusable selector component
-    from xespresso.gui.utils.pseudopotentials_selector import render_pseudopotentials_selector
+    from gui.utils.pseudopotentials_selector import render_pseudopotentials_selector
     
     elements = set(atoms.get_chemical_symbols())
     render_pseudopotentials_selector(elements, config, key_prefix="calc")
@@ -422,13 +422,13 @@ def render_calculation_setup_page():
     st.markdown("---")
 
     # Magnetic Configuration - optional expandable section
-    from xespresso.gui.utils.magnetic_selector import render_magnetic_selector
+    from gui.utils.magnetic_selector import render_magnetic_selector
     render_magnetic_selector(elements, config, key_prefix="calc")
 
     st.markdown("---")
 
     # Hubbard Configuration - optional expandable section  
-    from xespresso.gui.utils.hubbard_selector import render_hubbard_selector
+    from gui.utils.hubbard_selector import render_hubbard_selector
     render_hubbard_selector(elements, config, key_prefix="calc")
 
     st.markdown("---")
@@ -650,7 +650,7 @@ def render_calculation_setup_page():
 
     if st.button("🔧 Prepare Calculation", type="primary"):
         try:
-            from xespresso.gui.calculations import prepare_calculation_from_gui
+            from gui.calculations import prepare_calculation_from_gui
 
             # Validate configuration
             if not config.get("pseudopotentials"):

@@ -1,0 +1,12 @@
+{
+  "name": "local_desktop",
+  "execution": "local",
+  "scheduler": "direct",
+  "workdir": "./calculations",
+  "nprocs": 4,
+  "launcher": "mpirun -np {nprocs}",
+  "use_modules": false,
+  "modules": [],
+  "prepend": [],
+  "postpend": []
+}

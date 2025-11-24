@@ -1,0 +1,7 @@
+{
+    "execution": "local",
+    "scheduler": "direct",
+    "workdir": "./xespresso",
+    "nprocs": 1,
+    "launcher": "mpirun -np {nprocs}"
+}

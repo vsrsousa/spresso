@@ -1,0 +1,34 @@
+{
+  "name": "slurm_cluster",
+  "execution": "remote",
+  "scheduler": "slurm",
+  "workdir": "/home/username/calculations",
+  "host": "cluster.university.edu",
+  "username": "username",
+  "port": 22,
+  "auth": {
+    "method": "key",
+    "ssh_key": "~/.ssh/id_rsa"
+  },
+  "nprocs": 16,
+  "launcher": "mpirun -np {nprocs}",
+  "use_modules": true,
+  "modules": [
+    "quantum-espresso/7.0",
+    "openmpi/4.1.0"
+  ],
+  "resources": {
+    "nodes": 1,
+    "ntasks-per-node": 16,
+    "time": "02:00:00",
+    "partition": "compute",
+    "mem": "32G"
+  },
+  "prepend": [
+    "export OMP_NUM_THREADS=1",
+    "ulimit -s unlimited"
+  ],
+  "postpend": [
+    "echo 'Job completed at $(date)'"
+  ]
+}

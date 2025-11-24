@@ -1,0 +1,15 @@
+{
+    "execution": "remote",
+    "scheduler": "slurm",
+    "workdir": "~/gpu_qe",
+    "resources": {
+        "nodes": 1,
+        "ntasks-per-node": 8,
+        "time": "01:00:00",
+        "partition": "gpu"
+    },
+    "launcher": "mpirun -np {nprocs}",
+    "nprocs": 8,
+    "use_modules": true,
+    "modules": ["cuda/12.0", "qe-gpu"]
+}

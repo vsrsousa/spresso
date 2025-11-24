@@ -1,0 +1,83 @@
+{
+  "default": "local_desktop",
+  "machines": {
+    "local_desktop": {
+      "execution": "local",
+      "scheduler": "direct",
+      "workdir": "./calculations",
+      "nprocs": 4,
+      "launcher": "mpirun -np {nprocs}",
+      "use_modules": false,
+      "modules": [],
+      "prepend": [],
+      "postpend": []
+    },
+    "slurm_cluster": {
+      "execution": "remote",
+      "scheduler": "slurm",
+      "workdir": "/home/username/calculations",
+      "host": "cluster.university.edu",
+      "username": "username",
+      "port": 22,
+      "auth": {
+        "method": "key",
+        "ssh_key": "~/.ssh/id_rsa"
+      },
+      "nprocs": 16,
+      "launcher": "mpirun -np {nprocs}",
+      "use_modules": true,
+      "modules": [
+        "quantum-espresso/7.0",
+        "openmpi/4.1.0"
+      ],
+      "resources": {
+        "nodes": 1,
+        "ntasks-per-node": 16,
+        "time": "02:00:00",
+        "partition": "compute",
+        "mem": "32G"
+      },
+      "prepend": [
+        "export OMP_NUM_THREADS=1",
+        "ulimit -s unlimited"
+      ],
+      "postpend": [
+        "echo 'Job completed at $(date)'"
+      ]
+    },
+    "gpu_cluster": {
+      "execution": "remote",
+      "scheduler": "slurm",
+      "workdir": "/scratch/username/calculations",
+      "host": "gpu-cluster.university.edu",
+      "username": "username",
+      "port": 22,
+      "auth": {
+        "method": "key",
+        "ssh_key": "~/.ssh/id_rsa"
+      },
+      "nprocs": 8,
+      "launcher": "mpirun -np {nprocs}",
+      "use_modules": true,
+      "modules": [
+        "cuda/11.7",
+        "quantum-espresso-gpu/7.0"
+      ],
+      "resources": {
+        "nodes": 1,
+        "ntasks-per-node": 8,
+        "time": "04:00:00",
+        "partition": "gpu",
+        "gres": "gpu:2",
+        "mem": "64G"
+      },
+      "prepend": [
+        "export CUDA_VISIBLE_DEVICES=0,1",
+        "nvidia-smi"
+      ],
+      "postpend": [
+        "echo 'GPU job completed'"
+      ]
+    }
+  }
+}

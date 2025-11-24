@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""
+Command-line launcher for xespresso Streamlit GUI.
+
+This script can be installed as a command-line tool via setup.py.
+"""
+
+import sys
+import os
+from pathlib import Path
+
+def main():
+    """Launch the xespresso Streamlit GUI."""
+    try:
+        import streamlit.web.cli as stcli
+    except ImportError:
+        print("❌ Error: Streamlit is not installed.")
+        print("Please install it with: pip install streamlit")
+        print("Or install xespresso with GUI support: pip install xespresso[gui]")
+        sys.exit(1)
+    
+    # Find the streamlit app
+    try:
+        import xespresso.gui
+        gui_module_path = Path(xespresso.gui.__file__).parent
+        app_path = gui_module_path / "streamlit_app.py"
+    except ImportError:
+        print("❌ Error: xespresso module not found.")
+        print("Please install xespresso first: pip install xespresso")
+        sys.exit(1)
+    
+    if not app_path.exists():
+        print(f"❌ Error: Could not find streamlit_app.py at {app_path}")
+        sys.exit(1)
+    
+    print(f"🚀 Launching xespresso GUI...")
+    print(f"📂 App location: {app_path}")
+    print()
+    
+    # Launch streamlit
+    sys.argv = ["streamlit", "run", str(app_path), "--browser.gatherUsageStats", "false"]
+    sys.exit(stcli.main())
+
+if __name__ == "__main__":
+    main()

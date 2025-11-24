@@ -13,7 +13,7 @@ def render_job_submission_page():
     
     - **Generate Files (Dry Run)**: Creates Espresso calculator and generates input files with `calc.write_input(atoms)` for review
     - **File Browser**: Browse, view, and edit existing calculation files
-    - **Run Calculation**: Uses xespresso's `calc.run()` method which checks for previous results and handles restart logic
+    - **Run Calculation**: Creates Espresso calculator and runs with `calc.get_potential_energy()` which checks convergence
     """
     )
 
@@ -666,16 +666,15 @@ def render_job_submission_tab():
     st.subheader("🚀 Run Calculation")
     st.markdown(
         """
-    Run a calculation using xespresso's `calc.run()` method which follows xespresso's logic.
+    Run a calculation using xespresso by calling `calc.get_potential_energy()`.
     
     This will:
-    - Check for previous calculation results in the directory
-    - Skip calculation if results already exist (unless forced)
-    - Handle restart logic automatically if calculation failed
-    - Run the calculation with convergence checking
-    - Return the energy after successful completion
+    - Create an Espresso calculator from your configuration
+    - Check for previous calculation results and convergence
+    - Automatically generate input files if they don't exist
+    - Run the calculation and return the energy
     
-    **Note:** xespresso intelligently checks if a calculation is needed before running.
+    **Note:** xespresso's get_potential_energy() always checks convergence before running.
     """
     )
 
@@ -849,7 +848,7 @@ def render_job_submission_tab():
         run_button = st.button(
             "🚀 Run Calculation",
             type="primary",
-            help="Run calculation using xespresso's calc.run() method with automatic restart and convergence checking",
+            help="Run calculation using calc.get_potential_energy() which checks convergence",
             key="run_calculation_button",
         )
 
@@ -898,19 +897,9 @@ def render_job_submission_tab():
                 st.info("🔗 Attaching calculator to atoms object...")
                 prepared_atoms.calc = calc
 
-                # Use xespresso's run() method which handles restart logic and convergence checking
-                # This follows xespresso's design: check for previous results before running
-                st.info("⚡ Running calculation using xespresso's run() method...")
-                st.info("🔍 xespresso will check for previous results and restart if needed...")
-                
-                # Call xespresso's run method which includes:
-                # - Checking for previous calculations
-                # - Restart logic if calculation failed
-                # - Convergence checking
-                # - Automatic backup of output files
-                calc.run(atoms=prepared_atoms, restart=False)
-                
-                # After run(), get the energy
+                # Run calculation using get_potential_energy()
+                # xespresso's get_potential_energy() always checks convergence before running
+                st.info("⚡ Calling atoms.get_potential_energy()...")
                 energy = prepared_atoms.get_potential_energy()
 
                 # Display results

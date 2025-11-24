@@ -1,0 +1,13 @@
+ase==3.22.1              # Compatível com o código original do projeto
+numpy>=1.21.0            # Cálculos numéricos
+scipy>=1.7.0             # Operações científicas
+matplotlib>=3.4.0        # Visualização de dados
+pandas>=1.3.0            # Manipulação de dados tabulares
+tqdm>=4.62.0             # Barra de progresso
+pyyaml>=5.4.0            # Leitura/escrita de arquivos YAML (usado nos schedulers)
+jsonschema>=3.2.0        # Validação de arquivos JSON
+tabulate>=0.8.9          # Impressão de tabelas no terminal
+paramiko>=2.12.0         # Autenticação SSH e transferência de arquivos
+streamlit>=1.28.0        # GUI framework
+plotly>=5.17.0           # Interactive 3D visualizations
+py3Dmol>=2.0.0           # Alternative lightweight 3D molecular viewer

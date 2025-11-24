@@ -1,0 +1,15 @@
+{
+    "execution": "remote",
+    "scheduler": "slurm",
+    "workdir": "~/qe_runs",
+    "resources": {
+        "nodes": 2,
+        "ntasks-per-node": 16,
+        "time": "02:00:00",
+        "partition": "compute"
+    },
+    "launcher": "mpirun -np {nprocs}",
+    "nprocs": 32,
+    "use_modules": true,
+    "modules": ["intel/2021", "openmpi/4.1.2", "qe"]
+}

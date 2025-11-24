@@ -1,0 +1,15 @@
+{
+    "execution": "remote",
+    "scheduler": "slurm",
+    "workdir": "~/espresso_jobs",
+    "resources": {
+        "nodes": 1,
+        "ntasks-per-node": 32,
+        "time": "01:30:00",
+        "partition": "standard"
+    },
+    "launcher": "srun --mpi=pmi2",
+    "nprocs": 32,
+    "use_modules": true,
+    "modules": ["intel/2022", "impi", "qe"]
+}

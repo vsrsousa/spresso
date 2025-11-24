@@ -24,9 +24,20 @@ setup(
     ],
     packages=find_packages(),
     include_package_data=True,
-    install_requires=["ase", "numpy", "scipy", "matplotlib"],
+    install_requires=[
+        "ase>=3.22.0",
+        "numpy>=1.21.0",
+        "scipy>=1.7.0",
+        "matplotlib>=3.4.0",
+        "pandas>=1.3.0",
+        "tqdm>=4.62.0",
+        "pyyaml>=5.4.0",
+        "jsonschema>=3.2.0",
+        "tabulate>=0.8.9",
+    ],
     extras_require={
         "gui": ["streamlit>=1.28.0", "plotly>=5.17.0", "py3Dmol>=2.0.0"],
+        "ssh": ["paramiko>=2.12.0"],  # Optional SSH functionality
     },
     entry_points={
         "console_scripts": [

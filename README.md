@@ -5,6 +5,8 @@ Streamlit GUI for Quantum Espresso
 
 Quantum ESPRESSO Calculator for Atomic Simulation Environment (ASE) with an integrated Streamlit GUI.
 
+**Note on naming:** The repository and PyPI package are named `spresso`, but the Python module is `xespresso` (for backwards compatibility). Install with `pip install spresso`, but import as `from xespresso import ...`
+
 For the introduction of ASE , please visit https://wiki.fysik.dtu.dk/ase/index.html
 
 
@@ -46,24 +48,29 @@ pip install --upgrade --user spresso[gui]
 You can get the source using git:
 ``` sh
 git clone https://github.com/vsrsousa/spresso.git
+cd spresso
+pip install -e .
+# Install with GUI support
+pip install -e ".[gui]"
 ```
 
-Add xespresso to your PYTHONPATH. On windows, you can edit the system environment variables.
+**Optional environment variables:**
 ``` sh
-export PYTHONPATH="/path/to/xespresso":$PYTHONPATH
 export ASE_ESPRESSO_COMMAND="/path/to/PACKAGE.x  PARALLEL  -in  PREFIX.PACKAGEi  >  PREFIX.PACKAGEo"
 export ESPRESSO_PSEUDO="/path/to/pseudo"
 ```
 
+**Note:** When installed via pip (either from PyPI or from source), you don't need to manually add anything to PYTHONPATH. Simply import with `from xespresso import ...`
+
 ### GUI Interface (NEW!) 🎨
 
-xespresso now includes a user-friendly Streamlit-based GUI for easy configuration and job submission!
+spresso includes a user-friendly Streamlit-based GUI for easy configuration and job submission!
 
 **Launch the GUI:**
 ```bash
 spresso-gui
 # or
-python -m xespresso.gui
+python -m gui
 ```
 
 **Features:**

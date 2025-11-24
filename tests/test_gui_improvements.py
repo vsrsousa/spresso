@@ -32,7 +32,7 @@ class TestSessionStateInitialization:
         
         # The module should import without errors
         try:
-            import xespresso.gui.streamlit_app
+            import gui.streamlit_app
             assert True
         except ImportError as e:
             pytest.skip(f"Streamlit not available: {e}")
@@ -48,7 +48,7 @@ class TestMachineConfiguration:
     def test_machine_persistence_variables(self):
         """Test that machine persistence variables exist in session state."""
         # We just check that the code structure is correct
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         # Check that the file contains the required session state variables
         with open(app.__file__, 'r') as f:
@@ -65,7 +65,7 @@ class TestCodesConfiguration:
     
     def test_codes_version_support(self):
         """Test that codes configuration supports version labels."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -86,7 +86,7 @@ class TestStructureViewer:
     
     def test_ase_database_integration(self):
         """Test that ASE database functionality is present."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -99,7 +99,7 @@ class TestStructureViewer:
     
     def test_structure_persistence(self):
         """Test that structure is shown at top when loaded."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -113,7 +113,7 @@ class TestCalculationSetup:
     
     def test_smearing_configuration(self):
         """Test that smearing options are available."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -125,7 +125,7 @@ class TestCalculationSetup:
     
     def test_dual_parameter(self):
         """Test that dual parameter is configurable."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -136,7 +136,7 @@ class TestCalculationSetup:
     
     def test_dft_u_support(self):
         """Test that DFT+U configuration is available."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -147,7 +147,7 @@ class TestCalculationSetup:
     
     def test_band_structure_options(self):
         """Test that band structure specific options are available."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -162,7 +162,7 @@ class TestWorkflowImprovements:
     
     def test_local_workdir_selection(self):
         """Test that local working directory can be selected."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -173,7 +173,7 @@ class TestWorkflowImprovements:
     
     def test_file_locations_display(self):
         """Test that file locations are shown."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -187,7 +187,7 @@ class TestResultsViewer:
     
     def test_results_page_exists(self):
         """Test that results page is added."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -198,7 +198,7 @@ class TestResultsViewer:
     
     def test_output_viewing(self):
         """Test that output file viewing is available."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -209,7 +209,7 @@ class TestResultsViewer:
     
     def test_post_processing_tools(self):
         """Test that post-processing tools are present."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()
@@ -224,7 +224,7 @@ class TestConnectionTest:
     
     def test_connection_test_feedback(self):
         """Test that connection test provides feedback."""
-        import xespresso.gui.streamlit_app as app
+        import gui.streamlit_app as app
         
         with open(app.__file__, 'r') as f:
             content = f.read()

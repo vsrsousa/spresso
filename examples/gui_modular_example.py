@@ -35,7 +35,7 @@ config = {
 # This is what calculation_setup.py does
 print("\n1. Preparing calculation using calculation module...")
 try:
-    from xespresso.gui.calculations import prepare_calculation_from_gui
+    from gui.calculations import prepare_calculation_from_gui
     
     label = "/tmp/example_scf/fe"
     prepared_atoms, calc = prepare_calculation_from_gui(atoms, config, label=label)
@@ -59,7 +59,7 @@ print("Example 2: Dry Run (Generate Input Files)")
 print("="*70)
 
 try:
-    from xespresso.gui.calculations import dry_run_calculation
+    from gui.calculations import dry_run_calculation
     
     label = "/tmp/example_dryrun/fe"
     print("\n2. Performing dry run...")
@@ -78,7 +78,7 @@ print("Example 3: Multi-Step Workflow")
 print("="*70)
 
 try:
-    from xespresso.gui.workflows import GUIWorkflow
+    from gui.workflows import GUIWorkflow
     
     print("\n3. Creating workflow with SCF + Relaxation...")
     

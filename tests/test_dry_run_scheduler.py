@@ -14,7 +14,7 @@ def test_generate_input_files_with_scheduler():
     """Test that generate_input_files creates job_file using scheduler system."""
     try:
         from ase.build import bulk
-        from xespresso.gui.utils.dry_run import generate_input_files
+        from gui.utils.dry_run import generate_input_files
         
         # Create a simple structure
         atoms = bulk('Al', 'fcc', a=4.05)

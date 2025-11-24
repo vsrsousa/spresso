@@ -17,10 +17,31 @@ try:
         load_machine, save_machine, list_machines,
         DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
     )
-    from xespresso.utils.auth import test_ssh_connection
     XESPRESSO_AVAILABLE = True
 except ImportError:
     XESPRESSO_AVAILABLE = False
+
+# SSH connection testing is optional (requires paramiko)
+try:
+    from xespresso.utils.auth import test_ssh_connection
+    SSH_TEST_AVAILABLE = True
+except ImportError:
+    SSH_TEST_AVAILABLE = False
+    def test_ssh_connection(username, host, key_path=None, port=22):
+        """Fallback SSH connection test when paramiko is not available."""
+        import subprocess
+        import os
+        
+        key_path = os.path.expanduser(key_path) if key_path else None
+        cmd = ["ssh", "-p", str(port), "-o", "PasswordAuthentication=no", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
+        if key_path:
+            cmd += ["-i", key_path]
+        cmd += [f"{username}@{host}", "echo 'Connection successful'"]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
 
 
 def render_machine_config_page():

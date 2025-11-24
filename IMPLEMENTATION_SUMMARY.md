@@ -180,11 +180,14 @@ Results: 6/6 tests passed
 ### Installation
 ```bash
 # Basic installation
-pip install xespresso
+pip install spresso
 
 # With GUI support (includes py3Dmol)
-pip install xespresso[gui]
+pip install spresso[gui]
 ```
+
+**Note:** The PyPI package is named `spresso`, but the Python module is `xespresso` (for backwards compatibility).
+Install with `pip install spresso`, but import as `from xespresso import ...`
 
 ## 6. Usage Examples
 

@@ -156,8 +156,8 @@ def test_modular_structure_imports():
     # Actual function imports may fail without dependencies
     
     try:
-        import xespresso.gui.pages
-        import xespresso.gui.utils
+        import gui.pages
+        import gui.utils
         # If we get here, module structure is correct
         assert True
     except ImportError as e:

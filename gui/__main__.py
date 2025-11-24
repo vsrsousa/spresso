@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Launcher script for xespresso Streamlit GUI.
+Launcher script for spresso Streamlit GUI.
 
 Usage:
-    xespresso-gui
+    spresso-gui
     
 Or:
-    python -m xespresso.gui
+    python -m gui
 """
 
 import sys
@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 def main():
-    """Launch the xespresso Streamlit GUI."""
+    """Launch the spresso Streamlit GUI."""
     try:
         import streamlit.web.cli as stcli
     except ImportError:

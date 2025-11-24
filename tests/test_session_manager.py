@@ -53,7 +53,7 @@ def temp_session_dir():
 
 def test_get_serializable_state(mock_st):
     """Test extraction of serializable state."""
-    from xespresso.gui.utils.session_manager import get_serializable_state
+    from gui.utils.session_manager import get_serializable_state
     
     # Set up session state
     mock_st.session_state['test_string'] = 'hello'
@@ -79,7 +79,7 @@ def test_get_serializable_state(mock_st):
 
 def test_save_and_load_session(mock_st, temp_session_dir):
     """Test saving and loading session."""
-    from xespresso.gui.utils.session_manager import save_session, load_session
+    from gui.utils.session_manager import save_session, load_session
     
     # Set up session state
     mock_st.session_state['machine_name'] = 'test_machine'
@@ -109,7 +109,7 @@ def test_save_and_load_session(mock_st, temp_session_dir):
 
 def test_save_session_with_metadata(mock_st, temp_session_dir):
     """Test that saved session includes metadata."""
-    from xespresso.gui.utils.session_manager import save_session
+    from gui.utils.session_manager import save_session
     
     mock_st.session_state['test_key'] = 'test_value'
     
@@ -130,7 +130,7 @@ def test_save_session_with_metadata(mock_st, temp_session_dir):
 
 def test_restore_session(mock_st):
     """Test restoring session state."""
-    from xespresso.gui.utils.session_manager import restore_session
+    from gui.utils.session_manager import restore_session
     
     # Set initial state
     mock_st.session_state['old_key'] = 'old_value'
@@ -153,7 +153,7 @@ def test_restore_session(mock_st):
 
 def test_reset_session(mock_st):
     """Test resetting session state."""
-    from xespresso.gui.utils.session_manager import reset_session
+    from gui.utils.session_manager import reset_session
     
     # Set up state
     mock_st.session_state['key1'] = 'value1'
@@ -172,7 +172,7 @@ def test_reset_session(mock_st):
 
 def test_reset_session_all(mock_st):
     """Test resetting all session state."""
-    from xespresso.gui.utils.session_manager import reset_session
+    from gui.utils.session_manager import reset_session
     
     # Set up state
     mock_st.session_state['key1'] = 'value1'
@@ -191,7 +191,7 @@ def test_reset_session_all(mock_st):
 
 def test_list_sessions(temp_session_dir):
     """Test listing available sessions."""
-    from xespresso.gui.utils.session_manager import list_sessions
+    from gui.utils.session_manager import list_sessions
     import time
     
     # Create some test session files
@@ -226,7 +226,7 @@ def test_list_sessions(temp_session_dir):
 
 def test_list_sessions_empty_dir(temp_session_dir):
     """Test listing sessions in empty directory."""
-    from xespresso.gui.utils.session_manager import list_sessions
+    from gui.utils.session_manager import list_sessions
     
     sessions = list_sessions(session_dir=temp_session_dir)
     assert sessions == []
@@ -234,7 +234,7 @@ def test_list_sessions_empty_dir(temp_session_dir):
 
 def test_list_sessions_nonexistent_dir():
     """Test listing sessions in non-existent directory."""
-    from xespresso.gui.utils.session_manager import list_sessions
+    from gui.utils.session_manager import list_sessions
     
     sessions = list_sessions(session_dir='/nonexistent/directory')
     assert sessions == []
@@ -242,7 +242,7 @@ def test_list_sessions_nonexistent_dir():
 
 def test_save_session_auto_extension(mock_st, temp_session_dir):
     """Test that .json extension is added automatically."""
-    from xespresso.gui.utils.session_manager import save_session
+    from gui.utils.session_manager import save_session
     
     mock_st.session_state['test'] = 'value'
     
@@ -256,7 +256,7 @@ def test_save_session_auto_extension(mock_st, temp_session_dir):
 
 def test_load_session_nonexistent_file(temp_session_dir):
     """Test loading non-existent session file."""
-    from xespresso.gui.utils.session_manager import load_session
+    from gui.utils.session_manager import load_session
     
     with pytest.raises(IOError):
         load_session(os.path.join(temp_session_dir, 'nonexistent.json'))
@@ -264,7 +264,7 @@ def test_load_session_nonexistent_file(temp_session_dir):
 
 def test_load_session_invalid_format(temp_session_dir):
     """Test loading session with invalid format."""
-    from xespresso.gui.utils.session_manager import load_session
+    from gui.utils.session_manager import load_session
     
     # Create invalid session file (missing 'state' key)
     invalid_file = os.path.join(temp_session_dir, 'invalid.json')
@@ -277,7 +277,7 @@ def test_load_session_invalid_format(temp_session_dir):
 
 def test_session_name_in_filename(mock_st, temp_session_dir):
     """Test that session name is used as filename."""
-    from xespresso.gui.utils.session_manager import save_session
+    from gui.utils.session_manager import save_session
     
     mock_st.session_state['test_key'] = 'test_value'
     
@@ -291,7 +291,7 @@ def test_session_name_in_filename(mock_st, temp_session_dir):
 
 def test_load_session_preserves_name(mock_st, temp_session_dir):
     """Test that loading a session preserves the session name."""
-    from xespresso.gui.utils.session_manager import save_session, load_session
+    from gui.utils.session_manager import save_session, load_session
     
     mock_st.session_state['test_key'] = 'test_value'
     
@@ -311,7 +311,7 @@ def test_save_load_structure(mock_st, temp_session_dir):
     """Test that ASE Atoms structures are properly saved and loaded."""
     try:
         from ase import Atoms
-        from xespresso.gui.utils.session_manager import save_session, load_session, restore_session
+        from gui.utils.session_manager import save_session, load_session, restore_session
     except ImportError:
         pytest.skip("ASE not available")
     

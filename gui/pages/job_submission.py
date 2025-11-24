@@ -13,7 +13,7 @@ def render_job_submission_page():
     
     - **Generate Files (Dry Run)**: Creates Espresso calculator and generates input files with `calc.write_input(atoms)` for review
     - **File Browser**: Browse, view, and edit existing calculation files
-    - **Run Calculation**: Creates Espresso calculator and runs with `calc.get_potential_energy()`
+    - **Run Calculation**: Creates Espresso calculator and runs with `calc.get_potential_energy()` which checks convergence
     """
     )
 
@@ -224,7 +224,7 @@ def render_dry_run_tab():
 
         with st.spinner("Generating files..."):
             try:
-                from xespresso.gui.calculations import (
+                from gui.calculations import (
                     dry_run_calculation,
                     prepare_calculation_from_gui,
                 )
@@ -670,8 +670,11 @@ def render_job_submission_tab():
     
     This will:
     - Create an Espresso calculator from your configuration
+    - Check for previous calculation results and convergence
     - Automatically generate input files if they don't exist
     - Run the calculation and return the energy
+    
+    **Note:** xespresso's get_potential_energy() always checks convergence before running.
     """
     )
 
@@ -845,7 +848,7 @@ def render_job_submission_tab():
         run_button = st.button(
             "🚀 Run Calculation",
             type="primary",
-            help="Run calculation using calc.get_potential_energy()",
+            help="Run calculation using calc.get_potential_energy() which checks convergence",
             key="run_calculation_button",
         )
 
@@ -856,7 +859,7 @@ def render_job_submission_tab():
 
         with st.spinner("Running calculation..."):
             try:
-                from xespresso.gui.calculations import prepare_calculation_from_gui
+                from gui.calculations import prepare_calculation_from_gui
 
                 # Create output directory if it doesn't exist
                 os.makedirs(full_path, exist_ok=True)
@@ -877,16 +880,6 @@ def render_job_submission_tab():
 
                     # Update the label - Espresso will handle the path resolution
                     calc.set_label(label, calc.prefix)
-                    
-                    # Check if previous calculation failed and force recalculation if needed
-                    # This allows users to rerun failed calculations from the GUI
-                    if hasattr(calc, 'results') and 'convergence' in calc.results:
-                        convergence_status = calc.results['convergence']
-                        if convergence_status > 0:
-                            st.warning(f"⚠️ Previous calculation failed (status: {convergence_status}). Forcing recalculation...")
-                            # Clear cached results to force a fresh calculation
-                            calc.reset()
-                            st.info("✓ Calculator reset - ready for fresh calculation")
                 else:
                     # Use calculation module to prepare atoms and Espresso calculator
                     # Following the principle: calculation modules create objects, job submission executes
@@ -899,22 +892,13 @@ def render_job_submission_tab():
                     )
 
                     st.info("✅ Calculation module prepared objects from configuration!")
-                    
-                    # Check if this calculator loaded a failed previous calculation
-                    # If so, reset it to allow rerun
-                    if hasattr(calc, 'results') and 'convergence' in calc.results:
-                        convergence_status = calc.results['convergence']
-                        if convergence_status > 0:
-                            st.warning(f"⚠️ Found previous failed calculation (status: {convergence_status}). Forcing recalculation...")
-                            # Clear cached results to force a fresh calculation
-                            calc.reset()
-                            st.info("✓ Calculator reset - ready for fresh calculation")
 
                 # Attach calculator to prepared atoms (relationship maintained by calculation module)
                 st.info("🔗 Attaching calculator to atoms object...")
                 prepared_atoms.calc = calc
 
                 # Run calculation using get_potential_energy()
+                # xespresso's get_potential_energy() always checks convergence before running
                 st.info("⚡ Calling atoms.get_potential_energy()...")
                 energy = prepared_atoms.get_potential_energy()
 

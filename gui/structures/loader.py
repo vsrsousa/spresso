@@ -11,7 +11,7 @@ import os
 import tempfile
 from ase import Atoms
 from ase import io as ase_io
-from xespresso.gui.structures.base import BaseStructureHandler
+from gui.structures.base import BaseStructureHandler
 import logging
 
 logger = logging.getLogger(__name__)

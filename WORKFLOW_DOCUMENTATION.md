@@ -12,11 +12,14 @@ This document describes the new simplified workflow system in xespresso that mak
 
 ## Installation
 
-The workflow functionality is included in xespresso. No additional installation is required.
+The workflow functionality is included in spresso. No additional installation is required.
 
 ```bash
-pip install xespresso
+pip install spresso
 ```
+
+**Note:** The PyPI package is named `spresso`, but the Python module is `xespresso` (for backwards compatibility).
+Install with `pip install spresso`, but import as `from xespresso import ...`
 
 ## Quick Start
 

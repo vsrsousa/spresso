@@ -17,7 +17,7 @@ def test_prepare_calculation_from_gui():
     os.environ['ASE_ESPRESSO_COMMAND'] = 'pw.x -in PREFIX.pwi > PREFIX.pwo'
     os.environ['ESPRESSO_PSEUDO'] = '/tmp/pseudo'
     
-    from xespresso.gui.calculations import prepare_calculation_from_gui
+    from gui.calculations import prepare_calculation_from_gui
     
     # Create a test structure
     atoms = bulk('Fe', 'bcc', a=2.87)
@@ -59,7 +59,7 @@ def test_dry_run_calculation():
     os.environ['ASE_ESPRESSO_COMMAND'] = 'pw.x -in PREFIX.pwi > PREFIX.pwo'
     os.environ['ESPRESSO_PSEUDO'] = '/tmp/pseudo'
     
-    from xespresso.gui.calculations import dry_run_calculation
+    from gui.calculations import dry_run_calculation
     
     # Create a test structure
     atoms = bulk('Fe', 'bcc', a=2.87)
@@ -98,7 +98,7 @@ def test_calculator_reuse_in_session():
     os.environ['ASE_ESPRESSO_COMMAND'] = 'pw.x -in PREFIX.pwi > PREFIX.pwo'
     os.environ['ESPRESSO_PSEUDO'] = '/tmp/pseudo'
     
-    from xespresso.gui.calculations import prepare_calculation_from_gui
+    from gui.calculations import prepare_calculation_from_gui
     
     atoms = bulk('Fe', 'bcc', a=2.87)
     
@@ -130,7 +130,7 @@ def test_calculator_reuse_in_session():
 
 def test_config_validation():
     """Test that configuration validation works correctly."""
-    from xespresso.gui.calculations import prepare_calculation_from_gui
+    from gui.calculations import prepare_calculation_from_gui
     
     atoms = bulk('Fe', 'bcc', a=2.87)
     
@@ -153,7 +153,7 @@ def test_multiple_calc_types():
     os.environ['ASE_ESPRESSO_COMMAND'] = 'pw.x -in PREFIX.pwi > PREFIX.pwo'
     os.environ['ESPRESSO_PSEUDO'] = '/tmp/pseudo'
     
-    from xespresso.gui.calculations import prepare_calculation_from_gui
+    from gui.calculations import prepare_calculation_from_gui
     
     atoms = bulk('Fe', 'bcc', a=2.87)
     

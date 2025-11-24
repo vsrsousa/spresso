@@ -102,12 +102,15 @@ xespresso/gui/
 ## Installation
 
 ```bash
-# Install xespresso with GUI support
-pip install xespresso[gui]
+# Install spresso with GUI support
+pip install spresso[gui]
 
 # Or install dependencies separately
-pip install streamlit plotly
+pip install spresso streamlit plotly
 ```
+
+**Note:** The PyPI package is named `spresso`, but the Python module is `xespresso` (for backwards compatibility).
+Install with `pip install spresso`, but import as `from xespresso import ...`
 
 ## Usage
 

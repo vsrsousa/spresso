@@ -8,7 +8,7 @@ multiple calculations and using xespresso's logic and definitions.
 from typing import Dict, List, Tuple, Optional
 from ase import Atoms
 from xespresso import Espresso
-from xespresso.gui.calculations import prepare_calculation_from_gui
+from gui.calculations import prepare_calculation_from_gui
 import logging
 
 logger = logging.getLogger(__name__)

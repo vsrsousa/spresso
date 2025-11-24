@@ -6,7 +6,7 @@ import pytest
 import tempfile
 import os
 import json
-from xespresso.gui.utils.session_manager import save_session, load_session, restore_session
+from gui.utils.session_manager import save_session, load_session, restore_session
 from unittest.mock import Mock, patch
 import streamlit as st
 

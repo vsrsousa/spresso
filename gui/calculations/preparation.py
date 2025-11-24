@@ -12,7 +12,7 @@ from typing import Dict, Tuple, Optional
 from ase import Atoms
 from xespresso import Espresso
 from xespresso.tools import setup_magnetic_config
-from xespresso.gui.calculations.base import BaseCalculationPreparation
+from gui.calculations.base import BaseCalculationPreparation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -153,6 +153,13 @@ class CalculationPreparation(BaseCalculationPreparation):
         
         # Build input_data dictionary following xespresso patterns
         input_data = {}
+        
+        # Add pseudo_dir from environment variable ESPRESSO_PSEUDO if set
+        import os
+        if 'ESPRESSO_PSEUDO' in os.environ:
+            input_data['pseudo_dir'] = os.environ['ESPRESSO_PSEUDO']
+        elif 'pseudo_dir' in config:
+            input_data['pseudo_dir'] = config['pseudo_dir']
         
         # Add basic parameters
         if 'ecutwfc' in config:

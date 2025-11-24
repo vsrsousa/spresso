@@ -16,9 +16,9 @@ setup(
     long_description_content_type="text/markdown",
     url="https://github.com/vsrsousa/spresso",
     author="VSR Sousa",
-    author_email="vsrsousa@example.com",
+    author_email="vsrsousa@users.noreply.github.com",
     maintainer="VSR Sousa",
-    maintainer_email="vsrsousa@example.com",
+    maintainer_email="vsrsousa@users.noreply.github.com",
     license="GPL",
     classifiers=[
         "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",

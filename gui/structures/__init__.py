@@ -8,13 +8,13 @@ The key principle: structure modules handle loading/export operations,
 while GUI pages coordinate the user interaction.
 """
 
-from xespresso.gui.structures.base import BaseStructureHandler
-from xespresso.gui.structures.loader import (
+from gui.structures.base import BaseStructureHandler
+from gui.structures.loader import (
     StructureLoader,
     load_structure_from_file,
     load_structure_from_upload
 )
-from xespresso.gui.structures.exporter import (
+from gui.structures.exporter import (
     StructureExporter,
     export_structure
 )

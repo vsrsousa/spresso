@@ -13,7 +13,7 @@ from pathlib import Path
 def test_gui_module_import():
     """Test that GUI module can be imported."""
     try:
-        from xespresso.gui import streamlit_app
+        from gui import streamlit_app
         assert True
     except ImportError as e:
         pytest.fail(f"Failed to import GUI module: {e}")
@@ -34,7 +34,7 @@ def test_structure_visualization_function():
     try:
         import plotly.graph_objects as go
         from ase.build import bulk
-        from xespresso.gui.streamlit_app import create_3d_structure_plot
+        from gui.streamlit_app import create_3d_structure_plot
         
         # Create a simple structure
         atoms = bulk('Fe', 'bcc', a=2.87)
@@ -53,7 +53,7 @@ def test_structure_visualization_function():
 def test_display_structure_info_function():
     """Test that display_structure_info function exists."""
     try:
-        from xespresso.gui.streamlit_app import display_structure_info
+        from gui.streamlit_app import display_structure_info
         assert callable(display_structure_info)
     except ImportError as e:
         pytest.skip(f"GUI module not available: {e}")

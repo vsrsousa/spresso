@@ -25,7 +25,7 @@ class TestTempPrefixRemoval:
         """
         # This test verifies the fix by checking the code pattern
         # In real usage, the GUI would call prepare_calculation_from_gui with the actual label
-        from xespresso.gui.calculations import prepare_calculation_from_gui
+        from gui.calculations import prepare_calculation_from_gui
         
         atoms = bulk("Al", cubic=True)
         config = {

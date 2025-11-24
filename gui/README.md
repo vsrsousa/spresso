@@ -74,10 +74,10 @@ spresso-gui
 xespresso-gui
 
 # Or using Python module
-python -m xespresso.gui
+python -m gui
 
 # Or with streamlit directly
-streamlit run xespresso/gui/streamlit_app.py
+streamlit run gui/streamlit_app.py
 ```
 
 The GUI will open in your default web browser at `http://localhost:8501`
@@ -185,7 +185,7 @@ cd spresso
 pip install -e ".[gui]"
 
 # Run GUI
-streamlit run xespresso/gui/streamlit_app.py
+streamlit run gui/streamlit_app.py
 ```
 
 ## License

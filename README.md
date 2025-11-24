@@ -70,7 +70,7 @@ spresso includes a user-friendly Streamlit-based GUI for easy configuration and 
 ```bash
 spresso-gui
 # or
-python -m xespresso.gui
+python -m gui
 ```
 
 **Features:**

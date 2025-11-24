@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 def test_imports():
     """Test that visualization module can be imported."""
     try:
-        from xespresso.gui.utils import visualization
+        from gui.utils import visualization
         assert hasattr(visualization, 'create_3d_structure_plot')
         assert hasattr(visualization, 'create_x3d_viewer')
         assert hasattr(visualization, 'create_jmol_viewer')
@@ -28,7 +28,7 @@ def test_jmol_viewer_creation():
     """Test JMol viewer HTML generation."""
     try:
         from ase.build import bulk
-        from xespresso.gui.utils.visualization import create_jmol_viewer
+        from gui.utils.visualization import create_jmol_viewer
         
         # Create a simple structure
         atoms = bulk('Fe', 'bcc', a=2.87)
@@ -53,7 +53,7 @@ def test_jmol_viewer_creation():
 def test_py3dmol_viewer_availability():
     """Test py3Dmol viewer availability check."""
     try:
-        from xespresso.gui.utils.visualization import PY3DMOL_AVAILABLE
+        from gui.utils.visualization import PY3DMOL_AVAILABLE
         print(f"✓ py3Dmol availability: {PY3DMOL_AVAILABLE}")
         return True
     except Exception as e:
@@ -64,7 +64,7 @@ def test_py3dmol_viewer_availability():
 def test_ase_viewer_availability():
     """Test ASE viewer availability check."""
     try:
-        from xespresso.gui.utils.visualization import ASE_VIEWER_AVAILABLE
+        from gui.utils.visualization import ASE_VIEWER_AVAILABLE
         print(f"✓ ASE viewer availability: {ASE_VIEWER_AVAILABLE}")
         return True
     except Exception as e:
@@ -75,7 +75,7 @@ def test_ase_viewer_availability():
 def test_plotly_viewer_availability():
     """Test Plotly viewer availability check."""
     try:
-        from xespresso.gui.utils.visualization import PLOTLY_AVAILABLE
+        from gui.utils.visualization import PLOTLY_AVAILABLE
         print(f"✓ Plotly availability: {PLOTLY_AVAILABLE}")
         return True
     except Exception as e:
@@ -87,7 +87,7 @@ def test_x3d_viewer_creation():
     """Test X3D viewer HTML generation."""
     try:
         from ase.build import bulk
-        from xespresso.gui.utils.visualization import create_x3d_viewer
+        from gui.utils.visualization import create_x3d_viewer
         
         # Create a simple structure
         atoms = bulk('Al', 'fcc', a=4.05)

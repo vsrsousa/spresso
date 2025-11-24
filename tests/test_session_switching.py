@@ -41,7 +41,7 @@ def mock_st(monkeypatch):
 
 def test_create_new_session(mock_st):
     """Test creating a new session."""
-    from xespresso.gui.utils.session_manager import create_new_session, get_current_session_id
+    from gui.utils.session_manager import create_new_session, get_current_session_id
     
     # Create first session
     session_id = create_new_session()
@@ -68,7 +68,7 @@ def test_create_new_session(mock_st):
 
 def test_switch_session_preserves_working_directory(mock_st):
     """Test that switching sessions preserves each session's working directory."""
-    from xespresso.gui.utils.session_manager import (
+    from gui.utils.session_manager import (
         create_new_session, switch_session, get_current_session_id
     )
     
@@ -107,7 +107,7 @@ def test_switch_session_preserves_working_directory(mock_st):
 
 def test_rename_session(mock_st):
     """Test renaming a session."""
-    from xespresso.gui.utils.session_manager import (
+    from gui.utils.session_manager import (
         create_new_session, rename_session, get_active_sessions
     )
     
@@ -128,7 +128,7 @@ def test_rename_session(mock_st):
 
 def test_close_session(mock_st):
     """Test closing a session."""
-    from xespresso.gui.utils.session_manager import (
+    from gui.utils.session_manager import (
         create_new_session, close_session, get_active_sessions, get_current_session_id
     )
     
@@ -157,7 +157,7 @@ def test_close_session(mock_st):
 
 def test_close_current_session_switches_to_another(mock_st):
     """Test that closing current session switches to another session."""
-    from xespresso.gui.utils.session_manager import (
+    from gui.utils.session_manager import (
         create_new_session, close_session, get_active_sessions, get_current_session_id
     )
     
@@ -182,7 +182,7 @@ def test_close_current_session_switches_to_another(mock_st):
 
 def test_session_state_independence(mock_st):
     """Test that sessions maintain independent state."""
-    from xespresso.gui.utils.session_manager import (
+    from gui.utils.session_manager import (
         create_new_session, switch_session, get_current_session_id
     )
     
@@ -223,7 +223,7 @@ def test_session_state_independence(mock_st):
 
 def test_get_current_session_id_creates_default(mock_st):
     """Test that get_current_session_id creates default session if none exists."""
-    from xespresso.gui.utils.session_manager import get_current_session_id
+    from gui.utils.session_manager import get_current_session_id
     
     # Should create session_1 automatically
     session_id = get_current_session_id()
@@ -234,7 +234,7 @@ def test_get_current_session_id_creates_default(mock_st):
 
 def test_get_active_sessions_initializes_empty(mock_st):
     """Test that get_active_sessions initializes empty dict if needed."""
-    from xespresso.gui.utils.session_manager import get_active_sessions
+    from gui.utils.session_manager import get_active_sessions
     
     # Should initialize empty dict
     sessions = get_active_sessions()

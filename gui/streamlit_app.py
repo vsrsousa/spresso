@@ -28,7 +28,7 @@ st.set_page_config(
 
 # Import session manager functions early to get current session
 try:
-    from xespresso.gui.utils.session_manager import get_current_session_id, get_active_sessions
+    from gui.utils.session_manager import get_current_session_id, get_active_sessions
     SESSION_MANAGER_AVAILABLE = True
 except ImportError:
     SESSION_MANAGER_AVAILABLE = False
@@ -49,7 +49,7 @@ Configure your computational environment, select structures, and submit jobs eas
 
 # Import modular page components
 try:
-    from xespresso.gui.pages import (
+    from gui.pages import (
         render_machine_config_page,
         render_codes_config_page,
         render_pseudopotentials_config_page,
@@ -104,9 +104,9 @@ except ImportError:
 
 # Import utility functions
 try:
-    from xespresso.gui.utils import validate_path, create_3d_structure_plot, display_structure_info
-    from xespresso.gui.utils.session_manager import render_session_manager, get_current_session_id, get_active_sessions
-    from xespresso.gui.utils.directory_browser import render_directory_browser
+    from gui.utils import validate_path, create_3d_structure_plot, display_structure_info
+    from gui.utils.session_manager import render_session_manager, get_current_session_id, get_active_sessions
+    from gui.utils.directory_browser import render_directory_browser
     UTILS_AVAILABLE = True
 except ImportError as e:
     st.warning(f"⚠️ GUI utilities not fully available: {e}")

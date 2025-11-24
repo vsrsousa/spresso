@@ -14,7 +14,7 @@ from pathlib import Path
 def test_codes_config_page_imports():
     """Test that codes_config page can be imported."""
     try:
-        from xespresso.gui.pages.codes_config import render_codes_config_page
+        from gui.pages.codes_config import render_codes_config_page
         assert callable(render_codes_config_page)
         print("✓ codes_config page can be imported")
         return True

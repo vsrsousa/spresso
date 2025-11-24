@@ -14,15 +14,15 @@ class TestGUIImports(unittest.TestCase):
     def test_xespresso_gui_module_import(self):
         """Test that xespresso.gui module can be imported."""
         try:
-            import xespresso.gui
+            import gui
             self.assertTrue(True, "xespresso.gui module imported successfully")
         except ImportError as e:
-            self.fail(f"Failed to import xespresso.gui: {e}")
+            self.fail(f"Failed to import gui: {e}")
 
     def test_gui_pages_import(self):
         """Test that GUI page modules can be imported."""
         try:
-            from xespresso.gui.pages import (
+            from gui.pages import (
                 render_machine_config_page,
                 render_codes_config_page,
                 render_structure_viewer_page,
@@ -73,7 +73,7 @@ class TestGUIImports(unittest.TestCase):
     def test_gui_utilities_import(self):
         """Test that GUI utilities can be imported."""
         try:
-            from xespresso.gui.utils import (
+            from gui.utils import (
                 validate_path, 
                 create_3d_structure_plot, 
                 display_structure_info

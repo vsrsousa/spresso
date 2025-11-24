@@ -30,8 +30,8 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "spresso-gui=xespresso.gui.__main__:main",
-            "xespresso-gui=xespresso.gui.__main__:main",  # Keep backward compatibility
+            "spresso-gui=gui.__main__:main",
+            "xespresso-gui=gui.__main__:main",  # Keep backward compatibility
         ],
     },
     python_requires=">=3.5",

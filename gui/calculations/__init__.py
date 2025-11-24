@@ -8,8 +8,8 @@ from GUI configuration.
 The key principle: calculation modules prepare objects, job submission executes them.
 """
 
-from xespresso.gui.calculations.base import BaseCalculationPreparation
-from xespresso.gui.calculations.preparation import (
+from gui.calculations.base import BaseCalculationPreparation
+from gui.calculations.preparation import (
     CalculationPreparation,
     prepare_calculation_from_gui,
     dry_run_calculation

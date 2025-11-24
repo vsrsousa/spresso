@@ -51,7 +51,7 @@ def mock_st(monkeypatch):
 
 def test_widget_keys_are_filtered(mock_st):
     """Test that widget keys are not included in serializable state."""
-    from xespresso.gui.utils.session_manager import get_serializable_state
+    from gui.utils.session_manager import get_serializable_state
     
     # Set up session state with both application state and widget keys
     mock_st.session_state.working_directory = "/tmp/test"
@@ -108,7 +108,7 @@ def test_widget_keys_are_filtered(mock_st):
 
 def test_restore_session_filters_widget_keys(mock_st):
     """Test that widget keys are filtered during session restoration."""
-    from xespresso.gui.utils.session_manager import restore_session
+    from gui.utils.session_manager import restore_session
     
     # Create a state dictionary with both application state and widget keys
     state_with_widgets = {
@@ -155,7 +155,7 @@ def test_restore_session_filters_widget_keys(mock_st):
 
 def test_switch_session_no_widget_key_conflict(mock_st):
     """Test that switching sessions doesn't restore widget keys."""
-    from xespresso.gui.utils.session_manager import (
+    from gui.utils.session_manager import (
         create_new_session, switch_session, get_current_session_id
     )
     
@@ -195,7 +195,7 @@ def test_switch_session_no_widget_key_conflict(mock_st):
 
 def test_is_widget_key():
     """Test the _is_widget_key helper function."""
-    from xespresso.gui.utils.session_manager import _is_widget_key
+    from gui.utils.session_manager import _is_widget_key
     
     # Widget keys should be identified
     assert _is_widget_key('workdir_browser_quick_0')

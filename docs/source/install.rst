@@ -13,24 +13,44 @@ Installation
 * scipy
 * matplotlib
 
-The simplest way to install XEspresso is to use pip.
+The simplest way to install spresso is to use pip.
 
 .. code-block:: console
 
-    pip install --upgrade --user xespresso
+    pip install --upgrade --user spresso
+    
+    # Install with GUI support
+    pip install --upgrade --user spresso[gui]
+
+.. note::
+    The PyPI package is named ``spresso``, but the Python module is ``xespresso`` (for backwards compatibility).
+    Install with ``pip install spresso``, but import as ``from xespresso import ...``
+
+Installation from source
+=========================
+
+.. code-block:: bash
+
+    git clone https://github.com/vsrsousa/spresso.git
+    cd spresso
+    pip install -e .
+    # Install with GUI support
+    pip install -e ".[gui]"
 
 
 Configuration
 ==================
 
-Add xespresso to your PYTHONPATH. On windows, you can edit the system environment variables.
-
+**Optional environment variables:**
 
 .. code-block:: bash
 
-    export PYTHONPATH="/path/to/xespresso":$PYTHONPATH
     export ASE_ESPRESSO_COMMAND="/path/to/PACKAGE.x  PARALLEL  -in  PREFIX.PACKAGEi  >  PREFIX.PACKAGEo"
     export ESPRESSO_PSEUDO="/path/to/pseudo"
+
+.. note::
+    When installed via pip (either from PyPI or from source), you don't need to manually add anything to PYTHONPATH.
+    Simply import with ``from xespresso import ...``
 
 HPC
 ----------

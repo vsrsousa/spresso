@@ -190,37 +190,7 @@ if UTILS_AVAILABLE:
 
 st.sidebar.markdown("---")
 
-# Workflow section
-st.sidebar.title("🔬 Session & Workflow")
-
-# Workflow pages - radio buttons with direct navigation
-workflow_pages = [
-    "🔬 Structure Viewer",
-    "📊 Calculation Setup",
-    "🔄 Workflow Builder",
-    "🚀 Job Submission & Files",
-    "📈 Results & Post-Processing"
-]
-
-def on_workflow_change():
-    """Callback for workflow page selection."""
-    st.session_state.selected_page = st.session_state.workflow_nav
-
-# Get current page to determine which index to show in radio
-workflow_index = workflow_pages.index(current_page) if current_page in workflow_pages else 0
-
-st.sidebar.radio(
-    "Workflow Pages:",
-    workflow_pages,
-    key="workflow_nav",
-    index=workflow_index,
-    label_visibility="collapsed",
-    on_change=on_workflow_change
-)
-
-st.sidebar.markdown("---")
-
-# Working Directory selector (for calculation pages only)
+# Working Directory selector - before workflow since files are stored here
 st.sidebar.subheader("📁 Working Directory")
 
 # Use enhanced directory browser
@@ -274,6 +244,36 @@ else:
     
     st.sidebar.caption(f"📍 {st.session_state.working_directory}")
     st.sidebar.info("💡 Calculation folders will be created here based on calc/label")
+
+st.sidebar.markdown("---")
+
+# Workflow section
+st.sidebar.title("🔬 Session & Workflow")
+
+# Workflow pages - radio buttons with direct navigation
+workflow_pages = [
+    "🔬 Structure Viewer",
+    "📊 Calculation Setup",
+    "🔄 Workflow Builder",
+    "🚀 Job Submission & Files",
+    "📈 Results & Post-Processing"
+]
+
+def on_workflow_change():
+    """Callback for workflow page selection."""
+    st.session_state.selected_page = st.session_state.workflow_nav
+
+# Get current page to determine which index to show in radio
+workflow_index = workflow_pages.index(current_page) if current_page in workflow_pages else 0
+
+st.sidebar.radio(
+    "Workflow Pages:",
+    workflow_pages,
+    key="workflow_nav",
+    index=workflow_index,
+    label_visibility="collapsed",
+    on_change=on_workflow_change
+)
 
 # Initialize selected page if not set
 if 'selected_page' not in st.session_state:

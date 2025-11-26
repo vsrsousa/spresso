@@ -151,6 +151,9 @@ if 'workflow_config' not in st.session_state:
 if 'working_directory' not in st.session_state:
     st.session_state.working_directory = os.path.expanduser("~")
 
+# Default page constant
+DEFAULT_PAGE = "🔬 Structure Viewer"
+
 # Sidebar navigation - Configuration section (independent)
 st.sidebar.title("⚙️ Configuration")
 
@@ -166,7 +169,8 @@ def on_config_change():
     st.session_state.selected_page = st.session_state.config_nav
 
 # Get current page to determine which index to show in radio
-current_page = st.session_state.get('selected_page', "🔬 Structure Viewer")
+current_page = st.session_state.get('selected_page', DEFAULT_PAGE)
+# Use None for index when current page is not in config_pages (no selection shown)
 config_index = config_pages.index(current_page) if current_page in config_pages else None
 
 st.sidebar.radio(
@@ -273,7 +277,7 @@ else:
 
 # Initialize selected page if not set
 if 'selected_page' not in st.session_state:
-    st.session_state.selected_page = "🔬 Structure Viewer"
+    st.session_state.selected_page = DEFAULT_PAGE
 
 # Get the current page
 page = st.session_state.selected_page

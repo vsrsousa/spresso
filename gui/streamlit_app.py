@@ -151,13 +151,45 @@ if 'workflow_config' not in st.session_state:
 if 'working_directory' not in st.session_state:
     st.session_state.working_directory = os.path.expanduser("~")
 
-# Add session manager to sidebar first
+# Default page constant
+DEFAULT_PAGE = "🔬 Structure Viewer"
+
+# Configuration pages list
+config_pages = [
+    "🖥️ Machine Configuration",
+    "⚙️ Codes Configuration",
+    "🧪 Pseudopotentials Configuration",
+]
+
+def on_config_change():
+    """Callback for configuration page selection."""
+    st.session_state.selected_page = st.session_state.config_nav
+
+# Get current page to determine which index to show in radio
+current_page = st.session_state.get('selected_page', DEFAULT_PAGE)
+# Use None for index when current page is not in config_pages (no selection shown)
+config_index = config_pages.index(current_page) if current_page in config_pages else None
+
+# Sidebar navigation - Configuration section in collapsible expander
+with st.sidebar.expander("⚙️ Configuration", expanded=False):
+    st.radio(
+        "Configuration Pages:",
+        config_pages,
+        key="config_nav",
+        index=config_index,
+        label_visibility="collapsed",
+        on_change=on_config_change
+    )
+
+st.sidebar.markdown("---")
+
+# Session manager section (related to workflow)
 if UTILS_AVAILABLE:
     render_session_manager()
 
 st.sidebar.markdown("---")
 
-# Working Directory selector (for calculation pages only)
+# Working Directory selector - before workflow since files are stored here
 st.sidebar.subheader("📁 Working Directory")
 
 # Use enhanced directory browser
@@ -212,44 +244,39 @@ else:
     st.sidebar.caption(f"📍 {st.session_state.working_directory}")
     st.sidebar.info("💡 Calculation folders will be created here based on calc/label")
 
-# Sidebar navigation
 st.sidebar.markdown("---")
-st.sidebar.title("Navigation")
 
-# Use expanders for foldable navigation sections
-with st.sidebar.expander("⚙️ Configuration", expanded=False):
-    config_page = st.radio(
-        "Configuration Pages:",
-        [
-            "🖥️ Machine Configuration",
-            "⚙️ Codes Configuration",
-            "🧪 Pseudopotentials Configuration",
-        ],
-        key="config_nav",
-        label_visibility="collapsed"
-    )
-    if st.button("Go to selected", key="go_config"):
-        st.session_state.selected_page = config_page
+# Workflow section
+st.sidebar.title("🔬 Session & Workflow")
 
-with st.sidebar.expander("🔬 Workflow", expanded=True):
-    workflow_page = st.radio(
-        "Workflow Pages:",
-        [
-            "🔬 Structure Viewer",
-            "📊 Calculation Setup",
-            "🔄 Workflow Builder",
-            "🚀 Job Submission & Files",
-            "📈 Results & Post-Processing"
-        ],
-        key="workflow_nav",
-        label_visibility="collapsed"
-    )
-    if st.button("Go to selected", key="go_workflow"):
-        st.session_state.selected_page = workflow_page
+# Workflow pages - radio buttons with direct navigation
+workflow_pages = [
+    "🔬 Structure Viewer",
+    "📊 Calculation Setup",
+    "🔄 Workflow Builder",
+    "🚀 Job Submission & Files",
+    "📈 Results & Post-Processing"
+]
+
+def on_workflow_change():
+    """Callback for workflow page selection."""
+    st.session_state.selected_page = st.session_state.workflow_nav
+
+# Get current page to determine which index to show in radio
+workflow_index = workflow_pages.index(current_page) if current_page in workflow_pages else 0
+
+st.sidebar.radio(
+    "Workflow Pages:",
+    workflow_pages,
+    key="workflow_nav",
+    index=workflow_index,
+    label_visibility="collapsed",
+    on_change=on_workflow_change
+)
 
 # Initialize selected page if not set
 if 'selected_page' not in st.session_state:
-    st.session_state.selected_page = "🔬 Structure Viewer"
+    st.session_state.selected_page = DEFAULT_PAGE
 
 # Get the current page
 page = st.session_state.selected_page

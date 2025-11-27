@@ -15,6 +15,8 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 
+from qtgui.utils import validate_path_under_base, safe_makedirs
+
 try:
     from ase import Atoms
     from ase import io as ase_io
@@ -449,21 +451,15 @@ class JobSubmissionPage(QWidget):
         
         full_path = os.path.join(workdir, label)
         
-        # Validate path
-        try:
-            full_path = os.path.realpath(full_path)
-            workdir_real = os.path.realpath(workdir)
-            
-            if not full_path.startswith(workdir_real):
-                QMessageBox.critical(self, "Error", "Invalid calculation label - path traversal detected")
-                return
-        except (OSError, ValueError) as e:
-            QMessageBox.critical(self, "Error", f"Invalid path: {e}")
+        # Validate path using centralized validation utility
+        is_valid, full_path, error_msg = validate_path_under_base(full_path, workdir)
+        if not is_valid:
+            QMessageBox.critical(self, "Error", f"Invalid calculation label: {error_msg}")
             return
         
         try:
-            # Create output directory
-            os.makedirs(full_path, exist_ok=True)
+            # Create output directory using safe utility
+            safe_makedirs(full_path)
             
             # Save structure file
             if ASE_AVAILABLE:

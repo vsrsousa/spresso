@@ -154,10 +154,7 @@ if 'working_directory' not in st.session_state:
 # Default page constant
 DEFAULT_PAGE = "🔬 Structure Viewer"
 
-# Sidebar navigation - Configuration section (independent)
-st.sidebar.title("⚙️ Configuration")
-
-# Configuration pages - radio buttons with direct navigation
+# Configuration pages list
 config_pages = [
     "🖥️ Machine Configuration",
     "⚙️ Codes Configuration",
@@ -173,14 +170,16 @@ current_page = st.session_state.get('selected_page', DEFAULT_PAGE)
 # Use None for index when current page is not in config_pages (no selection shown)
 config_index = config_pages.index(current_page) if current_page in config_pages else None
 
-st.sidebar.radio(
-    "Configuration Pages:",
-    config_pages,
-    key="config_nav",
-    index=config_index,
-    label_visibility="collapsed",
-    on_change=on_config_change
-)
+# Sidebar navigation - Configuration section in collapsible expander
+with st.sidebar.expander("⚙️ Configuration", expanded=False):
+    st.radio(
+        "Configuration Pages:",
+        config_pages,
+        key="config_nav",
+        index=config_index,
+        label_visibility="collapsed",
+        on_change=on_config_change
+    )
 
 st.sidebar.markdown("---")
 

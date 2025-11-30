@@ -16,7 +16,7 @@ from PyQt5.QtWidgets import (
     QStackedWidget, QListWidget, QListWidgetItem, QLabel, QGroupBox,
     QFileDialog, QMessageBox, QSplitter, QFrame, QPushButton,
     QStatusBar, QMenuBar, QMenu, QAction, QToolBar, QComboBox,
-    QInputDialog, QLineEdit
+    QInputDialog, QLineEdit, QDesktopWidget
 )
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QIcon, QFont
@@ -350,7 +350,22 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("⚛️ xespresso - Quantum ESPRESSO Configuration GUI")
-        self.setMinimumSize(1200, 800)
+        
+        # Set window size as a proportion of the screen (80% width, 80% height)
+        # with a reasonable minimum for usability
+        screen = QDesktopWidget().availableGeometry()
+        width = max(int(screen.width() * 0.8), 800)
+        height = max(int(screen.height() * 0.8), 600)
+        self.resize(width, height)
+        
+        # Set minimum size to ensure usability on small screens
+        self.setMinimumSize(800, 600)
+        
+        # Center the window on the screen
+        self.move(
+            (screen.width() - width) // 2,
+            (screen.height() - height) // 2
+        )
         
         # Initialize session state
         self.session_state = session_state

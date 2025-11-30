@@ -1,0 +1,135 @@
+"""
+Configuration Dialog for xespresso PyQt GUI.
+
+This module provides a non-blocking dialog window that contains configuration
+options for Machines, Codes, and Pseudopotentials in a tabbed interface.
+The dialog doesn't block the main application and allows users to configure
+while still interacting with the main window.
+"""
+
+from PyQt5.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton,
+    QLabel, QWidget
+)
+from PyQt5.QtCore import Qt, pyqtSignal
+
+
+class ConfigurationDialog(QDialog):
+    """
+    Non-blocking configuration dialog with tabs for Machine, Codes, and Pseudopotentials.
+    
+    This dialog allows configuration without blocking the main application window.
+    Changes are applied immediately and reflected in the session state.
+    
+    Signals:
+        configuration_changed: Emitted when any configuration is saved.
+    """
+    
+    configuration_changed = pyqtSignal()
+    
+    def __init__(self, session_state, parent=None):
+        """
+        Initialize the configuration dialog.
+        
+        Args:
+            session_state: Application session state object
+            parent: Parent widget (main window)
+        """
+        super().__init__(parent)
+        self.session_state = session_state
+        self.setWindowTitle("⚙️ Configuration")
+        self.setMinimumSize(900, 700)
+        
+        # Make the dialog non-modal (doesn't block main window)
+        self.setModal(False)
+        
+        # Set window flags to keep dialog on top but allow interaction with main window
+        self.setWindowFlags(
+            Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint
+        )
+        
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        """Setup the dialog user interface."""
+        layout = QVBoxLayout(self)
+        
+        # Header
+        header = QLabel("""
+<h2>⚙️ Configuration</h2>
+<p>Configure your computational environment: machines, QE codes, and pseudopotentials.</p>
+<p><b>Note:</b> This window doesn't block the main application. You can switch between windows freely.</p>
+""")
+        header.setTextFormat(Qt.RichText)
+        header.setWordWrap(True)
+        layout.addWidget(header)
+        
+        # Tab widget for different configuration sections
+        self.tab_widget = QTabWidget()
+        
+        # Import page widgets (delayed import to avoid circular imports)
+        from qtgui.pages import (
+            MachineConfigPage,
+            CodesConfigPage,
+            PseudopotentialsConfigPage
+        )
+        
+        # Create page instances with session state
+        self.machine_page = MachineConfigPage(self.session_state)
+        self.codes_page = CodesConfigPage(self.session_state)
+        self.pseudopotentials_page = PseudopotentialsConfigPage(self.session_state)
+        
+        # Add tabs
+        self.tab_widget.addTab(self.machine_page, "🖥️ Machines")
+        self.tab_widget.addTab(self.codes_page, "⚙️ Codes")
+        self.tab_widget.addTab(self.pseudopotentials_page, "🧪 Pseudopotentials")
+        
+        layout.addWidget(self.tab_widget, 1)  # Stretch factor 1 to take available space
+        
+        # Button row
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        # Refresh button
+        refresh_btn = QPushButton("🔄 Refresh All")
+        refresh_btn.clicked.connect(self._refresh_all)
+        button_layout.addWidget(refresh_btn)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def _refresh_all(self):
+        """Refresh all configuration pages."""
+        self.machine_page.refresh()
+        self.codes_page.refresh()
+        self.pseudopotentials_page.refresh()
+        self.configuration_changed.emit()
+    
+    def show_machine_tab(self):
+        """Show the machine configuration tab."""
+        self.tab_widget.setCurrentWidget(self.machine_page)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+    
+    def show_codes_tab(self):
+        """Show the codes configuration tab."""
+        self.tab_widget.setCurrentWidget(self.codes_page)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+    
+    def show_pseudopotentials_tab(self):
+        """Show the pseudopotentials configuration tab."""
+        self.tab_widget.setCurrentWidget(self.pseudopotentials_page)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+    
+    def refresh(self):
+        """Refresh all pages in the dialog."""
+        self._refresh_all()

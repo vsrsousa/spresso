@@ -122,8 +122,16 @@ class SessionState:
         
         if os.path.exists(index_path):
             try:
-                with open(index_path, 'r') as f:
-                    self._sessions = json.load(f)
+                with open(index_path, 'r', encoding='utf-8') as f:
+                    loaded_data = json.load(f)
+                # Validate the loaded data is a dictionary with expected structure
+                if isinstance(loaded_data, dict):
+                    self._sessions = {
+                        k: v for k, v in loaded_data.items()
+                        if isinstance(k, str) and isinstance(v, dict)
+                    }
+                else:
+                    self._sessions = {}
             except Exception:
                 self._sessions = {}
         else:
@@ -135,7 +143,7 @@ class SessionState:
         index_path = os.path.join(self._sessions_dir, "sessions_index.json")
         
         try:
-            with open(index_path, 'w') as f:
+            with open(index_path, 'w', encoding='utf-8') as f:
                 json.dump(self._sessions, f, indent=2)
         except Exception as e:
             print(f"Warning: Could not save sessions index: {e}")
@@ -273,7 +281,7 @@ class SessionState:
                 pass
         
         try:
-            with open(session_path, 'w') as f:
+            with open(session_path, 'w', encoding='utf-8') as f:
                 json.dump(serializable_state, f, indent=2)
             
             # Update sessions index
@@ -295,15 +303,30 @@ class SessionState:
         """
         session_path = os.path.join(self._sessions_dir, f"{session_id}.json")
         
+        # Define allowed keys for security validation
+        allowed_keys = {
+            'current_structure', 'current_machine', 'current_machine_name',
+            'current_codes', 'selected_code_version', 'workflow_config',
+            'working_directory', 'session_name', 'session_created',
+            'session_modified', 'calc_machine', 'selected_machine',
+            'selected_qe_version', 'structure_source'
+        }
+        
         if os.path.exists(session_path):
             try:
-                with open(session_path, 'r') as f:
+                with open(session_path, 'r', encoding='utf-8') as f:
                     loaded_state = json.load(f)
                 
-                # Initialize defaults first, then override with loaded values
+                # Validate loaded data is a dictionary
+                if not isinstance(loaded_state, dict):
+                    raise ValueError("Invalid session data format")
+                
+                # Initialize defaults first, then override with validated values
                 self._initialize_defaults()
                 for key, value in loaded_state.items():
-                    self._state[key] = value
+                    # Only load keys that are strings and in allowed set
+                    if isinstance(key, str) and key in allowed_keys:
+                        self._state[key] = value
                     
             except Exception as e:
                 print(f"Warning: Could not load session: {e}")

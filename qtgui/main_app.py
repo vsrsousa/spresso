@@ -815,6 +815,11 @@ Version: 1.1.0<br>
 
 def main():
     """Main entry point for the application."""
+    # Enable high DPI scaling for different screen resolutions
+    # This must be set before QApplication is created
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    
     app = QApplication(sys.argv)
     app.setApplicationName("xespresso GUI")
     app.setOrganizationName("xespresso")

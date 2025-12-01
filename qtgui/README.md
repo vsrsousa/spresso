@@ -6,35 +6,48 @@ PySide6-based graphical user interface for xespresso - Quantum ESPRESSO calculat
 
 This is an alternative GUI for xespresso using PySide6 (Qt 6) instead of Streamlit. It provides the same functionality as the Streamlit GUI but with a native desktop application feel.
 
-**Version 1.2.0**: Migrated from PyQt5 to PySide6 for improved performance, modern Qt 6 features, and faster startup time.
+**Version 2.0.0**: Added simplified stable version alongside the full-featured version.
+
+## Two Versions Available
+
+### 1. Simplified Version (Recommended for Stability)
+
+A streamlined, stable interface with:
+- Simple tab-based navigation
+- No complex state listeners (avoids signal recursion issues)
+- Direct state management
+- Lighter resource usage
+
+```bash
+python -m qtgui --simple
+```
+
+### 2. Full Version (More Features)
+
+The full-featured version with:
+- Advanced session management
+- Configuration dialogs
+- Multi-session support
+- Full workflow pages
+
+```bash
+python -m qtgui
+```
 
 ## Features
 
-### Main Window
+### Simplified Version
+- **Structure Tab**: Load and view atomic structures
+- **Calculation Tab**: Configure basic calculation parameters
+- **Files Tab**: Browse calculation files
+- **Info Tab**: Quick start guide
+
+### Full Version
 - **Workflow Navigation**: Quick access to Structure Viewer, Calculation Setup, Workflow Builder, Job Submission, and Results pages
 - **Session Management**: Create, save, load, rename, and switch between multiple sessions
 - **Working Directory**: Browse and set working directory for calculations
 - **Toolbar**: Quick access to Configuration and Session management
-
-### Configuration Dialog (Non-Blocking)
-- **Machine Configuration**: Create and edit computational machine configurations
-- **Codes Configuration**: Auto-detect and configure Quantum ESPRESSO executables
-- **Pseudopotentials Configuration**: Browse and configure pseudopotential files
-- Opens as a separate window that doesn't block the main application
-- Access via the "⚙️ Open Configuration..." button or Edit menu (Ctrl+,)
-
-### Session Management
-- **Multiple Sessions**: Work with multiple calculation sessions simultaneously
-- **Session Persistence**: Sessions are automatically saved to disk (~/.xespresso/sessions/)
-- **Session Switching**: Switch between sessions without losing data
-- **Session Names**: Give your sessions meaningful names for easy identification
-
-### Workflow Pages
-- **Structure Viewer**: Load and visualize atomic structures with 3D visualization
-- **Calculation Setup**: Configure calculation parameters (cutoffs, k-points, pseudopotentials)
-- **Workflow Builder**: Build multi-step calculation workflows
-- **Job Submission**: Generate input files and run calculations
-- **Results & Post-Processing**: View results and perform post-processing analysis
+- **Configuration Dialog**: Non-blocking dialog for Machine, Codes, and Pseudopotentials configuration
 
 ## Installation
 
@@ -54,117 +67,70 @@ pip install -r requirements.txt
 
 ### Running the GUI
 
-From the repository root:
-
+Simplified (stable) version:
 ```bash
-python -m qtgui
+python -m qtgui --simple
 ```
 
-Or directly:
-
+Full version:
 ```bash
-python qtgui/main_app.py
+python -m qtgui
 ```
 
 ### From Python
 
 ```python
+# Simplified version
+from qtgui.main_app_simple import main
+main()
+
+# Full version
 from qtgui.main_app import main
 main()
 ```
 
 ## Architecture
 
-The Qt GUI follows a modular architecture:
+The Qt GUI has two main modules:
 
 ```
 qtgui/
-├── __init__.py          # Package initialization
-├── __main__.py          # Entry point for python -m qtgui
-├── main_app.py          # Main application window and SessionState
-├── dialogs/             # Non-blocking dialogs
-│   ├── __init__.py
-│   └── configuration_dialog.py  # Configuration dialog with tabs
-├── pages/               # Page modules
-│   ├── __init__.py
-│   ├── machine_config.py
-│   ├── codes_config.py
-│   ├── pseudopotentials_config.py
-│   ├── structure_viewer.py
-│   ├── calculation_setup.py
-│   ├── workflow_builder.py
-│   ├── job_submission.py
-│   └── results_postprocessing.py
-└── utils/               # Utility modules
-    ├── __init__.py
-    └── validation.py
+├── __init__.py           # Package initialization
+├── __main__.py           # Entry point (--simple flag for simplified version)
+├── main_app.py           # Full application with pages and session management
+├── main_app_simple.py    # Simplified application with tabs
+├── dialogs/              # Non-blocking dialogs (full version)
+├── pages/                # Page modules (full version)
+└── utils/                # Utility modules
 ```
 
-### SessionState
+## Troubleshooting
 
-The Qt GUI uses an enhanced `SessionState` class to manage application state across pages:
+### GUI Crashes or Hangs
 
-```python
-from qtgui.main_app import session_state
+If you experience crashes or hangs with the full version, try the simplified version:
 
-# Get/set state
-session_state['current_structure'] = atoms
-atoms = session_state.get('current_structure')
-
-# Session management
-session_state.create_session("My Session")
-session_state.save_session()
-session_state.switch_session(session_id)
-session_state.list_sessions()
-session_state.get_session_name()
-session_state.get_current_session_id()
-
-# State change listeners
-def on_change():
-    print("State changed!")
-session_state.add_listener(on_change)
+```bash
+python -m qtgui --simple
 ```
 
-### Configuration Dialog
+The simplified version avoids the complex state management that can cause signal recursion issues.
 
-The configuration dialog opens as a non-blocking window:
+### Common Issues
 
-```python
-from qtgui.dialogs import ConfigurationDialog
-from qtgui.main_app import session_state
-
-# Create and show dialog
-dialog = ConfigurationDialog(session_state, parent=main_window)
-dialog.show()  # Non-blocking
-
-# Show specific tab
-dialog.show_machine_tab()
-dialog.show_codes_tab()
-dialog.show_pseudopotentials_tab()
-```
-
-## Comparison with Streamlit GUI
-
-| Feature | Streamlit GUI | Qt GUI |
-|---------|--------------|--------|
-| Web-based | Yes | No |
-| Native desktop | No | Yes |
-| Installation | streamlit>=1.28.0 | PySide6>=6.5.0 |
-| State management | st.session_state | SessionState class |
-| Visualization | Plotly, py3Dmol | Matplotlib |
-| File dialogs | Browser-based | Native OS dialogs |
-| Configuration | In main pages | Non-blocking dialog |
-| Multiple sessions | Yes | Yes (with persistence) |
+1. **Import errors**: Make sure PySide6 is installed: `pip install PySide6`
+2. **Display errors**: On headless systems, set `QT_QPA_PLATFORM=offscreen`
+3. **File browser slow**: The simplified version uses a flat directory listing instead of recursive scanning
 
 ## Requirements
 
 - Python 3.8+
 - PySide6 >= 6.5.0
 - ASE >= 3.22.0 (for structure handling)
-- matplotlib >= 3.4.0 (for 3D visualization)
-- xespresso modules (for machine/codes configuration)
+- matplotlib >= 3.4.0 (for 3D visualization, optional)
+- xespresso modules (for machine/codes configuration, optional)
 
-## Keyboard Shortcuts
+## Keyboard Shortcuts (Full Version)
 
 | Shortcut | Action |
 |----------|--------|
@@ -172,73 +138,27 @@ dialog.show_pseudopotentials_tab()
 | Ctrl+S | Save Session |
 | Ctrl+, | Open Configuration Dialog |
 | Ctrl+Q | Exit |
-| Ctrl+1 | Structure Viewer |
-| Ctrl+2 | Calculation Setup |
-| Ctrl+3 | Workflow Builder |
-| Ctrl+4 | Job Submission |
-| Ctrl+5 | Results |
-
-## Development
-
-### Adding new pages
-
-1. Create a new page module in `qtgui/pages/`
-2. Inherit from `QWidget`
-3. Accept `session_state` in constructor
-4. Implement `refresh()` method for page updates
-5. Add import and export to `qtgui/pages/__init__.py`
-6. Add to page list in `main_app.py`
-
-### Example page structure
-
-```python
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
-
-class MyPage(QWidget):
-    def __init__(self, session_state):
-        super().__init__()
-        self.session_state = session_state
-        self._setup_ui()
-    
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("My Page"))
-    
-    def refresh(self):
-        # Called when page needs to be refreshed
-        pass
-```
-
-### Adding state listeners
-
-```python
-def on_state_change():
-    # React to state changes
-    self._update_display()
-
-session_state.add_listener(on_state_change)
-```
+| Ctrl+1-5 | Navigate to pages |
 
 ## Changelog
+
+### Version 2.0.0
+- **Added Simplified Version**: New simplified, stable GUI using `--simple` flag
+- **Fixed File Browser**: Improved file browser with limits to prevent blocking
+- **Fixed Signal Recursion**: Added guards to prevent infinite loops in session handling
+- **Bug Fixes**: Fixed various stability issues in the full version
 
 ### Version 1.2.0
 - **Migration to PySide6**: Migrated from PyQt5 to PySide6 (Qt 6) for improved performance
 - **Lazy imports**: Page modules are now loaded lazily for faster startup time
-- **Modern Qt 6 features**: Updated matplotlib backend to QtAgg
-- **Updated dependencies**: Requires PySide6>=6.5.0
 
 ### Version 1.1.0
 - Added non-blocking Configuration Dialog
 - Improved SessionState with multiple session support
 - Added session persistence (save/load to disk)
-- Added session switching without data loss
-- Added toolbar for quick access
-- Reorganized sidebar with cleaner workflow navigation
 
 ### Version 1.0.0
 - Initial Qt GUI implementation
-- Basic page structure
-- Session state management
 
 ## License
 

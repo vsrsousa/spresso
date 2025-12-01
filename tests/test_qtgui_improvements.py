@@ -161,9 +161,9 @@ class TestSessionPersistence:
             # Save session
             state.save_session()
             
-            # Verify file was created
-            session_file = os.path.join(tmpdir, "default.json")
-            assert os.path.exists(session_file)
+            # Verify file was created with session name (not session ID)
+            session_file = os.path.join(tmpdir, "Test Session.json")
+            assert os.path.exists(session_file), f"Expected 'Test Session.json' but found: {os.listdir(tmpdir)}"
             
             # Verify content
             with open(session_file, 'r') as f:
@@ -171,6 +171,9 @@ class TestSessionPersistence:
             
             assert saved_data['working_directory'] == '/test/path'
             assert saved_data['session_name'] == 'Test Session'
+            # Verify session ID is stored inside the file
+            assert '_session_id' in saved_data
+            assert saved_data['_session_id'] == 'default'
     
     def test_create_session(self):
         """Test creating a new session."""
@@ -240,13 +243,14 @@ class TestSessionPersistence:
             state._sessions_dir = tmpdir
             
             # Create some test session files with portable paths
-            session1_data = {'session_name': 'Test Session 1', 'working_directory': tempfile.gettempdir()}
-            session2_data = {'session_name': 'Test Session 2', 'working_directory': os.path.expanduser('~')}
+            # Include _session_id inside the file (as per the new behavior)
+            session1_data = {'session_name': 'Test Session 1', '_session_id': 'session_001', 'working_directory': tempfile.gettempdir()}
+            session2_data = {'session_name': 'Test Session 2', '_session_id': 'session_002', 'working_directory': os.path.expanduser('~')}
             
-            with open(os.path.join(tmpdir, 'session_one.json'), 'w') as f:
+            with open(os.path.join(tmpdir, 'Test Session 1.json'), 'w') as f:
                 json.dump(session1_data, f)
             
-            with open(os.path.join(tmpdir, 'session_two.json'), 'w') as f:
+            with open(os.path.join(tmpdir, 'Test Session 2.json'), 'w') as f:
                 json.dump(session2_data, f)
             
             # Create sessions_index.json which should be ignored
@@ -263,6 +267,11 @@ class TestSessionPersistence:
             session_names = [s[1] for s in session_files]
             assert 'Test Session 1' in session_names
             assert 'Test Session 2' in session_names
+            
+            # Check that session IDs are extracted correctly from inside the files
+            session_ids = [s[0] for s in session_files]
+            assert 'session_001' in session_ids
+            assert 'session_002' in session_ids
     
     def test_list_session_files_empty_dir(self):
         """Test listing session files in empty directory."""
@@ -289,15 +298,16 @@ class TestSessionPersistence:
             state = SessionState()
             state._sessions_dir = tmpdir
             
-            # Create a test session file
+            # Create a test session file with _session_id inside
             session_data = {
                 'session_name': 'Test Loaded Session',
+                '_session_id': 'my_custom_session_id',
                 'working_directory': '/test/dir',
                 'session_created': '2024-01-01T00:00:00',
                 'session_modified': '2024-01-01T00:00:00'
             }
             
-            session_file = os.path.join(tmpdir, 'test_session.json')
+            session_file = os.path.join(tmpdir, 'Test Loaded Session.json')
             with open(session_file, 'w') as f:
                 json.dump(session_data, f)
             
@@ -307,7 +317,8 @@ class TestSessionPersistence:
             assert result is True
             assert state.get_session_name() == 'Test Loaded Session'
             assert state['working_directory'] == '/test/dir'
-            assert state.get_current_session_id() == 'test_session'
+            # Session ID should be read from inside the file
+            assert state.get_current_session_id() == 'my_custom_session_id'
     
     def test_load_session_from_file_nonexistent(self):
         """Test loading a session from a non-existent file."""

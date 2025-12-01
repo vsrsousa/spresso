@@ -222,6 +222,9 @@ class SessionState:
         This scans the actual filesystem rather than relying on the index,
         ensuring all saved sessions are discoverable.
         
+        The session ID is read from inside the JSON file (stored as '_session_id'),
+        and the filename is the session name.
+        
         Returns:
             list: List of tuples (session_id, session_name, file_path)
         """
@@ -232,15 +235,22 @@ class SessionState:
         for filename in os.listdir(self._sessions_dir):
             if filename.endswith('.json') and filename != 'sessions_index.json':
                 file_path = os.path.join(self._sessions_dir, filename)
-                session_id = filename[:-5]  # Remove .json extension
+                # Default session_id to filename without .json extension
+                session_id = filename[:-5]
+                # Default session_name to filename without .json extension
+                session_name = filename[:-5]
                 
-                # Try to read the session name from the file
-                session_name = session_id
+                # Try to read the session ID and name from the file
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                        if isinstance(data, dict) and 'session_name' in data:
-                            session_name = data['session_name']
+                        if isinstance(data, dict):
+                            # Get session ID from inside the file
+                            if '_session_id' in data:
+                                session_id = data['_session_id']
+                            # Get session name from inside the file
+                            if 'session_name' in data:
+                                session_name = data['session_name']
                 except Exception:
                     pass
                 
@@ -254,6 +264,9 @@ class SessionState:
         """
         Load a session directly from a file path.
         
+        The session ID is read from inside the JSON file (stored as '_session_id').
+        If not present, falls back to using the filename.
+        
         Args:
             file_path (str): Path to the session JSON file
             
@@ -263,17 +276,13 @@ class SessionState:
         if not os.path.exists(file_path):
             return False
         
-        # Extract session_id from filename
+        # Extract filename
         filename = os.path.basename(file_path)
         if not filename.endswith('.json'):
             return False
-        session_id = filename[:-5]
         
         # Save current session first
         self.save_session()
-        
-        # Set new session ID
-        self._current_session_id = session_id
         
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -282,6 +291,12 @@ class SessionState:
             # Validate loaded data is a dictionary
             if not isinstance(loaded_state, dict):
                 raise ValueError("Invalid session data format")
+            
+            # Get session ID from inside the file, or fall back to filename
+            session_id = loaded_state.get('_session_id', filename[:-5])
+            
+            # Set new session ID
+            self._current_session_id = session_id
             
             # Initialize defaults first, then override with validated values
             self._initialize_defaults()
@@ -410,6 +425,9 @@ class SessionState:
         """
         Save the current session to disk.
         
+        The file is saved using the session name (e.g., "My Session.json").
+        The session ID is stored inside the JSON file.
+        
         Args:
             session_id: Optional specific session ID to save to
         """
@@ -417,7 +435,12 @@ class SessionState:
             session_id = self._current_session_id
         
         os.makedirs(self._sessions_dir, exist_ok=True)
-        session_path = os.path.join(self._sessions_dir, f"{session_id}.json")
+        
+        # Use session name for the filename, not the session ID
+        session_name = self._state.get('session_name', 'Unnamed')
+        # Sanitize filename: replace characters that are invalid in filenames
+        safe_filename = session_name.replace('/', '_').replace('\\', '_').replace(':', '_')
+        session_path = os.path.join(self._sessions_dir, f"{safe_filename}.json")
         
         # Prepare serializable state (exclude non-serializable objects)
         serializable_state = {}
@@ -430,6 +453,9 @@ class SessionState:
             except (TypeError, ValueError):
                 pass
         
+        # Store the session ID inside the JSON file
+        serializable_state['_session_id'] = session_id
+        
         try:
             with open(session_path, 'w', encoding='utf-8') as f:
                 json.dump(serializable_state, f, indent=2)
@@ -437,7 +463,7 @@ class SessionState:
             # Update sessions index
             if session_id not in self._sessions:
                 self._sessions[session_id] = {}
-            self._sessions[session_id]['name'] = self._state.get('session_name', 'Unnamed')
+            self._sessions[session_id]['name'] = session_name
             self._sessions[session_id]['modified'] = datetime.now().isoformat()
             self._save_sessions_index()
             
@@ -821,20 +847,28 @@ Version: 1.2.0<br>
         self.session_name_label.setTextFormat(Qt.RichText)
     
     def _refresh_session_list(self):
-        """Refresh the session list in the combo box."""
+        """Refresh the session list in the combo box.
+        
+        Displays the actual JSON file names from ~/.xespresso/sessions directory
+        to allow users to switch between saved sessions.
+        """
         self.session_combo.blockSignals(True)
         self.session_combo.clear()
         
-        sessions = self.session_state.list_sessions()
+        # Get list of session files from the filesystem (actual JSON files)
+        session_files = self.session_state.list_session_files()
         current_id = self.session_state.get_current_session_id()
         
-        # Add default session if not in list
-        if 'default' not in sessions:
-            self.session_combo.addItem("Default Session", "default")
+        # Add each session file to the combo box using the filename
+        for session_id, session_name, file_path in session_files:
+            # Use session_id (filename without .json) as the display name
+            filename = os.path.basename(file_path)
+            self.session_combo.addItem(filename, session_id)
         
-        for session_id, info in sessions.items():
-            name = info.get('name', session_id)
-            self.session_combo.addItem(name, session_id)
+        # If no sessions exist, show current session name
+        if self.session_combo.count() == 0:
+            current_name = self.session_state.get_session_name()
+            self.session_combo.addItem(f"{current_id}.json", current_id)
         
         # Select current session
         for i in range(self.session_combo.count()):

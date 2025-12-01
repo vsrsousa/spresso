@@ -309,7 +309,7 @@ class WorkflowBuilderPage(QWidget):
         self.version_combo.blockSignals(True)
         self.code_combo.blockSignals(True)
         try:
-            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR)
+            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
             
             self.version_combo.clear()
             self.code_combo.clear()
@@ -343,7 +343,7 @@ class WorkflowBuilderPage(QWidget):
         
         self.code_combo.blockSignals(True)
         try:
-            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, version=version)
+            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, version=version, verbose=False)
             
             self.code_combo.clear()
             if codes:

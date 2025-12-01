@@ -76,7 +76,7 @@ class CalculationSetupPage(QWidget):
         scroll_layout = QVBoxLayout(scroll_widget)
         
         # Header
-        header_label = QLabel("<h2>📊 Calculation Setup</h2>")
+        header_label = QLabel("<h2>🔄 Calculation Setup</h2>")
         header_label.setTextFormat(Qt.RichText)
         scroll_layout.addWidget(header_label)
         

@@ -59,7 +59,7 @@ class WorkflowBuilderPage(QWidget):
         scroll_layout = QVBoxLayout(scroll_widget)
         
         # Header
-        header_label = QLabel("<h2>🔄 Workflow Builder</h2>")
+        header_label = QLabel("<h2>📊 Workflow Builder</h2>")
         header_label.setTextFormat(Qt.RichText)
         scroll_layout.addWidget(header_label)
         

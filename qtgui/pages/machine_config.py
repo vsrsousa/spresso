@@ -271,9 +271,9 @@ in the Calculation Setup or Workflow Builder pages.</p>
         if not XESPRESSO_AVAILABLE:
             return
         
+        self.machine_combo.blockSignals(True)
         try:
             machines_list = list_machines(DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR)
-            self.machine_combo.blockSignals(True)
             self.machine_combo.clear()
             self.machine_combo.addItem("[Create New Machine]")
             
@@ -289,11 +289,11 @@ in the Calculation Setup or Workflow Builder pages.</p>
                     "ℹ️ No machines configured yet. Create your first machine below."
                 )
                 self.machines_status_label.setStyleSheet("color: blue;")
-            self.machine_combo.blockSignals(False)
         except Exception as e:
-            self.machine_combo.blockSignals(False)
             self.machines_status_label.setText(f"⚠️ Could not load machines list: {e}")
             self.machines_status_label.setStyleSheet("color: orange;")
+        finally:
+            self.machine_combo.blockSignals(False)
     
     def _on_machine_selected(self, machine_name):
         """Handle machine selection."""

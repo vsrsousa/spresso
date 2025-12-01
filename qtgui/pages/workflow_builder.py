@@ -260,18 +260,19 @@ class WorkflowBuilderPage(QWidget):
         if not XESPRESSO_AVAILABLE:
             return
         
+        self.machine_combo.blockSignals(True)
         try:
             machines = list_machines(DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR)
-            self.machine_combo.blockSignals(True)
             self.machine_combo.clear()
             for machine in machines:
                 self.machine_combo.addItem(machine)
+        except Exception:
+            pass
+        finally:
             self.machine_combo.blockSignals(False)
-            # Manually trigger the handler for the first item if any
-            if self.machine_combo.count() > 0:
-                self._on_machine_changed(self.machine_combo.currentText())
-        except Exception as e:
-            self.machine_combo.blockSignals(False)
+        # Manually trigger the handler for the first item if any
+        if self.machine_combo.count() > 0:
+            self._on_machine_changed(self.machine_combo.currentText())
     
     def _on_machine_changed(self, machine_name):
         """Handle machine selection change."""
@@ -297,11 +298,11 @@ class WorkflowBuilderPage(QWidget):
         if not XESPRESSO_AVAILABLE:
             return
         
+        self.version_combo.blockSignals(True)
+        self.code_combo.blockSignals(True)
         try:
             codes = load_codes_config(machine_name, DEFAULT_CODES_DIR)
             
-            self.version_combo.blockSignals(True)
-            self.code_combo.blockSignals(True)
             self.version_combo.clear()
             self.code_combo.clear()
             
@@ -314,15 +315,14 @@ class WorkflowBuilderPage(QWidget):
                     all_codes = codes.get_all_codes()
                     for code_name in all_codes.keys():
                         self.code_combo.addItem(code_name)
-            
+        except Exception:
+            pass
+        finally:
             self.version_combo.blockSignals(False)
             self.code_combo.blockSignals(False)
-            # Manually trigger the handler for the first item if any
-            if self.version_combo.count() > 0:
-                self._on_version_changed(self.version_combo.currentText())
-        except Exception as e:
-            self.version_combo.blockSignals(False)
-            self.code_combo.blockSignals(False)
+        # Manually trigger the handler for the first item if any
+        if self.version_combo.count() > 0:
+            self._on_version_changed(self.version_combo.currentText())
     
     def _on_version_changed(self, version):
         """Handle version selection change."""
@@ -333,10 +333,10 @@ class WorkflowBuilderPage(QWidget):
         if not machine_name:
             return
         
+        self.code_combo.blockSignals(True)
         try:
             codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, version=version)
             
-            self.code_combo.blockSignals(True)
             self.code_combo.clear()
             if codes:
                 version_codes = codes.get_all_codes(version=version)
@@ -346,8 +346,9 @@ class WorkflowBuilderPage(QWidget):
                 idx = self.code_combo.findText('pw')
                 if idx >= 0:
                     self.code_combo.setCurrentIndex(idx)
-            self.code_combo.blockSignals(False)
-        except Exception as e:
+        except Exception:
+            pass
+        finally:
             self.code_combo.blockSignals(False)
     
     def _on_workflow_changed(self, workflow_type):

@@ -413,6 +413,9 @@ class MainWindow(QMainWindow):
         # Configuration dialog (created on demand)
         self._config_dialog = None
         
+        # Guard to prevent recursive updates during session changes
+        self._updating = False
+        
         # Setup UI
         self._setup_ui()
         self._setup_menu()
@@ -721,6 +724,10 @@ Version: 1.2.0<br>
     
     def _on_session_selected(self, text):
         """Handle session selection from combo box."""
+        # Guard against recursive calls during updates
+        if self._updating:
+            return
+        
         session_id = self.session_combo.currentData()
         if session_id and session_id != self.session_state.get_current_session_id():
             if self.session_state.switch_session(session_id):
@@ -728,15 +735,31 @@ Version: 1.2.0<br>
                 self.statusbar.showMessage(f"Switched to session: {text}")
     
     def _on_session_changed(self):
-        """Handle session state changes."""
-        self._update_session_name_label()
-        self._update_statusbar()
-        self.workdir_label.setText(self.session_state.get('working_directory', '~'))
+        """Handle session state changes.
         
-        # Refresh all pages
-        for page in self.pages:
-            if hasattr(page, 'refresh'):
-                page.refresh()
+        This method is called when the session state changes, either from
+        the session listener or when switching sessions. Uses a guard to
+        prevent recursive updates.
+        """
+        # Guard against recursive calls
+        if self._updating:
+            return
+        
+        self._updating = True
+        try:
+            self._update_session_name_label()
+            self._update_statusbar()
+            self.workdir_label.setText(self.session_state.get('working_directory', '~'))
+            
+            # Refresh all pages
+            for page in self.pages:
+                if hasattr(page, 'refresh'):
+                    try:
+                        page.refresh()
+                    except Exception:
+                        pass  # Don't let page refresh errors crash the app
+        finally:
+            self._updating = False
     
     def _open_config_dialog(self):
         """Open the configuration dialog."""

@@ -31,6 +31,7 @@ class JobSubmissionPage(QWidget):
     def __init__(self, session_state):
         super().__init__()
         self.session_state = session_state
+        self._loading = False  # Guard to prevent recursive updates
         self._setup_ui()
     
     def _setup_ui(self):
@@ -297,7 +298,12 @@ class JobSubmissionPage(QWidget):
         self._update_run_config()
     
     def _refresh_browser(self):
-        """Refresh the file browser."""
+        """Refresh the file browser.
+        
+        This method scans the working directory for calculation folders.
+        To prevent blocking the main thread during large directory scans,
+        we limit the depth and number of directories scanned.
+        """
         workdir = self.session_state.get('working_directory', os.path.expanduser("~"))
         self.workdir_label.setText(workdir)
         
@@ -306,15 +312,30 @@ class JobSubmissionPage(QWidget):
         if not os.path.exists(workdir):
             return
         
-        # Find calculation folders
-        input_extensions = [".in", ".pwi", ".phi", ".ppi", ".bandi"]
+        # Find calculation folders with limits to prevent blocking
+        input_extensions = (".in", ".pwi", ".phi", ".ppi", ".bandi")
+        output_extensions = (".sh", ".slurm", ".out", ".pwo")
+        max_dirs_scanned = 100  # Limit to prevent blocking on large directories
+        dirs_scanned = 0
         
         try:
             for root, dirs, files in os.walk(workdir, topdown=True):
+                # Count directories to prevent scanning too many
+                dirs_scanned += 1
+                if dirs_scanned > max_dirs_scanned:
+                    self.file_info_label.setText(
+                        f"⚠️ Directory scan limited to {max_dirs_scanned} folders. "
+                        "Navigate to a specific calculation folder for better results."
+                    )
+                    break
+                
                 depth = root[len(workdir):].count(os.sep)
                 if depth < 4:
+                    # Prune hidden directories and common large directories to speed up walk
+                    dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.git', 'venv', 'env')]
+                    
                     has_input = any(
-                        f.endswith(tuple(input_extensions)) or 
+                        f.endswith(input_extensions) or 
                         f == "job_file" or 
                         f.endswith((".sh", ".slurm"))
                         for f in files
@@ -327,15 +348,18 @@ class JobSubmissionPage(QWidget):
                         
                         # Add files as children
                         for f in files:
-                            if (f.endswith(tuple(input_extensions)) or 
+                            if (f.endswith(input_extensions) or 
                                 f == "job_file" or 
-                                f.endswith((".sh", ".slurm", ".out", ".pwo"))):
+                                f.endswith(output_extensions)):
                                 child = QTreeWidgetItem([f])
                                 child.setData(0, Qt.UserRole, os.path.join(root, f))
                                 item.addChild(child)
                         
                         self.file_tree.addTopLevelItem(item)
-        except Exception as e:
+                else:
+                    # Don't descend into directories beyond depth 4
+                    dirs[:] = []
+        except (OSError, IOError) as e:
             self.file_info_label.setText(f"Error scanning: {e}")
     
     def _on_file_selected(self, item, column):

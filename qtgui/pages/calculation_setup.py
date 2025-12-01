@@ -765,5 +765,6 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         if config.get('pseudopotentials'):
             self.session_state['workflow_config'] = config
         elif not self.session_state.get('workflow_config'):
-            # No existing config and no valid new config, save anyway to track other fields
+            # No existing config and no valid new config, save current state anyway
+            # to preserve other fields like calc_type, ecutwfc, kpts, etc.
             self.session_state['workflow_config'] = config

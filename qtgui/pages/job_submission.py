@@ -724,7 +724,8 @@ Files created in: <code>{full_path}</code>
         if config.get('enable_magnetism') and config.get('magnetic_config'):
             input_data['SYSTEM']['nspin'] = 2
             # Use lowercase 'input_ntyp' as required by xespresso
-            input_data['input_ntyp'] = {}
+            if 'input_ntyp' not in input_data:
+                input_data['input_ntyp'] = {}
             input_data['input_ntyp']['starting_magnetization'] = {}
             for element, mag_values in config.get('magnetic_config', {}).items():
                 if isinstance(mag_values, list):

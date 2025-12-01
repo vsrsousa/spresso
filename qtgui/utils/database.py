@@ -298,6 +298,9 @@ class DatabaseLoadWidget(QWidget):
             self.result_label.setText(f"✅ Loaded: {atoms.get_chemical_formula()}")
             self.result_label.setStyleSheet("color: green;")
             
+            # Save the database path for session restoration
+            self.session_state['structure_db_path'] = db_path
+            
             # Call the callback if provided
             if self.on_structure_loaded:
                 self.on_structure_loaded(atoms, f"Database: ID {structure_id}")

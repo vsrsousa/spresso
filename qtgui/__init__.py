@@ -8,9 +8,14 @@ This application provides a user-friendly interface for:
 - Configuring calculations and workflows
 - Submitting computational jobs
 
-This is a PySide6-based alternative to the Streamlit GUI.
-Migrated from PyQt5 to PySide6 for improved performance and modern Qt 6 features.
+Two versions are available:
+- Full version (default): Full-featured but may have stability issues
+- Simple version (--simple flag): Simplified, more stable interface
+
+Run with:
+    python -m qtgui          # Full version
+    python -m qtgui --simple # Simple stable version
 """
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"
 __author__ = "xespresso team"

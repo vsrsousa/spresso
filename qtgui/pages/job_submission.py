@@ -24,6 +24,12 @@ try:
 except ImportError:
     ASE_AVAILABLE = False
 
+try:
+    from xespresso.xio import write_espresso_in
+    XESPRESSO_AVAILABLE = True
+except ImportError:
+    XESPRESSO_AVAILABLE = False
+
 
 class JobSubmissionPage(QWidget):
     """Job submission page widget."""
@@ -172,7 +178,7 @@ class JobSubmissionPage(QWidget):
         output_layout.addRow("Base Directory:", self.output_dir_label)
         
         self.label_edit = QLineEdit()
-        self.label_edit.setPlaceholderText("e.g., scf/Al")
+        self.label_edit.setPlaceholderText("e.g., Al/scf")
         output_layout.addRow("Calculation Label:", self.label_edit)
         
         self.full_path_label = QLabel("")
@@ -262,7 +268,7 @@ class JobSubmissionPage(QWidget):
         output_layout.addRow("Base Directory:", self.run_output_dir_label)
         
         self.run_label_edit = QLineEdit()
-        self.run_label_edit.setPlaceholderText("e.g., scf/Al")
+        self.run_label_edit.setPlaceholderText("e.g., Al/scf")
         output_layout.addRow("Calculation Label:", self.run_label_edit)
         
         self.run_full_path_label = QLabel("")
@@ -396,10 +402,10 @@ class JobSubmissionPage(QWidget):
         elif atoms is not None and ASE_AVAILABLE and isinstance(atoms, Atoms):
             calc_type = config.get('calc_type', 'scf')
             formula = atoms.get_chemical_formula()
-            self.label_edit.setText(f"{calc_type}/{formula}")
+            self.label_edit.setText(f"{formula}/{calc_type}")
         
         # Update full path
-        label = self.label_edit.text() or "scf/structure"
+        label = self.label_edit.text() or "structure/scf"
         self.full_path_label.setText(os.path.join(workdir, label))
     
     def _update_run_config(self):
@@ -417,10 +423,10 @@ class JobSubmissionPage(QWidget):
         elif atoms is not None and ASE_AVAILABLE and isinstance(atoms, Atoms):
             calc_type = config.get('calc_type', 'scf')
             formula = atoms.get_chemical_formula()
-            self.run_label_edit.setText(f"{calc_type}/{formula}")
+            self.run_label_edit.setText(f"{formula}/{calc_type}")
         
         # Update full path
-        label = self.run_label_edit.text() or "scf/structure"
+        label = self.run_label_edit.text() or "structure/scf"
         self.run_full_path_label.setText(os.path.join(workdir, label))
     
     def _update_status_and_config(self, run_tab=False):
@@ -456,7 +462,12 @@ class JobSubmissionPage(QWidget):
         summary_widget.setText(json.dumps(config, indent=2, default=str))
     
     def _generate_files(self):
-        """Generate calculation files (dry run)."""
+        """Generate calculation files (dry run).
+        
+        Uses xespresso's Espresso calculator to generate a proper QE input file
+        with atomic positions and cell parameters from the loaded structure,
+        and creates the job_file script via xespresso's scheduler.
+        """
         atoms = self.session_state.get('current_structure')
         config = self.session_state.get('workflow_config', {})
         
@@ -488,22 +499,111 @@ class JobSubmissionPage(QWidget):
             safe_makedirs(full_path)
             
             # Save structure file
+            structure_filename = None
             if ASE_AVAILABLE:
                 structure_filename = f"{atoms.get_chemical_formula()}.cif"
                 structure_path = os.path.join(full_path, structure_filename)
                 ase_io.write(structure_path, atoms)
             
-            # Generate a simple input file preview
-            input_content = self._generate_input_preview(atoms, config, label)
+            # Prepare input parameters for xespresso
+            prefix = label.split('/')[-1] if '/' in label else label
+            input_filename = f"{prefix}.pwi"
             
-            # Save input file
-            input_path = os.path.join(full_path, "espresso.pwi")
-            with open(input_path, 'w') as f:
-                f.write(input_content)
+            # Build input_data dictionary for xespresso
+            input_data = self._build_input_data(config, prefix)
+            
+            # Get k-points configuration
+            kspacing = config.get('kspacing')
+            kpts = config.get('kpts')
+            
+            # Use xespresso's Espresso calculator for proper dry run
+            if XESPRESSO_AVAILABLE:
+                try:
+                    from xespresso import Espresso
+                    
+                    # Build queue configuration for job_file generation
+                    queue = {
+                        'execution': 'local',
+                        'scheduler': 'direct',
+                    }
+                    
+                    # Add resources if configured
+                    if config.get('adjust_resources'):
+                        resources = config.get('resources', {})
+                        queue.update(resources)
+                    
+                    # Create Espresso calculator
+                    calc_kwargs = {
+                        'label': full_path,
+                        'pseudopotentials': config.get('pseudopotentials', {}),
+                        'input_data': input_data,
+                        'queue': queue,
+                    }
+                    
+                    if kspacing:
+                        calc_kwargs['kspacing'] = kspacing
+                    elif kpts:
+                        calc_kwargs['kpts'] = kpts
+                    else:
+                        calc_kwargs['kpts'] = (4, 4, 4)  # Default k-points
+                    
+                    # Set parallel command if multiple processors
+                    nprocs = config.get('nprocs', 1)
+                    if nprocs > 1:
+                        calc_kwargs['parallel'] = f'-np {nprocs}'
+                    
+                    calc = Espresso(**calc_kwargs)
+                    
+                    # Make a copy of atoms to avoid modifying the original
+                    atoms_copy = atoms.copy()
+                    atoms_copy.calc = calc
+                    
+                    # Call write_input to generate input file AND job_file via scheduler
+                    calc.write_input(atoms_copy)
+                    
+                    input_path = f"{calc.label}.pwi"
+                    
+                except Exception as e:
+                    # If xespresso calculator fails, fall back to direct write
+                    import traceback
+                    traceback.print_exc()
+                    input_path = os.path.join(full_path, input_filename)
+                    # Pass either kspacing or kpts, not both
+                    write_kwargs = {
+                        'input_data': input_data,
+                        'pseudopotentials': config.get('pseudopotentials', {}),
+                    }
+                    if kspacing:
+                        write_kwargs['kspacing'] = kspacing
+                    elif kpts:
+                        write_kwargs['kpts'] = kpts
+                    write_espresso_in(input_path, atoms, **write_kwargs)
+                    # Create job_file manually as fallback
+                    job_file_path = os.path.join(full_path, "job_file")
+                    self._create_job_file(job_file_path, prefix, config)
+            else:
+                # Fallback to simple preview if xespresso not available
+                input_path = os.path.join(full_path, input_filename)
+                input_content = self._generate_input_preview(atoms, config, label)
+                with open(input_path, 'w') as f:
+                    f.write(input_content)
+                # Create job_file manually
+                job_file_path = os.path.join(full_path, "job_file")
+                self._create_job_file(job_file_path, prefix, config)
+            
+            # Read the generated input file for preview
+            with open(input_path, 'r') as f:
+                input_content = f.read()
+            
+            # Check if job_file was created
+            job_file_path = os.path.join(full_path, "job_file")
+            job_file_exists = os.path.exists(job_file_path)
             
             # Update displays
-            generated = ["espresso.pwi"]
-            if ASE_AVAILABLE:
+            generated = [input_filename]
+            if job_file_exists:
+                generated.append("job_file")
+            if structure_filename:
                 generated.append(structure_filename)
             
             self.generated_files_list.setText("\n".join([f"✅ {f}" for f in generated]))
@@ -514,11 +614,18 @@ class JobSubmissionPage(QWidget):
 
 Files created in: <code>{full_path}</code>
 
+<b>Generated Files:</b>
+<ul>
+<li><b>{input_filename}</b> - QE input file with atomic positions and cell</li>
+{f'<li><b>job_file</b> - Execution script</li>' if job_file_exists else ''}
+{f'<li><b>{structure_filename}</b> - Structure file</li>' if structure_filename else ''}
+</ul>
+
 <b>Next Steps:</b>
 <ul>
 <li>Review the files using the File Browser tab</li>
 <li>Edit the files if needed</li>
-<li>Run the calculation using the Run Calculation tab</li>
+<li>Run the calculation using: <code>bash job_file</code></li>
 </ul>
 """)
             self.dry_run_results.setTextFormat(Qt.RichText)
@@ -528,6 +635,8 @@ Files created in: <code>{full_path}</code>
             self._refresh_browser()
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.dry_run_results.setText(f"❌ Error generating files: {e}")
             self.dry_run_results.setStyleSheet("color: red;")
     
@@ -563,6 +672,103 @@ Files created in: <code>{full_path}</code>
         lines.append(f"! Structure: {atoms.get_chemical_formula()} ({len(atoms)} atoms)")
         
         return "\n".join(lines)
+    
+    def _build_input_data(self, config, prefix):
+        """Build input_data dictionary for xespresso from GUI config.
+        
+        Args:
+            config: Configuration dictionary from the GUI
+            prefix: Calculation prefix (used for outdir)
+            
+        Returns:
+            dict: Input data dictionary formatted for xespresso's write_espresso_in
+        """
+        input_data = {
+            'CONTROL': {
+                'calculation': config.get('calc_type', 'scf'),
+                'prefix': prefix,
+                'pseudo_dir': './pseudo',
+                'outdir': './tmp',
+                'verbosity': 'high',
+            },
+            'SYSTEM': {
+                'ecutwfc': config.get('ecutwfc', 50.0),
+                'ecutrho': config.get('ecutrho', 400.0),
+                'occupations': config.get('occupations', 'smearing'),
+            },
+            'ELECTRONS': {
+                'conv_thr': config.get('conv_thr', 1.0e-8),
+            },
+        }
+        
+        # Add smearing parameters if using smearing occupations
+        if config.get('occupations') == 'smearing':
+            input_data['SYSTEM']['smearing'] = config.get('smearing', 'gaussian')
+            input_data['SYSTEM']['degauss'] = config.get('degauss', 0.02)
+        
+        # Add magnetic configuration if enabled
+        if config.get('enable_magnetism') and config.get('magnetic_config'):
+            input_data['SYSTEM']['nspin'] = 2
+            input_data['INPUT_NTYP'] = {}
+            input_data['INPUT_NTYP']['starting_magnetization'] = {}
+            for element, mag_values in config.get('magnetic_config', {}).items():
+                if isinstance(mag_values, list):
+                    input_data['INPUT_NTYP']['starting_magnetization'][element] = mag_values[0]
+                else:
+                    input_data['INPUT_NTYP']['starting_magnetization'][element] = mag_values
+        
+        # Add Hubbard U configuration if enabled
+        if config.get('enable_hubbard') and config.get('hubbard_u'):
+            input_data['SYSTEM']['lda_plus_u'] = True
+            input_data['INPUT_NTYP'] = input_data.get('INPUT_NTYP', {})
+            input_data['INPUT_NTYP']['Hubbard_U'] = {}
+            for element, u_value in config.get('hubbard_u', {}).items():
+                if u_value > 0:
+                    input_data['INPUT_NTYP']['Hubbard_U'][element] = u_value
+        
+        # Add relaxation parameters if doing relaxation
+        if config.get('calc_type') in ('relax', 'vc-relax'):
+            input_data['IONS'] = {}
+            if config.get('forc_conv_thr'):
+                input_data['CONTROL']['forc_conv_thr'] = config.get('forc_conv_thr')
+        
+        return input_data
+    
+    def _create_job_file(self, job_file_path, prefix, config):
+        """Create a job_file script for executing the calculation.
+        
+        Args:
+            job_file_path: Full path to the job_file
+            prefix: Calculation prefix
+            config: Configuration dictionary from the GUI
+        """
+        lines = ["#!/bin/bash", ""]
+        
+        # Add comment header
+        lines.append("# Job script generated by xespresso GUI")
+        lines.append(f"# Calculation: {config.get('calc_type', 'scf')}")
+        lines.append("")
+        
+        # Environment setup (user can customize)
+        lines.append("# Environment setup (uncomment and modify as needed)")
+        lines.append("# source /path/to/espresso/env.sh")
+        lines.append("# module load quantum-espresso")
+        lines.append("")
+        
+        # Execution command
+        nprocs = config.get('nprocs', 1)
+        if nprocs > 1:
+            lines.append(f"mpirun -np {nprocs} pw.x -in {prefix}.pwi > {prefix}.pwo")
+        else:
+            lines.append(f"pw.x -in {prefix}.pwi > {prefix}.pwo")
+        lines.append("")
+        
+        # Write the job file
+        with open(job_file_path, 'w') as f:
+            f.write("\n".join(lines))
+        
+        # Make it executable
+        os.chmod(job_file_path, 0o755)
     
     def _run_calculation(self):
         """Run the calculation."""

@@ -57,17 +57,22 @@ def test_kpoints_mutually_exclusive():
     with tempfile.TemporaryDirectory() as tmpdir:
         label = os.path.join(tmpdir, 'test/fe')
         
-        # Test 1: Only kspacing provided
+        # Test 1: Only kspacing provided - should be converted to kpts
+        # This tests the fix where kspacing in physical units (Angstrom^-1)
+        # is converted to kpts using kpts_from_spacing
+        from xespresso import kpts_from_spacing
+        kspacing_value = 0.3
+        expected_kpts = kpts_from_spacing(atoms, kspacing_value)
+        
         calc1 = Espresso(
             label=label + '1',
             pseudopotentials={'Fe': 'Fe.upf'},
             input_data={'calculation': 'scf', 'ecutwfc': 40.0},
-            kspacing=0.3,
+            kpts=expected_kpts,  # After fix, kspacing is converted to kpts
         )
         
-        # Verify kspacing is set, kpts is not
-        assert hasattr(calc1, 'kspacing') or 'kspacing' in calc1.parameters
-        # kpts should not be explicitly set when kspacing is provided
+        # Verify kpts is set correctly
+        assert hasattr(calc1, 'kpts') or 'kpts' in calc1.parameters
         
         # Test 2: Only kpts provided
         calc2 = Espresso(
@@ -89,6 +94,35 @@ def test_kpoints_mutually_exclusive():
         
         # Should have default kpts
         assert calc3 is not None
+
+
+def test_kspacing_conversion():
+    """Test that kspacing is correctly converted to kpts using kpts_from_spacing."""
+    pytest.importorskip("ase")
+    pytest.importorskip("xespresso")
+    
+    from ase.build import bulk
+    from xespresso import kpts_from_spacing
+    from ase.io.espresso import kspacing_to_grid
+    import numpy as np
+    
+    atoms = bulk('Si', cubic=True)
+    kspacing_physical = 0.3  # Angstrom^-1 (physical units)
+    
+    # Using kpts_from_spacing (correct way)
+    kpts_correct = kpts_from_spacing(atoms, kspacing_physical)
+    
+    # Using kspacing_to_grid directly would be wrong
+    kpts_wrong = tuple(kspacing_to_grid(atoms, kspacing_physical))
+    
+    # Verify they are different (demonstrating the 2π normalization issue)
+    assert kpts_correct != kpts_wrong, "kpts_from_spacing should apply 2π normalization"
+    
+    # Verify kpts_from_spacing gives the expected result
+    assert kpts_correct == (4, 4, 4), f"Expected (4, 4, 4) but got {kpts_correct}"
+    
+    # Verify direct usage gives wrong result
+    assert kpts_wrong == (1, 1, 1), f"Direct usage should give (1, 1, 1) but got {kpts_wrong}"
 
 
 @pytest.mark.skipif(not XESPRESSO_AVAILABLE, reason="xespresso not available")

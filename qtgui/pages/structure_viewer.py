@@ -1,18 +1,20 @@
 """
 Structure Viewer Page for xespresso PySide6 GUI.
 
-This page handles loading and visualizing atomic structures.
+This page handles loading and visualizing atomic structures,
+including ASE database operations for saving and loading structures.
 """
 
 import os
 import tempfile
+import traceback
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QFileDialog, QTabWidget, QTextEdit, QCheckBox,
-    QDoubleSpinBox, QSpinBox, QSlider
+    QDoubleSpinBox, QSpinBox, QSlider, QRadioButton, QButtonGroup
 )
 from PySide6.QtCore import Qt
 
@@ -25,6 +27,12 @@ except ImportError:
     ASE_AVAILABLE = False
 
 try:
+    from ase.db import connect as ase_db_connect
+    ASE_DB_AVAILABLE = True
+except ImportError:
+    ASE_DB_AVAILABLE = False
+
+try:
     import matplotlib
     # Only set backend if not already set to avoid conflicts
     if matplotlib.get_backend() != 'QtAgg':
@@ -35,6 +43,9 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
+
+# Default database path
+DEFAULT_DB_PATH = os.path.expanduser("~/.xespresso/structures.db")
 
 
 class StructureViewerPage(QWidget):
@@ -179,6 +190,119 @@ class StructureViewerPage(QWidget):
         
         build_layout.addStretch()
         tabs.addTab(build_tab, "Build Structure")
+        
+        # ASE Database Tab
+        db_tab = QWidget()
+        db_layout = QVBoxLayout(db_tab)
+        
+        if not ASE_DB_AVAILABLE:
+            db_unavailable = QLabel("❌ ASE database module not available.")
+            db_unavailable.setStyleSheet("color: red;")
+            db_layout.addWidget(db_unavailable)
+        else:
+            db_desc = QLabel("""
+<p>Load and save structures to an ASE database for easy management.</p>
+<p>💡 <b>Tip:</b> Use the database to store frequently used structures for quick access.</p>
+""")
+            db_desc.setTextFormat(Qt.RichText)
+            db_desc.setWordWrap(True)
+            db_layout.addWidget(db_desc)
+            
+            # Database path configuration
+            db_path_layout = QHBoxLayout()
+            db_path_layout.addWidget(QLabel("Database Path:"))
+            self.db_path_edit = QLineEdit()
+            self.db_path_edit.setText(DEFAULT_DB_PATH)
+            self.db_path_edit.setToolTip("Path to ASE database file")
+            db_path_layout.addWidget(self.db_path_edit, 1)
+            
+            db_browse_btn = QPushButton("Browse...")
+            db_browse_btn.clicked.connect(self._browse_db_path)
+            db_path_layout.addWidget(db_browse_btn)
+            db_layout.addLayout(db_path_layout)
+            
+            # Operation selector
+            self.db_operation_group = QButtonGroup(self)
+            op_layout = QHBoxLayout()
+            
+            self.load_radio = QRadioButton("Load from Database")
+            self.load_radio.setChecked(True)
+            self.load_radio.toggled.connect(self._on_db_operation_changed)
+            self.db_operation_group.addButton(self.load_radio)
+            op_layout.addWidget(self.load_radio)
+            
+            self.save_radio = QRadioButton("Save to Database")
+            self.save_radio.toggled.connect(self._on_db_operation_changed)
+            self.db_operation_group.addButton(self.save_radio)
+            op_layout.addWidget(self.save_radio)
+            
+            op_layout.addStretch()
+            db_layout.addLayout(op_layout)
+            
+            # Load from database section
+            self.db_load_group = QGroupBox("📥 Load from Database")
+            db_load_layout = QVBoxLayout(self.db_load_group)
+            
+            refresh_db_btn = QPushButton("🔄 Refresh Database List")
+            refresh_db_btn.clicked.connect(self._refresh_db_list)
+            db_load_layout.addWidget(refresh_db_btn)
+            
+            self.db_status_label = QLabel("")
+            db_load_layout.addWidget(self.db_status_label)
+            
+            self.db_structures_table = QTableWidget()
+            self.db_structures_table.setColumnCount(4)
+            self.db_structures_table.setHorizontalHeaderLabels(["ID", "Formula", "Atoms", "Tags"])
+            self.db_structures_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            self.db_structures_table.setMaximumHeight(200)
+            self.db_structures_table.setSelectionBehavior(QTableWidget.SelectRows)
+            self.db_structures_table.setSelectionMode(QTableWidget.SingleSelection)
+            db_load_layout.addWidget(self.db_structures_table)
+            
+            load_selected_btn = QPushButton("📥 Load Selected Structure")
+            load_selected_btn.clicked.connect(self._load_from_database)
+            db_load_layout.addWidget(load_selected_btn)
+            
+            db_layout.addWidget(self.db_load_group)
+            
+            # Save to database section
+            self.db_save_group = QGroupBox("💾 Save to Database")
+            db_save_layout = QFormLayout(self.db_save_group)
+            
+            self.db_save_info = QLabel("Load a structure first to save it to the database.")
+            db_save_layout.addRow(self.db_save_info)
+            
+            self.db_save_name = QLineEdit()
+            self.db_save_name.setPlaceholderText("e.g., my_structure, bulk_Fe")
+            db_save_layout.addRow("Structure Name:", self.db_save_name)
+            
+            self.db_save_tags = QLineEdit()
+            self.db_save_tags.setPlaceholderText("e.g., bulk, metal, test")
+            self.db_save_tags.setToolTip("Tags to help identify this structure (comma-separated)")
+            db_save_layout.addRow("Tags:", self.db_save_tags)
+            
+            self.db_save_description = QTextEdit()
+            self.db_save_description.setPlaceholderText("Optional description of the structure")
+            self.db_save_description.setMaximumHeight(60)
+            db_save_layout.addRow("Description:", self.db_save_description)
+            
+            save_to_db_btn = QPushButton("💾 Save to Database")
+            save_to_db_btn.clicked.connect(self._save_to_database)
+            db_save_layout.addRow(save_to_db_btn)
+            
+            self.db_save_status = QLabel("")
+            self.db_save_status.setWordWrap(True)
+            db_save_layout.addRow(self.db_save_status)
+            
+            self.db_save_group.setVisible(False)
+            db_layout.addWidget(self.db_save_group)
+            
+            self.db_load_result = QLabel("")
+            self.db_load_result.setWordWrap(True)
+            db_layout.addWidget(self.db_load_result)
+        
+        db_layout.addStretch()
+        tabs.addTab(db_tab, "ASE Database")
         
         scroll_layout.addWidget(tabs)
         
@@ -463,5 +587,194 @@ class StructureViewerPage(QWidget):
                 
                 self._update_structure_info(atoms)
                 self._refresh_visualization()
+                
+                # Update save to database info
+                if ASE_DB_AVAILABLE and hasattr(self, 'db_save_info'):
+                    self.db_save_info.setText(f"Ready to save: {formula} ({natoms} atoms)")
         finally:
             self._loading = False
+    
+    def _browse_db_path(self):
+        """Browse for database file path."""
+        current_path = self.db_path_edit.text() or DEFAULT_DB_PATH
+        current_dir = os.path.dirname(current_path)
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Select Database File",
+            current_dir,
+            "ASE Database Files (*.db);;All Files (*)"
+        )
+        
+        if file_path:
+            self.db_path_edit.setText(file_path)
+    
+    def _on_db_operation_changed(self):
+        """Handle database operation change."""
+        is_save = self.save_radio.isChecked()
+        self.db_load_group.setVisible(not is_save)
+        self.db_save_group.setVisible(is_save)
+    
+    def _refresh_db_list(self):
+        """Refresh the database structures list."""
+        if not ASE_DB_AVAILABLE:
+            return
+        
+        db_path = self.db_path_edit.text().strip()
+        if not db_path:
+            self.db_status_label.setText("⚠️ Please enter a database path")
+            self.db_status_label.setStyleSheet("color: orange;")
+            return
+        
+        # Normalize the path
+        db_path = os.path.abspath(os.path.expanduser(db_path))
+        
+        if not os.path.exists(db_path):
+            self.db_status_label.setText("ℹ️ Database does not exist yet. It will be created when you save your first structure.")
+            self.db_status_label.setStyleSheet("color: blue;")
+            self.db_structures_table.setRowCount(0)
+            return
+        
+        try:
+            db = ase_db_connect(db_path)
+            rows = list(db.select())
+            
+            if rows:
+                self.db_status_label.setText(f"✅ Found {len(rows)} structure(s) in database")
+                self.db_status_label.setStyleSheet("color: green;")
+                
+                self.db_structures_table.setRowCount(len(rows))
+                for i, row in enumerate(rows):
+                    self.db_structures_table.setItem(i, 0, QTableWidgetItem(str(row.id)))
+                    self.db_structures_table.setItem(i, 1, QTableWidgetItem(row.formula))
+                    self.db_structures_table.setItem(i, 2, QTableWidgetItem(str(row.natoms)))
+                    
+                    # Get tags from key_value_pairs
+                    tags = ", ".join(row.key_value_pairs.keys()) if row.key_value_pairs else ""
+                    self.db_structures_table.setItem(i, 3, QTableWidgetItem(tags))
+            else:
+                self.db_status_label.setText("ℹ️ Database is empty. Save structures to start building your library.")
+                self.db_status_label.setStyleSheet("color: blue;")
+                self.db_structures_table.setRowCount(0)
+                
+        except Exception as e:
+            self.db_status_label.setText(f"❌ Error reading database: {e}")
+            self.db_status_label.setStyleSheet("color: red;")
+            self.db_structures_table.setRowCount(0)
+    
+    def _load_from_database(self):
+        """Load a structure from the database."""
+        if not ASE_DB_AVAILABLE:
+            return
+        
+        selected_rows = self.db_structures_table.selectedItems()
+        if not selected_rows:
+            QMessageBox.warning(self, "Warning", "Please select a structure to load")
+            return
+        
+        # Get the ID from the first column of the selected row
+        selected_row = self.db_structures_table.currentRow()
+        id_item = self.db_structures_table.item(selected_row, 0)
+        if not id_item:
+            return
+        
+        try:
+            structure_id = int(id_item.text())
+        except ValueError:
+            QMessageBox.warning(self, "Warning", "Invalid structure ID")
+            return
+        
+        db_path = os.path.abspath(os.path.expanduser(self.db_path_edit.text().strip()))
+        
+        try:
+            db = ase_db_connect(db_path)
+            row = db.get(id=structure_id)
+            atoms = row.toatoms()
+            
+            self._set_structure(atoms, f"Database: ID {structure_id}")
+            
+            self.db_load_result.setText(f"✅ Loaded structure ID {structure_id}: {atoms.get_chemical_formula()}")
+            self.db_load_result.setStyleSheet("color: green;")
+            self.results_label.setText(f"✅ Loaded from database: {atoms.get_chemical_formula()}")
+            self.results_label.setStyleSheet("color: green;")
+            
+        except Exception as e:
+            self.db_load_result.setText(f"❌ Error loading structure: {e}")
+            self.db_load_result.setStyleSheet("color: red;")
+            QMessageBox.critical(self, "Error", f"Error loading structure:\n{e}")
+    
+    def _save_to_database(self):
+        """Save the current structure to the database."""
+        if not ASE_DB_AVAILABLE:
+            return
+        
+        atoms = self.session_state.get('current_structure')
+        if atoms is None:
+            QMessageBox.warning(self, "Warning", "No structure loaded. Load a structure first before saving to database.")
+            return
+        
+        db_path = self.db_path_edit.text().strip()
+        if not db_path:
+            QMessageBox.warning(self, "Warning", "Please enter a database path")
+            return
+        
+        # Normalize the path
+        db_path = os.path.abspath(os.path.expanduser(db_path))
+        
+        try:
+            # Create database directory if it doesn't exist
+            db_dir = os.path.dirname(db_path)
+            if db_dir:
+                os.makedirs(db_dir, exist_ok=True)
+            
+            db = ase_db_connect(db_path)
+            
+            # Prepare key-value pairs
+            key_value_pairs = {}
+            
+            # Add name
+            save_name = self.db_save_name.text().strip()
+            if save_name:
+                key_value_pairs['name'] = save_name
+            
+            # Add source info
+            source = self.session_state.get('structure_source', '')
+            if source:
+                key_value_pairs['source'] = source
+            
+            # Parse and add tags
+            tags = self.db_save_tags.text().strip()
+            if tags:
+                for tag in tags.split(','):
+                    tag = tag.strip()
+                    if tag:
+                        key_value_pairs[tag] = True
+            
+            # Add description
+            description = self.db_save_description.toPlainText().strip()
+            if description:
+                key_value_pairs['description'] = description
+            
+            # Save to database
+            db.write(atoms, **key_value_pairs)
+            
+            self.db_save_status.setText(f"✅ Structure saved to database: {db_path}")
+            self.db_save_status.setStyleSheet("color: green;")
+            
+            QMessageBox.information(
+                self, "Success",
+                f"Structure saved to database!\n\n"
+                f"Formula: {atoms.get_chemical_formula()}\n"
+                f"Database: {db_path}\n\n"
+                "💡 Switch to 'Load from Database' to see the updated list."
+            )
+            
+            # Clear the form
+            self.db_save_name.clear()
+            self.db_save_tags.clear()
+            self.db_save_description.clear()
+            
+        except Exception as e:
+            self.db_save_status.setText(f"❌ Error saving to database: {e}")
+            self.db_save_status.setStyleSheet("color: red;")
+            QMessageBox.critical(self, "Error", f"Error saving to database:\n{e}\n\n{traceback.format_exc()}")

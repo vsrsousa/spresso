@@ -439,7 +439,12 @@ class SessionState:
         # Use session name for the filename, not the session ID
         session_name = self._state.get('session_name', 'Unnamed')
         # Sanitize filename: replace characters that are invalid in filenames
-        safe_filename = session_name.replace('/', '_').replace('\\', '_').replace(':', '_')
+        # Invalid chars on Windows: < > : " / \ | ? *
+        # Invalid chars on Unix: / and null
+        invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        safe_filename = session_name
+        for char in invalid_chars:
+            safe_filename = safe_filename.replace(char, '_')
         session_path = os.path.join(self._sessions_dir, f"{safe_filename}.json")
         
         # Prepare serializable state (exclude non-serializable objects)

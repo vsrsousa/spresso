@@ -214,6 +214,137 @@ class TestSessionPersistence:
             
             sessions = state.list_sessions()
             assert len(sessions) >= 2
+    
+    def test_get_sessions_dir(self):
+        """Test getting the sessions directory."""
+        from qtgui.main_app import SessionState
+        
+        # Reset singleton for testing
+        SessionState._instance = None
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state = SessionState()
+            state._sessions_dir = tmpdir
+            
+            assert state.get_sessions_dir() == tmpdir
+    
+    def test_list_session_files(self):
+        """Test listing session files from the filesystem."""
+        from qtgui.main_app import SessionState
+        
+        # Reset singleton for testing
+        SessionState._instance = None
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state = SessionState()
+            state._sessions_dir = tmpdir
+            
+            # Create some test session files with portable paths
+            session1_data = {'session_name': 'Test Session 1', 'working_directory': tempfile.gettempdir()}
+            session2_data = {'session_name': 'Test Session 2', 'working_directory': os.path.expanduser('~')}
+            
+            with open(os.path.join(tmpdir, 'session_one.json'), 'w') as f:
+                json.dump(session1_data, f)
+            
+            with open(os.path.join(tmpdir, 'session_two.json'), 'w') as f:
+                json.dump(session2_data, f)
+            
+            # Create sessions_index.json which should be ignored
+            with open(os.path.join(tmpdir, 'sessions_index.json'), 'w') as f:
+                json.dump({}, f)
+            
+            # List session files
+            session_files = state.list_session_files()
+            
+            # Should find 2 session files (excluding sessions_index.json)
+            assert len(session_files) == 2
+            
+            # Check that session names are extracted correctly
+            session_names = [s[1] for s in session_files]
+            assert 'Test Session 1' in session_names
+            assert 'Test Session 2' in session_names
+    
+    def test_list_session_files_empty_dir(self):
+        """Test listing session files in empty directory."""
+        from qtgui.main_app import SessionState
+        
+        # Reset singleton for testing
+        SessionState._instance = None
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state = SessionState()
+            state._sessions_dir = tmpdir
+            
+            session_files = state.list_session_files()
+            assert session_files == []
+    
+    def test_load_session_from_file(self):
+        """Test loading a session directly from a file."""
+        from qtgui.main_app import SessionState
+        
+        # Reset singleton for testing
+        SessionState._instance = None
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state = SessionState()
+            state._sessions_dir = tmpdir
+            
+            # Create a test session file
+            session_data = {
+                'session_name': 'Test Loaded Session',
+                'working_directory': '/test/dir',
+                'session_created': '2024-01-01T00:00:00',
+                'session_modified': '2024-01-01T00:00:00'
+            }
+            
+            session_file = os.path.join(tmpdir, 'test_session.json')
+            with open(session_file, 'w') as f:
+                json.dump(session_data, f)
+            
+            # Load the session
+            result = state.load_session_from_file(session_file)
+            
+            assert result is True
+            assert state.get_session_name() == 'Test Loaded Session'
+            assert state['working_directory'] == '/test/dir'
+            assert state.get_current_session_id() == 'test_session'
+    
+    def test_load_session_from_file_nonexistent(self):
+        """Test loading a session from a non-existent file."""
+        from qtgui.main_app import SessionState
+        
+        # Reset singleton for testing
+        SessionState._instance = None
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state = SessionState()
+            state._sessions_dir = tmpdir
+            
+            # Use a path within the temp directory that doesn't exist
+            nonexistent_path = os.path.join(tmpdir, 'nonexistent', 'file.json')
+            result = state.load_session_from_file(nonexistent_path)
+            
+            assert result is False
+    
+    def test_load_session_from_file_invalid_format(self):
+        """Test loading a session from a file with invalid format."""
+        from qtgui.main_app import SessionState
+        
+        # Reset singleton for testing
+        SessionState._instance = None
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state = SessionState()
+            state._sessions_dir = tmpdir
+            
+            # Create an invalid session file (not JSON)
+            session_file = os.path.join(tmpdir, 'invalid.json')
+            with open(session_file, 'w') as f:
+                f.write('not valid json')
+            
+            result = state.load_session_from_file(session_file)
+            
+            assert result is False
 
 
 class TestConfigurationDialog:

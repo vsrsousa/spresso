@@ -307,6 +307,46 @@ def test_load_session_preserves_name(mock_st, temp_session_dir):
     assert state['test_key'] == 'test_value'
 
 
+def test_restore_session_syncs_browser_path(mock_st):
+    """Test that restore_session syncs browser path with working_directory when missing."""
+    from gui.utils.session_manager import restore_session
+    
+    # Simulate an old session format that doesn't have the browser path key
+    old_session_state = {
+        'working_directory': '/home/user/project',
+        'workflow_config': {'ecutwfc': 50},
+        # Note: no 'workdir_browser_current_path' key
+    }
+    
+    # Restore the old session
+    restore_session(old_session_state, clear_first=True)
+    
+    # Verify that browser path was synced with working_directory
+    assert 'working_directory' in mock_st.session_state
+    assert mock_st.session_state['working_directory'] == '/home/user/project'
+    assert 'workdir_browser_current_path' in mock_st.session_state
+    assert mock_st.session_state['workdir_browser_current_path'] == '/home/user/project'
+
+
+def test_restore_session_preserves_separate_browser_path(mock_st):
+    """Test that restore_session preserves separate browser path when both are saved."""
+    from gui.utils.session_manager import restore_session
+    
+    # Session with both paths (possibly different if user was browsing)
+    session_state = {
+        'working_directory': '/home/user/project',
+        'workdir_browser_current_path': '/home/user/project/subdir',
+        'workflow_config': {'ecutwfc': 80},
+    }
+    
+    # Restore the session
+    restore_session(session_state, clear_first=True)
+    
+    # Verify both paths are preserved independently
+    assert mock_st.session_state['working_directory'] == '/home/user/project'
+    assert mock_st.session_state['workdir_browser_current_path'] == '/home/user/project/subdir'
+
+
 def test_save_load_structure(mock_st, temp_session_dir):
     """Test that ASE Atoms structures are properly saved and loaded."""
     try:

@@ -6,8 +6,6 @@ including ASE database operations for saving and loading structures.
 """
 
 import os
-import tempfile
-import traceback
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -777,4 +775,4 @@ class StructureViewerPage(QWidget):
         except Exception as e:
             self.db_save_status.setText(f"❌ Error saving to database: {e}")
             self.db_save_status.setStyleSheet("color: red;")
-            QMessageBox.critical(self, "Error", f"Error saving to database:\n{e}\n\n{traceback.format_exc()}")
+            QMessageBox.critical(self, "Error", f"Error saving to database:\n{e}")

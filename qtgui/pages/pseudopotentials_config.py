@@ -9,7 +9,6 @@ allowing users to:
 """
 
 import os
-import traceback
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -304,8 +303,9 @@ During calculations, xespresso automatically copies the needed pseudopotentials 
             if machines_list:
                 for machine in machines_list:
                     self.machine_combo.addItem(machine)
-        except Exception as e:
-            pass  # Silently ignore machine loading errors
+        except Exception:
+            # Machine loading is optional - user can still configure local pseudopotentials
+            self.machine_combo.clear()
     
     def _load_existing_configs(self):
         """Load existing pseudopotential configurations."""
@@ -410,8 +410,8 @@ During calculations, xespresso automatically copies the needed pseudopotentials 
             self.detection_status.setStyleSheet("color: red;")
             self.results_group.setVisible(True)
             
-            # Show traceback in message box
-            QMessageBox.critical(self, "Error", f"Error detecting pseudopotentials:\n{e}\n\n{traceback.format_exc()}")
+            # Show user-friendly error message (avoid exposing full traceback)
+            QMessageBox.critical(self, "Error", f"Error detecting pseudopotentials:\n{e}")
     
     def _show_detected_pseudos(self):
         """Display detected pseudopotentials."""

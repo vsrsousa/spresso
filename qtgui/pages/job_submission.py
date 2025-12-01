@@ -564,8 +564,8 @@ class JobSubmissionPage(QWidget):
                         'queue': queue,
                     }
                     
-                    # K-points: pass either kspacing OR kpts, never both (xespresso pattern)
-                    # xespresso's sort_qe_input treats these as mutually exclusive (lines 559-560 in xio.py)
+                    # K-points: pass either kspacing OR kpts, never both
+                    # Following xespresso's sort_qe_input pattern where these are mutually exclusive
                     if kspacing:
                         calc_kwargs['kspacing'] = kspacing
                     elif kpts:
@@ -793,11 +793,11 @@ Files created in: <code>{full_path}</code>
                 lines.append(f"module load {modules}")
             lines.append("")
         
-        # Environment setup (user can customize)
+        # Additional environment setup (user can customize)
         lines.append("# Additional environment setup (uncomment and modify as needed)")
         lines.append("# source /path/to/espresso/env.sh")
         if not modules:
-            lines.append("# module load quantum-espresso")
+            lines.append("# module load <your-quantum-espresso-module>")
         lines.append("")
         
         # Get launcher from machine configuration

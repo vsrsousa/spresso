@@ -24,6 +24,10 @@ try:
 except ImportError:
     XESPRESSO_AVAILABLE = False
 
+# ASE_ESPRESSO_COMMAND template for Quantum ESPRESSO execution
+# LAUNCHER, PACKAGE, PARALLEL, and PREFIX are placeholders replaced by xespresso
+ASE_ESPRESSO_COMMAND_TEMPLATE = "LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo"
+
 try:
     from ase import Atoms
     ASE_AVAILABLE = True
@@ -622,6 +626,39 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             else:
                 spin.setValue(0.0)
     
+    def _load_modules_from_codes(self, config):
+        """Load modules from codes configuration.
+        
+        Helper method to load modules for a specific machine and QE version
+        from the codes configuration JSON file.
+        
+        Args:
+            config: Configuration dictionary containing machine_name and qe_version
+            
+        Returns:
+            list: Modules to load, or None if not found
+        """
+        try:
+            if not XESPRESSO_AVAILABLE:
+                return None
+            
+            machine_name = config.get('machine_name')
+            qe_version = config.get('qe_version')
+            
+            if not machine_name or not qe_version:
+                return None
+            
+            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
+            
+            if codes and codes.versions and qe_version in codes.versions:
+                version_config = codes.versions[qe_version]
+                return version_config.get('modules')
+        except Exception:
+            # Silently fail - modules are optional
+            pass
+        
+        return None
+    
     def _get_config(self):
         """Get the current configuration as a dictionary."""
         config = {}
@@ -658,25 +695,10 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         config['qe_version'] = self.version_combo.currentText()
         config['selected_code'] = self.code_combo.currentText()
         
-        # Try to load modules from codes configuration
-        try:
-            if XESPRESSO_AVAILABLE:
-                from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
-                
-                machine_name = config['machine_name']
-                qe_version = config['qe_version']
-                
-                if machine_name and qe_version:
-                    codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
-                    
-                    if codes and codes.versions and qe_version in codes.versions:
-                        version_config = codes.versions[qe_version]
-                        # Store modules in config if they exist
-                        if version_config.get('modules'):
-                            config['modules'] = version_config['modules']
-        except Exception:
-            # Silently fail - modules are optional
-            pass
+        # Load modules from codes configuration
+        modules = self._load_modules_from_codes(config)
+        if modules:
+            config['modules'] = modules
         
         # Resources
         if self.adjust_resources_check.isChecked():
@@ -735,28 +757,12 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # 1. Set ASE_ESPRESSO_COMMAND environment variable (like Streamlit GUI does)
         # This tells xespresso's Espresso calculator how to run QE executables
         import os
-        os.environ['ASE_ESPRESSO_COMMAND'] = "LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo"
+        os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
         
         # 2. Load modules from codes configuration if available
-        try:
-            if XESPRESSO_AVAILABLE:
-                from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
-                
-                machine_name = config.get('machine_name')
-                qe_version = config.get('qe_version')
-                
-                if machine_name and qe_version:
-                    codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
-                    
-                    if codes and codes.versions and qe_version in codes.versions:
-                        version_config = codes.versions[qe_version]
-                        # Store modules in config so they can be used by scheduler/job_file
-                        if version_config.get('modules'):
-                            config['modules'] = version_config['modules']
-        except Exception as e:
-            # Log but don't fail if module loading fails
-            import logging
-            logging.warning(f"Could not load modules from codes config: {e}")
+        modules = self._load_modules_from_codes(config)
+        if modules:
+            config['modules'] = modules
         
         # Store config in session state
         self.session_state['workflow_config'] = config

@@ -80,7 +80,7 @@ class SessionState:
         'current_codes', 'selected_code_version', 'workflow_config',
         'working_directory', 'session_name', 'session_created',
         'session_modified', 'calc_machine', 'selected_machine',
-        'selected_qe_version', 'structure_source'
+        'selected_qe_version', 'structure_source', 'workflow_machine'
     }
     
     def __new__(cls):
@@ -1006,7 +1006,18 @@ Version: 1.2.0<br>
             self.statusbar.showMessage(f"Session renamed to: {name}")
     
     def _save_session(self):
-        """Save the current session."""
+        """Save the current session.
+        
+        First collects current state from all pages, then saves to disk.
+        """
+        # Collect current state from all pages before saving
+        for page in self.pages:
+            if hasattr(page, 'save_state'):
+                try:
+                    page.save_state()
+                except Exception as e:
+                    print(f"Warning: Could not save state from page: {e}")
+        
         self.session_state.save_session()
         self.statusbar.showMessage("Session saved")
     

@@ -214,6 +214,72 @@ class WorkflowBuilderPage(QWidget):
         
         scroll_layout.addWidget(pseudo_group)
         
+        # Magnetic Configuration (optional)
+        self.magnetic_group = QGroupBox("🧲 Magnetic Configuration (Optional)")
+        self.magnetic_group.setCheckable(True)
+        self.magnetic_group.setChecked(False)
+        magnetic_layout = QVBoxLayout(self.magnetic_group)
+        
+        magnetic_info = QLabel("""
+<p><b>Configure magnetic properties for spin-polarized calculations.</b></p>
+<p>Specify starting magnetization for each element. Values typically range from -1 to 1.</p>
+""")
+        magnetic_info.setTextFormat(Qt.RichText)
+        magnetic_info.setWordWrap(True)
+        magnetic_layout.addWidget(magnetic_info)
+        
+        # Preset selector
+        preset_layout = QHBoxLayout()
+        preset_layout.addWidget(QLabel("Preset:"))
+        self.magnetic_preset_combo = QComboBox()
+        self.magnetic_preset_combo.addItems(["Custom", "Ferromagnetic", "Antiferromagnetic"])
+        self.magnetic_preset_combo.currentTextChanged.connect(self._on_magnetic_preset_changed)
+        preset_layout.addWidget(self.magnetic_preset_combo)
+        magnetic_layout.addLayout(preset_layout)
+        
+        # Container for per-element magnetic inputs
+        self.magnetic_container = QWidget()
+        self.magnetic_container_layout = QFormLayout(self.magnetic_container)
+        magnetic_layout.addWidget(self.magnetic_container)
+        
+        # Store magnetic inputs
+        self.magnetic_edits = {}
+        
+        scroll_layout.addWidget(self.magnetic_group)
+        
+        # Hubbard (DFT+U) Configuration (optional)
+        self.hubbard_group = QGroupBox("⚛️ Hubbard (DFT+U) Configuration (Optional)")
+        self.hubbard_group.setCheckable(True)
+        self.hubbard_group.setChecked(False)
+        hubbard_layout = QVBoxLayout(self.hubbard_group)
+        
+        hubbard_info = QLabel("""
+<p><b>Configure Hubbard U corrections for strongly correlated systems.</b></p>
+<p>Specify U values (in eV) for transition metals and rare earths.</p>
+""")
+        hubbard_info.setTextFormat(Qt.RichText)
+        hubbard_info.setWordWrap(True)
+        hubbard_layout.addWidget(hubbard_info)
+        
+        # Hubbard format selector
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+        self.hubbard_format_combo = QComboBox()
+        self.hubbard_format_combo.addItems(["New (QE 7.x)", "Old (QE 6.x)"])
+        format_layout.addWidget(self.hubbard_format_combo)
+        hubbard_layout.addLayout(format_layout)
+        
+        # Container for per-element Hubbard inputs
+        self.hubbard_container = QWidget()
+        self.hubbard_container_layout = QFormLayout(self.hubbard_container)
+        hubbard_layout.addWidget(self.hubbard_container)
+        
+        # Store Hubbard inputs
+        self.hubbard_u_edits = {}
+        self.hubbard_orbital_edits = {}
+        
+        scroll_layout.addWidget(self.hubbard_group)
+        
         # Workflow-specific options
         self.relax_group = QGroupBox("🔄 Relaxation Options")
         relax_layout = QFormLayout(self.relax_group)
@@ -424,6 +490,105 @@ class WorkflowBuilderPage(QWidget):
                 edit.setPlaceholderText(f"e.g., {element}.UPF")
                 self.pseudo_edits[element] = edit
                 self.pseudo_container_layout.addRow(f"{element}:", edit)
+        
+        # Update magnetic inputs
+        self._update_magnetic_inputs(elements)
+        
+        # Update Hubbard inputs
+        self._update_hubbard_inputs(elements)
+    
+    def _update_magnetic_inputs(self, elements):
+        """Update magnetic configuration input fields for the given elements."""
+        # Clear existing inputs
+        while self.magnetic_container_layout.count():
+            item = self.magnetic_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        self.magnetic_edits = {}
+        
+        # Predefined magnetic moments for common elements
+        predefined_moments = {
+            'Fe': 2.2, 'Co': 1.7, 'Ni': 0.6, 'Mn': 5.0, 'Cr': 3.0,
+            'V': 2.0, 'Ti': 1.0, 'Gd': 7.0, 'Nd': 3.0, 'Sm': 5.0
+        }
+        
+        for element in sorted(elements):
+            edit = QDoubleSpinBox()
+            edit.setRange(-10.0, 10.0)
+            edit.setSingleStep(0.1)
+            edit.setDecimals(2)
+            # Set default value based on predefined moments or 0
+            default_val = predefined_moments.get(element, 0.0)
+            edit.setValue(default_val)
+            self.magnetic_edits[element] = edit
+            self.magnetic_container_layout.addRow(f"{element}:", edit)
+    
+    def _update_hubbard_inputs(self, elements):
+        """Update Hubbard U input fields for the given elements."""
+        # Clear existing inputs
+        while self.hubbard_container_layout.count():
+            item = self.hubbard_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        self.hubbard_u_edits = {}
+        self.hubbard_orbital_edits = {}
+        
+        # Common Hubbard U values and orbitals
+        common_hubbard = {
+            'Fe': (4.0, '3d'), 'Co': (3.5, '3d'), 'Ni': (3.0, '3d'),
+            'Mn': (4.0, '3d'), 'Cr': (3.5, '3d'), 'V': (3.0, '3d'),
+            'Ti': (2.5, '3d'), 'Cu': (4.0, '3d'), 'Zn': (3.0, '3d'),
+            'Ce': (4.5, '4f'), 'Nd': (5.0, '4f'), 'Gd': (6.0, '4f')
+        }
+        
+        for element in sorted(elements):
+            # Create a horizontal layout for each element
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # U value spinbox
+            u_edit = QDoubleSpinBox()
+            u_edit.setRange(0.0, 15.0)
+            u_edit.setSingleStep(0.5)
+            u_edit.setDecimals(1)
+            u_edit.setSuffix(" eV")
+            default_u, default_orbital = common_hubbard.get(element, (0.0, '3d'))
+            u_edit.setValue(default_u)
+            row_layout.addWidget(QLabel("U:"))
+            row_layout.addWidget(u_edit)
+            
+            # Orbital selector
+            orbital_edit = QComboBox()
+            orbital_edit.addItems(['3d', '4d', '5d', '4f', '5f', '2p', '3p'])
+            orbital_edit.setCurrentText(default_orbital)
+            row_layout.addWidget(QLabel("Orbital:"))
+            row_layout.addWidget(orbital_edit)
+            
+            self.hubbard_u_edits[element] = u_edit
+            self.hubbard_orbital_edits[element] = orbital_edit
+            self.hubbard_container_layout.addRow(f"{element}:", row_widget)
+    
+    def _on_magnetic_preset_changed(self, preset):
+        """Handle magnetic preset selection change."""
+        if preset == "Custom":
+            return
+        
+        # Predefined magnetic moments
+        predefined_moments = {
+            'Fe': 2.2, 'Co': 1.7, 'Ni': 0.6, 'Mn': 5.0, 'Cr': 3.0,
+            'V': 2.0, 'Ti': 1.0, 'Gd': 7.0, 'Nd': 3.0, 'Sm': 5.0
+        }
+        
+        for element, edit in self.magnetic_edits.items():
+            base_moment = predefined_moments.get(element, 0.0)
+            if preset == "Ferromagnetic":
+                edit.setValue(base_moment)
+            elif preset == "Antiferromagnetic":
+                # For AFM, we'd need to alternate signs - simplified here
+                edit.setValue(base_moment)
     
     def _get_config(self):
         """Get the current configuration as a dictionary."""
@@ -454,6 +619,25 @@ class WorkflowBuilderPage(QWidget):
                 pseudo = edit.text().strip()
                 if pseudo:
                     config['pseudopotentials'][element] = pseudo
+        
+        # Magnetic configuration (optional)
+        config['enable_magnetism'] = self.magnetic_group.isChecked()
+        if config['enable_magnetism']:
+            config['magnetic_config'] = {}
+            for element, edit in getattr(self, 'magnetic_edits', {}).items():
+                config['magnetic_config'][element] = edit.value()
+        
+        # Hubbard (DFT+U) configuration (optional)
+        config['enable_hubbard'] = self.hubbard_group.isChecked()
+        if config['enable_hubbard']:
+            config['hubbard_format'] = 'new' if 'New' in self.hubbard_format_combo.currentText() else 'old'
+            config['hubbard_u'] = {}
+            config['hubbard_orbital'] = {}
+            for element in getattr(self, 'hubbard_u_edits', {}):
+                u_value = self.hubbard_u_edits[element].value()
+                if u_value > 0:
+                    config['hubbard_u'][element] = u_value
+                    config['hubbard_orbital'][element] = self.hubbard_orbital_edits[element].currentText()
         
         # Machine
         config['machine_name'] = self.machine_combo.currentText()
@@ -529,3 +713,12 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
             self._update_structure_status()
         finally:
             self._loading = False
+    
+    def save_state(self):
+        """Save current page state to session state.
+        
+        This is called before the session is saved to disk to ensure
+        all current UI values are captured in the session state.
+        """
+        config = self._get_config()
+        self.session_state['workflow_config'] = config

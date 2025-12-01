@@ -585,3 +585,12 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
             self._update_structure_status()
         finally:
             self._loading = False
+    
+    def save_state(self):
+        """Save current page state to session state.
+        
+        This is called before the session is saved to disk to ensure
+        all current UI values are captured in the session state.
+        """
+        config = self._get_config()
+        self.session_state['workflow_config'] = config

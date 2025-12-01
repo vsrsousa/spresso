@@ -748,11 +748,48 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         finally:
             self._loading = False
     
+    def _should_save_config(self, config, existing_config):
+        """Determine if the current config should overwrite existing config.
+        
+        A configuration is considered valid if it has pseudopotentials defined,
+        which indicates the user has completed the "Prepare Calculation" step.
+        
+        Args:
+            config (dict): New configuration from current UI state
+            existing_config (dict or None): Existing workflow configuration in session state
+            
+        Returns:
+            bool: True if new config should be saved, False to keep existing
+            
+        Decision logic:
+            - If new config has pseudopotentials: Save (it's a valid prepared config)
+            - If no existing config: Save new config even if incomplete (preserve UI state)
+            - Otherwise: Keep existing (don't overwrite valid with incomplete)
+        """
+        # Always save if new config has pseudopotentials (indicates a prepared config)
+        if config.get('pseudopotentials'):
+            return True
+        
+        # If no existing config, save current state even if incomplete
+        # to preserve other fields like calc_type, ecutwfc, kpts, etc.
+        if not existing_config:
+            return True
+        
+        # Otherwise, keep existing config to avoid overwriting valid with incomplete
+        return False
+    
     def save_state(self):
         """Save current page state to session state.
         
         This is called before the session is saved to disk to ensure
         all current UI values are captured in the session state.
+        
+        Only save if there's a valid configuration with pseudopotentials,
+        otherwise keep the existing workflow_config to avoid overwriting
+        a valid configuration with an incomplete one.
         """
         config = self._get_config()
-        self.session_state['workflow_config'] = config
+        existing_config = self.session_state.get('workflow_config')
+        
+        if self._should_save_config(config, existing_config):
+            self.session_state['workflow_config'] = config

@@ -296,7 +296,15 @@ def restore_session(state: Dict[str, Any], clear_first: bool = True):
     if "_espresso_pseudo_path" in state:
         import os
         os.environ["ESPRESSO_PSEUDO"] = state["_espresso_pseudo_path"]
-
+    
+    # Ensure directory browser syncs with working_directory if it wasn't saved separately
+    # This handles sessions saved before the browser key was added
+    if 'working_directory' in st.session_state:
+        workdir = st.session_state['working_directory']
+        browser_key = 'workdir_browser_current_path'
+        # If browser key wasn't in the saved state or is empty, sync it
+        if browser_key not in state or not st.session_state.get(browser_key):
+            st.session_state[browser_key] = workdir
 
 def reset_session(keep_keys: Optional[List[str]] = None):
     """

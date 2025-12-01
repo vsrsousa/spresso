@@ -239,9 +239,9 @@ class TestSessionPersistence:
             state = SessionState()
             state._sessions_dir = tmpdir
             
-            # Create some test session files
-            session1_data = {'session_name': 'Test Session 1', 'working_directory': '/tmp'}
-            session2_data = {'session_name': 'Test Session 2', 'working_directory': '/home'}
+            # Create some test session files with portable paths
+            session1_data = {'session_name': 'Test Session 1', 'working_directory': tempfile.gettempdir()}
+            session2_data = {'session_name': 'Test Session 2', 'working_directory': os.path.expanduser('~')}
             
             with open(os.path.join(tmpdir, 'session_one.json'), 'w') as f:
                 json.dump(session1_data, f)
@@ -320,7 +320,9 @@ class TestSessionPersistence:
             state = SessionState()
             state._sessions_dir = tmpdir
             
-            result = state.load_session_from_file('/nonexistent/file.json')
+            # Use a path within the temp directory that doesn't exist
+            nonexistent_path = os.path.join(tmpdir, 'nonexistent', 'file.json')
+            result = state.load_session_from_file(nonexistent_path)
             
             assert result is False
     

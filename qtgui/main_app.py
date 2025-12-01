@@ -74,6 +74,15 @@ class SessionState:
     """
     _instance = None
     
+    # Allowed keys for session state validation (security measure)
+    ALLOWED_SESSION_KEYS = {
+        'current_structure', 'current_machine', 'current_machine_name',
+        'current_codes', 'selected_code_version', 'workflow_config',
+        'working_directory', 'session_name', 'session_created',
+        'session_modified', 'calc_machine', 'selected_machine',
+        'selected_qe_version', 'structure_source'
+    }
+    
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -246,7 +255,7 @@ class SessionState:
         Load a session directly from a file path.
         
         Args:
-            file_path: Path to the session JSON file
+            file_path (str): Path to the session JSON file
             
         Returns:
             bool: True if loading was successful
@@ -266,15 +275,6 @@ class SessionState:
         # Set new session ID
         self._current_session_id = session_id
         
-        # Define allowed keys for security validation
-        allowed_keys = {
-            'current_structure', 'current_machine', 'current_machine_name',
-            'current_codes', 'selected_code_version', 'workflow_config',
-            'working_directory', 'session_name', 'session_created',
-            'session_modified', 'calc_machine', 'selected_machine',
-            'selected_qe_version', 'structure_source'
-        }
-        
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 loaded_state = json.load(f)
@@ -287,7 +287,7 @@ class SessionState:
             self._initialize_defaults()
             for key, value in loaded_state.items():
                 # Only load keys that are strings and in allowed set
-                if isinstance(key, str) and key in allowed_keys:
+                if isinstance(key, str) and key in self.ALLOWED_SESSION_KEYS:
                     self._state[key] = value
             
             # Register in index if not already
@@ -453,15 +453,6 @@ class SessionState:
         """
         session_path = os.path.join(self._sessions_dir, f"{session_id}.json")
         
-        # Define allowed keys for security validation
-        allowed_keys = {
-            'current_structure', 'current_machine', 'current_machine_name',
-            'current_codes', 'selected_code_version', 'workflow_config',
-            'working_directory', 'session_name', 'session_created',
-            'session_modified', 'calc_machine', 'selected_machine',
-            'selected_qe_version', 'structure_source'
-        }
-        
         if os.path.exists(session_path):
             try:
                 with open(session_path, 'r', encoding='utf-8') as f:
@@ -475,7 +466,7 @@ class SessionState:
                 self._initialize_defaults()
                 for key, value in loaded_state.items():
                     # Only load keys that are strings and in allowed set
-                    if isinstance(key, str) and key in allowed_keys:
+                    if isinstance(key, str) and key in self.ALLOWED_SESSION_KEYS:
                         self._state[key] = value
                     
             except Exception as e:

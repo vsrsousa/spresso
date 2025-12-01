@@ -82,7 +82,10 @@ class SessionState:
             cls._instance._current_session_id = "default"
             cls._instance._sessions_dir = DEFAULT_SESSIONS_DIR
             cls._instance._listeners = []
-            cls._instance._notifying = False  # Guard against recursive notifications
+            # Guard against recursive notifications - this prevents infinite loops
+            # when listeners update state during notification, which would otherwise
+            # trigger another notification cycle
+            cls._instance._notifying = False
             cls._instance._initialize_defaults()
             cls._instance._load_sessions_index()
         return cls._instance

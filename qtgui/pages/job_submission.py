@@ -448,9 +448,16 @@ class JobSubmissionPage(QWidget):
             status_label.setStyleSheet("color: orange;")
             return
         
-        # Check configuration
-        if not config.get('pseudopotentials'):
+        # Check configuration - be more lenient to avoid false negatives after session save
+        # Only show "not configured" if config is completely empty or missing key fields
+        if not config or (not config.get('pseudopotentials') and not config.get('calc_type')):
             status_label.setText("⚠️ No calculation configured. Please configure in Calculation Setup.")
+            status_label.setStyleSheet("color: orange;")
+            return
+        
+        # Show warning if pseudopotentials are missing but other config exists
+        if not config.get('pseudopotentials'):
+            status_label.setText("⚠️ Pseudopotentials not configured. Please configure in Calculation Setup.")
             status_label.setStyleSheet("color: orange;")
             return
         
@@ -522,15 +529,22 @@ class JobSubmissionPage(QWidget):
                     from xespresso import Espresso
                     
                     # Build queue configuration for job_file generation
-                    queue = {
-                        'execution': 'local',
-                        'scheduler': 'direct',
-                    }
-                    
-                    # Add resources if configured
-                    if config.get('adjust_resources'):
-                        resources = config.get('resources', {})
-                        queue.update(resources)
+                    # First check if machine is configured and use it
+                    machine = self.session_state.get('calc_machine')
+                    if machine:
+                        # Machine object is configured, use it for queue
+                        queue = machine
+                    else:
+                        # Build queue configuration manually
+                        queue = {
+                            'execution': 'local',
+                            'scheduler': 'direct',
+                        }
+                        
+                        # Add resources if configured
+                        if config.get('adjust_resources'):
+                            resources = config.get('resources', {})
+                            queue.update(resources)
                     
                     # Create Espresso calculator
                     calc_kwargs = {
@@ -709,22 +723,25 @@ Files created in: <code>{full_path}</code>
         # Add magnetic configuration if enabled
         if config.get('enable_magnetism') and config.get('magnetic_config'):
             input_data['SYSTEM']['nspin'] = 2
-            input_data['INPUT_NTYP'] = {}
-            input_data['INPUT_NTYP']['starting_magnetization'] = {}
+            # Use lowercase 'input_ntyp' as required by xespresso
+            input_data['input_ntyp'] = {}
+            input_data['input_ntyp']['starting_magnetization'] = {}
             for element, mag_values in config.get('magnetic_config', {}).items():
                 if isinstance(mag_values, list):
-                    input_data['INPUT_NTYP']['starting_magnetization'][element] = mag_values[0]
+                    input_data['input_ntyp']['starting_magnetization'][element] = mag_values[0]
                 else:
-                    input_data['INPUT_NTYP']['starting_magnetization'][element] = mag_values
+                    input_data['input_ntyp']['starting_magnetization'][element] = mag_values
         
         # Add Hubbard U configuration if enabled
         if config.get('enable_hubbard') and config.get('hubbard_u'):
             input_data['SYSTEM']['lda_plus_u'] = True
-            input_data['INPUT_NTYP'] = input_data.get('INPUT_NTYP', {})
-            input_data['INPUT_NTYP']['Hubbard_U'] = {}
+            # Use lowercase 'input_ntyp' as required by xespresso
+            if 'input_ntyp' not in input_data:
+                input_data['input_ntyp'] = {}
+            input_data['input_ntyp']['Hubbard_U'] = {}
             for element, u_value in config.get('hubbard_u', {}).items():
                 if u_value > 0:
-                    input_data['INPUT_NTYP']['Hubbard_U'][element] = u_value
+                    input_data['input_ntyp']['Hubbard_U'][element] = u_value
         
         # Add relaxation parameters if doing relaxation
         if config.get('calc_type') in ('relax', 'vc-relax'):

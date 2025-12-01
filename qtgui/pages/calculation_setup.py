@@ -753,6 +753,17 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         
         This is called before the session is saved to disk to ensure
         all current UI values are captured in the session state.
+        
+        Only save if there's a valid configuration with pseudopotentials,
+        otherwise keep the existing workflow_config to avoid overwriting
+        a valid configuration with an incomplete one.
         """
         config = self._get_config()
-        self.session_state['workflow_config'] = config
+        
+        # Only save if we have pseudopotentials configured, otherwise keep existing config
+        # This prevents overwriting a valid prepared configuration with incomplete UI state
+        if config.get('pseudopotentials'):
+            self.session_state['workflow_config'] = config
+        elif not self.session_state.get('workflow_config'):
+            # No existing config and no valid new config, save anyway to track other fields
+            self.session_state['workflow_config'] = config

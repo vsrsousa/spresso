@@ -302,8 +302,8 @@ def restore_session(state: Dict[str, Any], clear_first: bool = True):
     if 'working_directory' in st.session_state:
         workdir = st.session_state['working_directory']
         browser_key = 'workdir_browser_current_path'
-        # If browser key wasn't in the saved state or is empty, sync it
-        if browser_key not in state or not st.session_state.get(browser_key):
+        # If browser key wasn't in the saved state or is empty/falsy, sync it
+        if browser_key not in state or not state.get(browser_key):
             st.session_state[browser_key] = workdir
 
 def reset_session(keep_keys: Optional[List[str]] = None):

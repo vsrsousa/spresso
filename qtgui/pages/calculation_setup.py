@@ -24,6 +24,10 @@ try:
 except ImportError:
     XESPRESSO_AVAILABLE = False
 
+# ASE_ESPRESSO_COMMAND template for Quantum ESPRESSO execution
+# LAUNCHER, PACKAGE, PARALLEL, and PREFIX are placeholders replaced by xespresso
+ASE_ESPRESSO_COMMAND_TEMPLATE = "LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo"
+
 try:
     from ase import Atoms
     ASE_AVAILABLE = True
@@ -622,6 +626,48 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             else:
                 spin.setValue(0.0)
     
+    def _load_modules_from_codes(self, config):
+        """Load modules from codes configuration.
+        
+        Helper method to load modules for a specific machine and QE version
+        from the codes configuration JSON file. This is used to automatically
+        include the correct module load commands in generated job scripts.
+        
+        Args:
+            config (dict): Configuration dictionary that must contain:
+                - machine_name (str): Name of the machine configuration
+                - qe_version (str): Quantum ESPRESSO version string (e.g., '7.2')
+                
+        Returns:
+            list or None: List of module names to load (e.g., ['quantum-espresso/7.2']),
+                         or None if modules not found or config is incomplete
+                         
+        Note:
+            This method gracefully handles missing xespresso, missing config files,
+            or incomplete config dictionaries by returning None. Modules are optional
+            for local execution but typically required for HPC environments.
+        """
+        try:
+            if not XESPRESSO_AVAILABLE:
+                return None
+            
+            machine_name = config.get('machine_name')
+            qe_version = config.get('qe_version')
+            
+            if not machine_name or not qe_version:
+                return None
+            
+            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
+            
+            if codes and codes.versions and qe_version in codes.versions:
+                version_config = codes.versions[qe_version]
+                return version_config.get('modules')
+        except Exception:
+            # Silently fail - modules are optional
+            pass
+        
+        return None
+    
     def _get_config(self):
         """Get the current configuration as a dictionary."""
         config = {}
@@ -657,6 +703,11 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         config['machine_name'] = self.machine_combo.currentText()
         config['qe_version'] = self.version_combo.currentText()
         config['selected_code'] = self.code_combo.currentText()
+        
+        # Load modules from codes configuration
+        modules = self._load_modules_from_codes(config)
+        if modules:
+            config['modules'] = modules
         
         # Resources
         if self.adjust_resources_check.isChecked():
@@ -711,6 +762,17 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             QMessageBox.warning(self, "Warning", "Please specify pseudopotentials for all elements")
             return
         
+        # Set up environment for Espresso calculator
+        # 1. Set ASE_ESPRESSO_COMMAND environment variable (like Streamlit GUI does)
+        # This tells xespresso's Espresso calculator how to run QE executables
+        import os
+        os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
+        
+        # 2. Load modules from codes configuration if available
+        modules = self._load_modules_from_codes(config)
+        if modules:
+            config['modules'] = modules
+        
         # Store config in session state
         self.session_state['workflow_config'] = config
         
@@ -745,8 +807,106 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         try:
             self._load_machines()
             self._update_structure_status()
+            # Restore UI state from saved configuration if exists
+            self._restore_config_to_ui()
         finally:
             self._loading = False
+    
+    def _restore_config_to_ui(self):
+        """Restore UI state from saved workflow_config in session state.
+        
+        This ensures that when a session is loaded, the magnetic and hubbard
+        checkboxes and other UI elements reflect the saved configuration,
+        allowing continued editing after session save/reload.
+        """
+        config = self.session_state.get('workflow_config')
+        if not config:
+            return
+        
+        # Restore magnetic configuration checkbox state
+        if config.get('enable_magnetism'):
+            self.magnetic_group.setChecked(True)
+            # Restore magnetic values if elements exist
+            if config.get('magnetic_config'):
+                for element, mag_value in config['magnetic_config'].items():
+                    if element in self.magnetic_edits:
+                        # mag_value might be a list from setup_magnetic_config
+                        value = mag_value[0] if isinstance(mag_value, list) else mag_value
+                        self.magnetic_edits[element].setValue(value)
+        
+        # Restore Hubbard configuration checkbox state
+        if config.get('enable_hubbard'):
+            self.hubbard_group.setChecked(True)
+            # Restore Hubbard U values if elements exist
+            if config.get('hubbard_u'):
+                for element, u_value in config['hubbard_u'].items():
+                    if element in self.hubbard_edits:
+                        self.hubbard_edits[element].setValue(u_value)
+            # Restore Hubbard format
+            if config.get('hubbard_format'):
+                format_str = "New (QE >= 7.0)" if config['hubbard_format'] == 'new' else "Old (QE < 7.0)"
+                idx = self.hubbard_format_combo.findText(format_str)
+                if idx >= 0:
+                    self.hubbard_format_combo.setCurrentIndex(idx)
+        
+        # Restore other configuration values
+        if config.get('calc_type'):
+            idx = self.calc_type_combo.findText(config['calc_type'])
+            if idx >= 0:
+                self.calc_type_combo.setCurrentIndex(idx)
+        
+        if config.get('label'):
+            self.label_edit.setText(config['label'])
+        
+        if 'ecutwfc' in config:
+            self.ecutwfc_spin.setValue(config['ecutwfc'])
+        
+        if 'ecutrho' in config:
+            self.ecutrho_spin.setValue(config['ecutrho'])
+        
+        if config.get('occupations'):
+            idx = self.occupations_combo.findText(config['occupations'])
+            if idx >= 0:
+                self.occupations_combo.setCurrentIndex(idx)
+        
+        if 'conv_thr' in config:
+            self.conv_thr_edit.setText(str(config['conv_thr']))
+        
+        # Restore smearing parameters
+        if config.get('smearing'):
+            idx = self.smearing_combo.findText(config['smearing'])
+            if idx >= 0:
+                self.smearing_combo.setCurrentIndex(idx)
+        
+        if 'degauss' in config:
+            self.degauss_spin.setValue(config['degauss'])
+        
+        # Restore k-points
+        if 'kspacing' in config:
+            self.kspacing_radio.setChecked(True)
+            self.kspacing_spin.setValue(config['kspacing'])
+        elif 'kpts' in config:
+            self.explicit_radio.setChecked(True)
+            kpts = config['kpts']
+            if isinstance(kpts, (list, tuple)) and len(kpts) == 3:
+                self.k1_spin.setValue(kpts[0])
+                self.k2_spin.setValue(kpts[1])
+                self.k3_spin.setValue(kpts[2])
+        
+        # Restore resources configuration
+        if config.get('adjust_resources'):
+            self.adjust_resources_check.setChecked(True)
+            if 'nprocs' in config:
+                self.nprocs_spin.setValue(config['nprocs'])
+            resources = config.get('resources', {})
+            if 'nodes' in resources:
+                self.nodes_spin.setValue(resources['nodes'])
+            if 'ntasks-per-node' in resources:
+                self.ntasks_spin.setValue(resources['ntasks-per-node'])
+            if 'time' in resources:
+                self.time_edit.setText(resources['time'])
+            if 'partition' in resources:
+                self.partition_edit.setText(resources['partition'])
     
     def _should_save_config(self, config, existing_config):
         """Determine if the current config should overwrite existing config.

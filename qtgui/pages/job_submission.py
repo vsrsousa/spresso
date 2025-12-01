@@ -523,6 +523,20 @@ class JobSubmissionPage(QWidget):
             kspacing = config.get('kspacing')
             kpts = config.get('kpts')
             
+            # Convert kspacing to kpts if kspacing is provided
+            # xespresso's build_kpts_str expects kspacing in units of (2π/Angstrom),
+            # but GUI provides it in physical units (1/Angstrom), so we need to convert
+            # using kpts_from_spacing which handles the 2π normalization
+            if kspacing and not kpts:
+                try:
+                    from xespresso import kpts_from_spacing
+                    kpts = kpts_from_spacing(atoms, kspacing)
+                    kspacing = None  # Clear kspacing since we converted to kpts
+                except ImportError:
+                    # Fallback: keep kspacing and let xespresso handle it
+                    # (though this may give incorrect k-points if kspacing is in physical units)
+                    pass
+            
             # Use xespresso's Espresso calculator for proper dry run
             if XESPRESSO_AVAILABLE:
                 try:
@@ -564,9 +578,10 @@ class JobSubmissionPage(QWidget):
                         'queue': queue,
                     }
                     
-                    if kspacing:
-                        calc_kwargs['kspacing'] = kspacing
-                    elif kpts:
+                    # K-points: Since kspacing is converted to kpts above, we only pass kpts
+                    # This avoids the 2π normalization issue where kspacing_to_grid expects
+                    # kspacing in units of (2π/Angstrom) but GUI provides it in (1/Angstrom)
+                    if kpts:
                         calc_kwargs['kpts'] = kpts
                     else:
                         calc_kwargs['kpts'] = (4, 4, 4)  # Default k-points
@@ -592,14 +607,12 @@ class JobSubmissionPage(QWidget):
                     import traceback
                     traceback.print_exc()
                     input_path = os.path.join(full_path, input_filename)
-                    # Pass either kspacing or kpts, not both
+                    # Since kspacing was already converted to kpts above, just pass kpts
                     write_kwargs = {
                         'input_data': input_data,
                         'pseudopotentials': config.get('pseudopotentials', {}),
                     }
-                    if kspacing:
-                        write_kwargs['kspacing'] = kspacing
-                    elif kpts:
+                    if kpts:
                         write_kwargs['kpts'] = kpts
                     write_espresso_in(input_path, atoms, **write_kwargs)
                     # Create job_file manually as fallback
@@ -780,18 +793,42 @@ Files created in: <code>{full_path}</code>
         lines.append(f"# Calculation: {config.get('calc_type', 'scf')}")
         lines.append("")
         
-        # Environment setup (user can customize)
-        lines.append("# Environment setup (uncomment and modify as needed)")
+        # Module loading from codes configuration
+        modules = config.get('modules')
+        if modules:
+            lines.append("# Load required modules")
+            if isinstance(modules, list):
+                for module in modules:
+                    lines.append(f"module load {module}")
+            else:
+                lines.append(f"module load {modules}")
+            lines.append("")
+        
+        # Additional environment setup (user can customize)
+        lines.append("# Additional environment setup (uncomment and modify as needed)")
         lines.append("# source /path/to/espresso/env.sh")
-        lines.append("# module load quantum-espresso")
+        if not modules:
+            lines.append("# module load <your-quantum-espresso-module>")
         lines.append("")
         
-        # Execution command
+        # Get launcher from machine configuration
+        launcher = ""
         nprocs = config.get('nprocs', 1)
-        if nprocs > 1:
-            lines.append(f"mpirun -np {nprocs} pw.x -in {prefix}.pwi > {prefix}.pwo")
-        else:
-            lines.append(f"pw.x -in {prefix}.pwi > {prefix}.pwo")
+        machine = self.session_state.get('calc_machine')
+        
+        if machine and hasattr(machine, 'launcher') and machine.launcher:
+            # Use launcher from machine config
+            launcher = machine.launcher
+            # Replace {nprocs} placeholder if present
+            if '{nprocs}' in launcher:
+                launcher = launcher.replace('{nprocs}', str(nprocs))
+            launcher = launcher + " "
+        elif nprocs > 1:
+            # Fallback to default mpirun launcher
+            launcher = f"mpirun -np {nprocs} "
+        
+        # Execution command
+        lines.append(f"{launcher}pw.x -in {prefix}.pwi > {prefix}.pwo")
         lines.append("")
         
         # Write the job file

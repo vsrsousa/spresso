@@ -533,7 +533,15 @@ class JobSubmissionPage(QWidget):
                     machine = self.session_state.get('calc_machine')
                     if machine:
                         # Machine object is configured, convert to queue dict using to_queue()
-                        queue = machine.to_queue()
+                        try:
+                            queue = machine.to_queue()
+                        except (AttributeError, TypeError) as e:
+                            # Fallback if machine doesn't have to_queue() or it fails
+                            print(f"Warning: Could not convert machine to queue: {e}")
+                            queue = {
+                                'execution': 'local',
+                                'scheduler': 'direct',
+                            }
                     else:
                         # Build queue configuration manually
                         queue = {

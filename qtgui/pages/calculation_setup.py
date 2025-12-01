@@ -748,6 +748,28 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         finally:
             self._loading = False
     
+    def _should_save_config(self, config, existing_config):
+        """Determine if the current config should overwrite existing config.
+        
+        Args:
+            config: New configuration from current UI state
+            existing_config: Existing workflow configuration in session state
+            
+        Returns:
+            bool: True if new config should be saved, False to keep existing
+        """
+        # Always save if new config has pseudopotentials (valid and complete)
+        if config.get('pseudopotentials'):
+            return True
+        
+        # If no existing config, save current state even if incomplete
+        # to preserve other fields like calc_type, ecutwfc, kpts, etc.
+        if not existing_config:
+            return True
+        
+        # Otherwise, keep existing config to avoid overwriting valid with incomplete
+        return False
+    
     def save_state(self):
         """Save current page state to session state.
         
@@ -759,12 +781,7 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         a valid configuration with an incomplete one.
         """
         config = self._get_config()
+        existing_config = self.session_state.get('workflow_config')
         
-        # Only save if we have pseudopotentials configured, otherwise keep existing config
-        # This prevents overwriting a valid prepared configuration with incomplete UI state
-        if config.get('pseudopotentials'):
-            self.session_state['workflow_config'] = config
-        elif not self.session_state.get('workflow_config'):
-            # No existing config and no valid new config, save current state anyway
-            # to preserve other fields like calc_type, ecutwfc, kpts, etc.
+        if self._should_save_config(config, existing_config):
             self.session_state['workflow_config'] = config

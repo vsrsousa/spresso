@@ -751,12 +751,20 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
     def _should_save_config(self, config, existing_config):
         """Determine if the current config should overwrite existing config.
         
+        A configuration is considered valid if it has pseudopotentials defined,
+        which indicates the user has completed the "Prepare Calculation" step.
+        
         Args:
-            config: New configuration from current UI state
-            existing_config: Existing workflow configuration in session state
+            config (dict): New configuration from current UI state
+            existing_config (dict or None): Existing workflow configuration in session state
             
         Returns:
             bool: True if new config should be saved, False to keep existing
+            
+        Decision logic:
+            - If new config has pseudopotentials: Save (it's a valid prepared config)
+            - If no existing config: Save new config even if incomplete (preserve UI state)
+            - Otherwise: Keep existing (don't overwrite valid with incomplete)
         """
         # Always save if new config has pseudopotentials (indicates a prepared config)
         if config.get('pseudopotentials'):

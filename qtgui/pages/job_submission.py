@@ -537,7 +537,9 @@ class JobSubmissionPage(QWidget):
                             queue = machine.to_queue()
                         except (AttributeError, TypeError) as e:
                             # Fallback if machine doesn't have to_queue() or it fails
-                            print(f"Warning: Could not convert machine to queue: {e}")
+                            # Log error for debugging but don't crash - use default queue
+                            import logging
+                            logging.warning(f"Could not convert machine to queue: {e}. Using default local queue.")
                             queue = {
                                 'execution': 'local',
                                 'scheduler': 'direct',

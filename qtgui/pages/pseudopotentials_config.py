@@ -85,7 +85,7 @@ During calculations, xespresso automatically copies the needed pseudopotentials 
         info_label.setTextFormat(Qt.RichText)
         info_label.setWordWrap(True)
         info_label.setOpenExternalLinks(True)
-        info_label.setStyleSheet("background-color: #e7f3ff; padding: 10px; border-radius: 5px;")
+        info_label.setStyleSheet("background-color: #e7f3ff; color: #1a1a1a; padding: 10px; border-radius: 5px;")
         scroll_layout.addWidget(info_label)
         
         if not XESPRESSO_AVAILABLE:

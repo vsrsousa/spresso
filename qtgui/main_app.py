@@ -425,8 +425,8 @@ class MainWindow(QMainWindow):
         # Connect session state listener for UI updates
         self.session_state.add_listener(self._on_session_changed)
         
-        # Select default page (Structure Viewer)
-        self.nav_list.setCurrentRow(0)  # Now index 0 is Structure Viewer
+        # Select default page (Structure)
+        self.nav_list.setCurrentRow(0)  # Now index 0 is Structure
     
     def _setup_ui(self):
         """Setup the main user interface."""
@@ -551,7 +551,7 @@ class MainWindow(QMainWindow):
         
         self.nav_list = QListWidget()
         nav_items = [
-            "🔬 Structure Viewer",
+            "🔬 Structure",
             "📊 Calculation Setup",
             "🔄 Workflow Builder",
             "🚀 Job Submission",
@@ -635,7 +635,7 @@ Version: 1.2.0<br>
         
         # Navigate menu items
         nav_actions = [
-            ("Structure Viewer", "Ctrl+1"),
+            ("Structure", "Ctrl+1"),
             ("Calculation Setup", "Ctrl+2"),
             ("Workflow Builder", "Ctrl+3"),
             ("Job Submission", "Ctrl+4"),
@@ -679,6 +679,25 @@ Version: 1.2.0<br>
         save_action.setToolTip("Save current session")
         save_action.triggered.connect(self._save_session)
         toolbar.addAction(save_action)
+        
+        # Add a load session button
+        load_action = QAction("📂 Load Session", self)
+        load_action.setToolTip("Load a saved session")
+        load_action.triggered.connect(self._load_session_dialog)
+        toolbar.addAction(load_action)
+        
+        # Spacer to push quit button to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
+        from PySide6.QtWidgets import QSizePolicy
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        toolbar.addWidget(spacer)
+        
+        # Quit button at the end
+        quit_action = QAction("🚪 Quit", self)
+        quit_action.setToolTip("Quit the application")
+        quit_action.triggered.connect(self.close)
+        toolbar.addAction(quit_action)
     
     def _setup_statusbar(self):
         """Setup the status bar."""
@@ -788,7 +807,7 @@ Version: 1.2.0<br>
         
         # Update status bar
         page_names = [
-            "Structure Viewer",
+            "Structure",
             "Calculation Setup",
             "Workflow Builder",
             "Job Submission",
@@ -853,6 +872,55 @@ Version: 1.2.0<br>
         """Save the current session."""
         self.session_state.save_session()
         self.statusbar.showMessage("Session saved")
+    
+    def _load_session_dialog(self):
+        """Open a dialog to load a saved session."""
+        sessions = self.session_state.list_sessions()
+        
+        if not sessions:
+            QMessageBox.information(
+                self,
+                "No Saved Sessions",
+                "No saved sessions found. Create and save a session first."
+            )
+            return
+        
+        # Build list of session names
+        session_names = []
+        session_ids = []
+        for session_id, info in sessions.items():
+            name = info.get('name', session_id)
+            session_names.append(f"{name} (ID: {session_id})")
+            session_ids.append(session_id)
+        
+        # Show selection dialog
+        from PySide6.QtWidgets import QInputDialog
+        selected, ok = QInputDialog.getItem(
+            self,
+            "Load Session",
+            "Select a session to load:",
+            session_names,
+            0,  # Default index
+            False  # Not editable
+        )
+        
+        if ok and selected:
+            # Find the selected session ID
+            idx = session_names.index(selected)
+            session_id = session_ids[idx]
+            
+            if self.session_state.switch_session(session_id):
+                # Update the working directory label
+                self.workdir_label.setText(self.session_state.get('working_directory', '~'))
+                self._refresh_session_list()
+                self._on_session_changed()
+                self.statusbar.showMessage(f"Loaded session: {selected}")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Error",
+                    f"Could not load session: {selected}"
+                )
     
     def _show_about(self):
         """Show about dialog."""

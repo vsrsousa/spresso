@@ -758,7 +758,7 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         Returns:
             bool: True if new config should be saved, False to keep existing
         """
-        # Always save if new config has pseudopotentials (valid and complete)
+        # Always save if new config has pseudopotentials (indicates a prepared config)
         if config.get('pseudopotentials'):
             return True
         

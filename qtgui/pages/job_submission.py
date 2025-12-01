@@ -705,6 +705,11 @@ Files created in: <code>{full_path}</code>
         Returns:
             dict: Input data dictionary formatted for xespresso's write_espresso_in
         """
+        def ensure_input_ntyp(input_data):
+            """Ensure input_ntyp key exists in input_data."""
+            if 'input_ntyp' not in input_data:
+                input_data['input_ntyp'] = {}
+        
         input_data = {
             'CONTROL': {
                 'calculation': config.get('calc_type', 'scf'),
@@ -732,8 +737,7 @@ Files created in: <code>{full_path}</code>
         if config.get('enable_magnetism') and config.get('magnetic_config'):
             input_data['SYSTEM']['nspin'] = 2
             # Use lowercase 'input_ntyp' as required by xespresso
-            if 'input_ntyp' not in input_data:
-                input_data['input_ntyp'] = {}
+            ensure_input_ntyp(input_data)
             input_data['input_ntyp']['starting_magnetization'] = {}
             for element, mag_values in config.get('magnetic_config', {}).items():
                 if isinstance(mag_values, list):
@@ -745,8 +749,7 @@ Files created in: <code>{full_path}</code>
         if config.get('enable_hubbard') and config.get('hubbard_u'):
             input_data['SYSTEM']['lda_plus_u'] = True
             # Use lowercase 'input_ntyp' as required by xespresso
-            if 'input_ntyp' not in input_data:
-                input_data['input_ntyp'] = {}
+            ensure_input_ntyp(input_data)
             input_data['input_ntyp']['Hubbard_U'] = {}
             for element, u_value in config.get('hubbard_u', {}).items():
                 if u_value > 0:

@@ -197,6 +197,116 @@ class SessionState:
         """
         return dict(self._sessions)
     
+    def get_sessions_dir(self):
+        """
+        Get the directory where sessions are stored.
+        
+        Returns:
+            str: Path to the sessions directory
+        """
+        return self._sessions_dir
+    
+    def list_session_files(self):
+        """
+        List all session JSON files in the sessions directory.
+        
+        This scans the actual filesystem rather than relying on the index,
+        ensuring all saved sessions are discoverable.
+        
+        Returns:
+            list: List of tuples (session_id, session_name, file_path)
+        """
+        sessions = []
+        if not os.path.isdir(self._sessions_dir):
+            return sessions
+        
+        for filename in os.listdir(self._sessions_dir):
+            if filename.endswith('.json') and filename != 'sessions_index.json':
+                file_path = os.path.join(self._sessions_dir, filename)
+                session_id = filename[:-5]  # Remove .json extension
+                
+                # Try to read the session name from the file
+                session_name = session_id
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if isinstance(data, dict) and 'session_name' in data:
+                            session_name = data['session_name']
+                except Exception:
+                    pass
+                
+                sessions.append((session_id, session_name, file_path))
+        
+        # Sort by session name
+        sessions.sort(key=lambda x: x[1].lower())
+        return sessions
+    
+    def load_session_from_file(self, file_path):
+        """
+        Load a session directly from a file path.
+        
+        Args:
+            file_path: Path to the session JSON file
+            
+        Returns:
+            bool: True if loading was successful
+        """
+        if not os.path.exists(file_path):
+            return False
+        
+        # Extract session_id from filename
+        filename = os.path.basename(file_path)
+        if not filename.endswith('.json'):
+            return False
+        session_id = filename[:-5]
+        
+        # Save current session first
+        self.save_session()
+        
+        # Set new session ID
+        self._current_session_id = session_id
+        
+        # Define allowed keys for security validation
+        allowed_keys = {
+            'current_structure', 'current_machine', 'current_machine_name',
+            'current_codes', 'selected_code_version', 'workflow_config',
+            'working_directory', 'session_name', 'session_created',
+            'session_modified', 'calc_machine', 'selected_machine',
+            'selected_qe_version', 'structure_source'
+        }
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                loaded_state = json.load(f)
+            
+            # Validate loaded data is a dictionary
+            if not isinstance(loaded_state, dict):
+                raise ValueError("Invalid session data format")
+            
+            # Initialize defaults first, then override with validated values
+            self._initialize_defaults()
+            for key, value in loaded_state.items():
+                # Only load keys that are strings and in allowed set
+                if isinstance(key, str) and key in allowed_keys:
+                    self._state[key] = value
+            
+            # Register in index if not already
+            if session_id not in self._sessions:
+                self._sessions[session_id] = {
+                    'name': self._state.get('session_name', session_id),
+                    'created': self._state.get('session_created', ''),
+                    'modified': self._state.get('session_modified', '')
+                }
+                self._save_sessions_index()
+            
+            self._notify_listeners()
+            return True
+            
+        except Exception as e:
+            print(f"Warning: Could not load session from file: {e}")
+            self._initialize_defaults()
+            return False
+    
     def get_current_session_id(self):
         """Get the ID of the current session."""
         return self._current_session_id
@@ -876,52 +986,89 @@ Version: 1.2.0<br>
         self.statusbar.showMessage("Session saved")
     
     def _load_session_dialog(self):
-        """Open a dialog to load a saved session."""
-        sessions = self.session_state.list_sessions()
+        """Open a dialog to load a saved session from the sessions directory."""
+        sessions_dir = self.session_state.get_sessions_dir()
         
-        if not sessions:
-            QMessageBox.information(
+        # Ensure sessions directory exists
+        os.makedirs(sessions_dir, exist_ok=True)
+        
+        # Get list of session files from the actual filesystem
+        session_files = self.session_state.list_session_files()
+        
+        if not session_files:
+            # If no sessions found, offer to open file dialog anyway
+            reply = QMessageBox.question(
                 self,
                 "No Saved Sessions",
-                "No saved sessions found. Create and save a session first."
+                f"No saved sessions found in:\n{sessions_dir}\n\n"
+                "Would you like to browse for a session file?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
             )
-            return
+            if reply == QMessageBox.No:
+                return
+            # Fall through to file dialog
+        else:
+            # Build list of session names for selection
+            session_items = []
+            session_paths = {}
+            for session_id, session_name, file_path in session_files:
+                display_name = f"{session_name} ({session_id})"
+                session_items.append(display_name)
+                session_paths[display_name] = file_path
+            
+            # Show selection dialog with option to browse
+            session_items.append("--- Browse for other file... ---")
+            
+            from PySide6.QtWidgets import QInputDialog
+            selected, ok = QInputDialog.getItem(
+                self,
+                "Load Session",
+                f"Sessions directory: {sessions_dir}\n\nSelect a session to load:",
+                session_items,
+                0,  # Default index
+                False  # Not editable
+            )
+            
+            if not ok:
+                return
+            
+            if selected != "--- Browse for other file... ---":
+                # Load the selected session file
+                file_path = session_paths[selected]
+                if self.session_state.load_session_from_file(file_path):
+                    self.workdir_label.setText(self.session_state.get('working_directory', '~'))
+                    self._refresh_session_list()
+                    self._on_session_changed()
+                    self.statusbar.showMessage(f"Loaded session: {selected}")
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Error",
+                        f"Could not load session: {selected}"
+                    )
+                return
         
-        # Build list of session names
-        session_names = []
-        session_ids = []
-        for session_id, info in sessions.items():
-            name = info.get('name', session_id)
-            session_names.append(f"{name} (ID: {session_id})")
-            session_ids.append(session_id)
-        
-        # Show selection dialog
-        from PySide6.QtWidgets import QInputDialog
-        selected, ok = QInputDialog.getItem(
+        # Open file dialog starting in sessions directory
+        file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Load Session",
-            "Select a session to load:",
-            session_names,
-            0,  # Default index
-            False  # Not editable
+            "Load Session File",
+            sessions_dir,
+            "Session Files (*.json);;All Files (*)"
         )
         
-        if ok and selected:
-            # Find the selected session ID
-            idx = session_names.index(selected)
-            session_id = session_ids[idx]
-            
-            if self.session_state.switch_session(session_id):
-                # Update the working directory label
+        if file_path:
+            if self.session_state.load_session_from_file(file_path):
                 self.workdir_label.setText(self.session_state.get('working_directory', '~'))
                 self._refresh_session_list()
                 self._on_session_changed()
-                self.statusbar.showMessage(f"Loaded session: {selected}")
+                session_name = self.session_state.get_session_name()
+                self.statusbar.showMessage(f"Loaded session: {session_name}")
             else:
                 QMessageBox.warning(
                     self,
                     "Error",
-                    f"Could not load session: {selected}"
+                    f"Could not load session from file:\n{file_path}"
                 )
     
     def _show_about(self):

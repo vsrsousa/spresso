@@ -200,7 +200,9 @@ class TestSessionPersistence:
         
         with tempfile.TemporaryDirectory() as tmpdir:
             state = SessionState()
+            # Set the sessions dir and clear existing sessions loaded from default
             state._sessions_dir = tmpdir
+            state._sessions = {}
             
             # Initially empty
             sessions = state.list_sessions()

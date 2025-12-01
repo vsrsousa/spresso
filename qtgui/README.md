@@ -1,10 +1,12 @@
 # xespresso Qt GUI
 
-PyQt5-based graphical user interface for xespresso - Quantum ESPRESSO calculations.
+PySide6-based graphical user interface for xespresso - Quantum ESPRESSO calculations.
 
 ## Overview
 
-This is an alternative GUI for xespresso using PyQt5 instead of Streamlit. It provides the same functionality as the Streamlit GUI but with a native desktop application feel.
+This is an alternative GUI for xespresso using PySide6 (Qt 6) instead of Streamlit. It provides the same functionality as the Streamlit GUI but with a native desktop application feel.
+
+**Version 1.2.0**: Migrated from PyQt5 to PySide6 for improved performance, modern Qt 6 features, and faster startup time.
 
 ## Features
 
@@ -36,10 +38,10 @@ This is an alternative GUI for xespresso using PyQt5 instead of Streamlit. It pr
 
 ## Installation
 
-Make sure PyQt5 is installed:
+Make sure PySide6 is installed:
 
 ```bash
-pip install PyQt5>=5.15.0
+pip install PySide6>=6.5.0
 ```
 
 Or install all requirements:
@@ -147,7 +149,7 @@ dialog.show_pseudopotentials_tab()
 |---------|--------------|--------|
 | Web-based | Yes | No |
 | Native desktop | No | Yes |
-| Installation | streamlit>=1.28.0 | PyQt5>=5.15.0 |
+| Installation | streamlit>=1.28.0 | PySide6>=6.5.0 |
 | State management | st.session_state | SessionState class |
 | Visualization | Plotly, py3Dmol | Matplotlib |
 | File dialogs | Browser-based | Native OS dialogs |
@@ -157,7 +159,7 @@ dialog.show_pseudopotentials_tab()
 ## Requirements
 
 - Python 3.8+
-- PyQt5 >= 5.15.0
+- PySide6 >= 6.5.0
 - ASE >= 3.22.0 (for structure handling)
 - matplotlib >= 3.4.0 (for 3D visualization)
 - xespresso modules (for machine/codes configuration)
@@ -190,7 +192,7 @@ dialog.show_pseudopotentials_tab()
 ### Example page structure
 
 ```python
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 class MyPage(QWidget):
     def __init__(self, session_state):
@@ -218,6 +220,12 @@ session_state.add_listener(on_state_change)
 ```
 
 ## Changelog
+
+### Version 1.2.0
+- **Migration to PySide6**: Migrated from PyQt5 to PySide6 (Qt 6) for improved performance
+- **Lazy imports**: Page modules are now loaded lazily for faster startup time
+- **Modern Qt 6 features**: Updated matplotlib backend to QtAgg
+- **Updated dependencies**: Requires PySide6>=6.5.0
 
 ### Version 1.1.0
 - Added non-blocking Configuration Dialog

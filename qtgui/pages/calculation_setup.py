@@ -1,18 +1,18 @@
 """
-Calculation Setup Page for xespresso PyQt GUI.
+Calculation Setup Page for xespresso PySide6 GUI.
 
 This page is responsible for configuring calculations.
 """
 
 import os
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QDoubleSpinBox,
     QSpinBox, QCheckBox, QTextEdit, QRadioButton, QButtonGroup
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 try:
     from xespresso.machines.config.loader import (

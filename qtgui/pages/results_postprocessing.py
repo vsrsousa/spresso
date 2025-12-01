@@ -1,19 +1,19 @@
 """
-Results and Post-processing Page for xespresso PyQt GUI.
+Results and Post-processing Page for xespresso PySide6 GUI.
 
 This page displays calculation results and provides post-processing tools.
 """
 
 import os
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTextEdit,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 
 class ResultsPostprocessingPage(QWidget):

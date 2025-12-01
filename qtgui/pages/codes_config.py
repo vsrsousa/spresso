@@ -1,5 +1,5 @@
 """
-Codes Configuration Page for xespresso PyQt GUI.
+Codes Configuration Page for xespresso PySide6 GUI.
 
 This module handles the Quantum ESPRESSO codes configuration interface,
 allowing users to:
@@ -11,13 +11,13 @@ allowing users to:
 import os
 import traceback
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QTextEdit, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTableWidget, QTableWidgetItem,
-    QHeaderView
+    QHeaderView, QApplication
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 try:
     from xespresso.machines.config.loader import (
@@ -246,7 +246,6 @@ in the Calculation Setup or Workflow Builder pages.</p>
             self.results_label.setStyleSheet("color: blue;")
             
             # Process events to update UI
-            from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             
             modules_text = self.modules_edit.toPlainText()

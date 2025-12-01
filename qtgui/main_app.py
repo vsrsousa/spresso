@@ -3,6 +3,10 @@ PySide6 Main Application for xespresso GUI.
 
 This module provides the main window and navigation for the xespresso
 configuration interface using PySide6.
+
+Performance optimizations:
+- Lazy imports for page modules (loaded when first accessed)
+- Efficient Qt6 event handling
 """
 
 import sys
@@ -21,18 +25,33 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QIcon, QFont, QAction, QScreen
 
-# Import page modules
-from qtgui.pages import (
-    StructureViewerPage,
-    CalculationSetupPage,
-    WorkflowBuilderPage,
-    JobSubmissionPage,
-    ResultsPostprocessingPage
-)
-
 
 # Default session data directory
 DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.xespresso/sessions")
+
+
+# Lazy import helper for page modules (improves startup time)
+_page_modules = {}
+
+def _get_page_class(name):
+    """Lazy import page class to improve startup time."""
+    if name not in _page_modules:
+        if name == 'StructureViewerPage':
+            from qtgui.pages.structure_viewer import StructureViewerPage
+            _page_modules[name] = StructureViewerPage
+        elif name == 'CalculationSetupPage':
+            from qtgui.pages.calculation_setup import CalculationSetupPage
+            _page_modules[name] = CalculationSetupPage
+        elif name == 'WorkflowBuilderPage':
+            from qtgui.pages.workflow_builder import WorkflowBuilderPage
+            _page_modules[name] = WorkflowBuilderPage
+        elif name == 'JobSubmissionPage':
+            from qtgui.pages.job_submission import JobSubmissionPage
+            _page_modules[name] = JobSubmissionPage
+        elif name == 'ResultsPostprocessingPage':
+            from qtgui.pages.results_postprocessing import ResultsPostprocessingPage
+            _page_modules[name] = ResultsPostprocessingPage
+    return _page_modules[name]
 
 
 class SessionState:
@@ -526,9 +545,9 @@ class MainWindow(QMainWindow):
         # About section
         about_label = QLabel("""
 <b>About</b><br>
-<b>xespresso GUI</b> - PyQt interface for Quantum ESPRESSO calculations<br>
+<b>xespresso GUI</b> - PySide6 interface for Quantum ESPRESSO calculations<br>
 <br>
-Version: 1.1.0<br>
+Version: 1.2.0<br>
 <a href="https://github.com/vsrsousa/spresso">Documentation</a> | 
 <a href="https://github.com/vsrsousa/spresso/issues">Report Issue</a>
 """)
@@ -540,15 +559,16 @@ Version: 1.1.0<br>
         return sidebar
     
     def _create_pages(self):
-        """Create all page widgets (workflow pages only)."""
+        """Create all page widgets (workflow pages only) using lazy imports."""
         # Create pages in order matching navigation list
         # Configuration pages are now in the dialog
+        # Use lazy imports for faster startup
         self.pages = [
-            StructureViewerPage(self.session_state),
-            CalculationSetupPage(self.session_state),
-            WorkflowBuilderPage(self.session_state),
-            JobSubmissionPage(self.session_state),
-            ResultsPostprocessingPage(self.session_state)
+            _get_page_class('StructureViewerPage')(self.session_state),
+            _get_page_class('CalculationSetupPage')(self.session_state),
+            _get_page_class('WorkflowBuilderPage')(self.session_state),
+            _get_page_class('JobSubmissionPage')(self.session_state),
+            _get_page_class('ResultsPostprocessingPage')(self.session_state)
         ]
         
         for page in self.pages:

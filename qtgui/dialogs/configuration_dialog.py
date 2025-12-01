@@ -1,5 +1,5 @@
 """
-Configuration Dialog for xespresso PyQt GUI.
+Configuration Dialog for xespresso PySide6 GUI.
 
 This module provides a non-blocking dialog window that contains configuration
 options for Machines, Codes, and Pseudopotentials in a tabbed interface.
@@ -7,11 +7,11 @@ The dialog doesn't block the main application and allows users to configure
 while still interacting with the main window.
 """
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton,
     QLabel, QWidget
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from PySide6.QtCore import Qt, Signal
 
 
 class ConfigurationDialog(QDialog):
@@ -25,7 +25,7 @@ class ConfigurationDialog(QDialog):
         configuration_changed: Emitted when any configuration is saved.
     """
     
-    configuration_changed = pyqtSignal()
+    configuration_changed = Signal()
     
     def __init__(self, session_state, parent=None):
         """

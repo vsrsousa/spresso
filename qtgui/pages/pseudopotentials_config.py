@@ -1,18 +1,18 @@
 """
-Pseudopotentials Configuration Page for xespresso PyQt GUI.
+Pseudopotentials Configuration Page for xespresso PySide6 GUI.
 
 This module handles the pseudopotential configuration interface.
 """
 
 import os
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QFileDialog
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 try:
     from xespresso.pseudopotentials import (

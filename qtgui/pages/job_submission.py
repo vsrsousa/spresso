@@ -1,19 +1,19 @@
 """
-Job Submission Page for xespresso PyQt GUI.
+Job Submission Page for xespresso PySide6 GUI.
 
 This page handles file browsing, dry run, and job submission.
 """
 
 import os
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTextEdit,
     QTabWidget, QTreeWidget, QTreeWidgetItem, QFileDialog,
     QHeaderView, QSplitter
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 from qtgui.utils import validate_path_under_base, safe_makedirs
 

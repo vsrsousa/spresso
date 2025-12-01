@@ -36,21 +36,26 @@ _page_modules = {}
 def _get_page_class(name):
     """Lazy import page class to improve startup time."""
     if name not in _page_modules:
-        if name == 'StructureViewerPage':
-            from qtgui.pages.structure_viewer import StructureViewerPage
-            _page_modules[name] = StructureViewerPage
-        elif name == 'CalculationSetupPage':
-            from qtgui.pages.calculation_setup import CalculationSetupPage
-            _page_modules[name] = CalculationSetupPage
-        elif name == 'WorkflowBuilderPage':
-            from qtgui.pages.workflow_builder import WorkflowBuilderPage
-            _page_modules[name] = WorkflowBuilderPage
-        elif name == 'JobSubmissionPage':
-            from qtgui.pages.job_submission import JobSubmissionPage
-            _page_modules[name] = JobSubmissionPage
-        elif name == 'ResultsPostprocessingPage':
-            from qtgui.pages.results_postprocessing import ResultsPostprocessingPage
-            _page_modules[name] = ResultsPostprocessingPage
+        try:
+            if name == 'StructureViewerPage':
+                from qtgui.pages.structure_viewer import StructureViewerPage
+                _page_modules[name] = StructureViewerPage
+            elif name == 'CalculationSetupPage':
+                from qtgui.pages.calculation_setup import CalculationSetupPage
+                _page_modules[name] = CalculationSetupPage
+            elif name == 'WorkflowBuilderPage':
+                from qtgui.pages.workflow_builder import WorkflowBuilderPage
+                _page_modules[name] = WorkflowBuilderPage
+            elif name == 'JobSubmissionPage':
+                from qtgui.pages.job_submission import JobSubmissionPage
+                _page_modules[name] = JobSubmissionPage
+            elif name == 'ResultsPostprocessingPage':
+                from qtgui.pages.results_postprocessing import ResultsPostprocessingPage
+                _page_modules[name] = ResultsPostprocessingPage
+            else:
+                raise ValueError(f"Unknown page class: {name}")
+        except ImportError as e:
+            raise ImportError(f"Failed to import page module '{name}': {e}") from e
     return _page_modules[name]
 
 

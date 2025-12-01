@@ -26,7 +26,9 @@ except ImportError:
 
 try:
     import matplotlib
-    matplotlib.use('QtAgg')
+    # Only set backend if not already set to avoid conflicts
+    if matplotlib.get_backend() != 'QtAgg':
+        matplotlib.use('QtAgg')
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     import numpy as np

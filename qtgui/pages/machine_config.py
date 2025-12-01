@@ -58,6 +58,7 @@ class MachineConfigPage(QWidget):
     def __init__(self, session_state):
         super().__init__()
         self.session_state = session_state
+        self._loading = False  # Guard to prevent infinite loops
         self._setup_ui()
         self._load_machines_list()
     
@@ -301,13 +302,20 @@ in the Calculation Setup or Workflow Builder pages.</p>
             self._clear_form()
             return
         
+        # Prevent recursive updates
+        if self._loading:
+            return
+        
         try:
+            self._loading = True
             machine = load_machine(DEFAULT_CONFIG_PATH, machine_name, DEFAULT_MACHINES_DIR, return_object=True)
             self._populate_form(machine)
             self.session_state['current_machine'] = machine
             self.session_state['current_machine_name'] = machine_name
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Error loading machine: {e}")
+        finally:
+            self._loading = False
     
     def _populate_form(self, machine):
         """Populate the form with machine data."""
@@ -536,5 +544,12 @@ in the Calculation Setup or Workflow Builder pages.</p>
     
     def refresh(self):
         """Refresh the page."""
-        self._load_machines_list()
-        self._clear_form()
+        # Use loading guard to prevent infinite loops
+        if self._loading:
+            return
+        self._loading = True
+        try:
+            self._load_machines_list()
+            self._clear_form()
+        finally:
+            self._loading = False

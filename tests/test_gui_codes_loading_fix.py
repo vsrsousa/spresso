@@ -66,6 +66,8 @@ class TestGUICodesLoadingFix(unittest.TestCase):
                         "Second parameter should be 'codes_dir'")
         self.assertEqual(param_names[2], 'version',
                         "Third parameter should be 'version'")
+        self.assertEqual(param_names[3], 'verbose',
+                        "Fourth parameter should be 'verbose'")
 
     def test_load_codes_config_with_correct_parameters(self):
         """Test that load_codes_config works with correct parameters."""
@@ -95,6 +97,43 @@ class TestGUICodesLoadingFix(unittest.TestCase):
         
         self.assertIsNotNone(codes, "Codes config should be loaded successfully")
         self.assertEqual(codes.machine_name, self.test_machine_name)
+
+    def test_load_codes_config_verbose_parameter(self):
+        """Test that load_codes_config verbose parameter controls output."""
+        from xespresso.codes.manager import load_codes_config
+        import io
+        import sys
+        
+        # Test with verbose=False (default) - should not print anything
+        old_stdout = sys.stdout
+        sys.stdout = captured_output = io.StringIO()
+        
+        codes = load_codes_config(
+            machine_name=self.test_machine_name,
+            codes_dir=self.codes_dir,
+            verbose=False
+        )
+        
+        output = captured_output.getvalue()
+        sys.stdout = old_stdout
+        
+        self.assertEqual(output, "", "verbose=False should not produce any output")
+        self.assertIsNotNone(codes, "Codes config should be loaded successfully")
+        
+        # Test with verbose=True - should print messages
+        sys.stdout = captured_output = io.StringIO()
+        
+        codes = load_codes_config(
+            machine_name=self.test_machine_name,
+            codes_dir=self.codes_dir,
+            verbose=True
+        )
+        
+        output = captured_output.getvalue()
+        sys.stdout = old_stdout
+        
+        self.assertIn(self.test_machine_name, output, "verbose=True should print machine name")
+        self.assertIsNotNone(codes, "Codes config should be loaded successfully")
 
     def test_constants_are_available(self):
         """Test that DEFAULT_CODES_DIR is importable."""

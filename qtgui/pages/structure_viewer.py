@@ -43,6 +43,7 @@ class StructureViewerPage(QWidget):
     def __init__(self, session_state):
         super().__init__()
         self.session_state = session_state
+        self._loading = False  # Guard to prevent infinite loops
         self._setup_ui()
     
     def _setup_ui(self):
@@ -304,24 +305,32 @@ class StructureViewerPage(QWidget):
     
     def _set_structure(self, atoms, source):
         """Set the current structure."""
-        self.session_state['current_structure'] = atoms
-        self.session_state['structure_source'] = source
+        # Prevent recursive updates
+        if self._loading:
+            return
         
-        # Update UI
-        self.current_group.setVisible(True)
-        formula = atoms.get_chemical_formula()
-        natoms = len(atoms)
-        
-        self.structure_info_label.setText(f"✅ Structure loaded: {formula}")
-        self.formula_label.setText(f"<b>Formula:</b> {formula}")
-        self.natoms_label.setText(f"<b>Atoms:</b> {natoms}")
-        self.source_label.setText(f"<b>Source:</b> {source}")
-        
-        # Update structure info
-        self._update_structure_info(atoms)
-        
-        # Update visualization
-        self._refresh_visualization()
+        self._loading = True
+        try:
+            self.session_state['current_structure'] = atoms
+            self.session_state['structure_source'] = source
+            
+            # Update UI
+            self.current_group.setVisible(True)
+            formula = atoms.get_chemical_formula()
+            natoms = len(atoms)
+            
+            self.structure_info_label.setText(f"✅ Structure loaded: {formula}")
+            self.formula_label.setText(f"<b>Formula:</b> {formula}")
+            self.natoms_label.setText(f"<b>Atoms:</b> {natoms}")
+            self.source_label.setText(f"<b>Source:</b> {source}")
+            
+            # Update structure info
+            self._update_structure_info(atoms)
+            
+            # Update visualization
+            self._refresh_visualization()
+        finally:
+            self._loading = False
     
     def _update_structure_info(self, atoms):
         """Update structure information display."""
@@ -433,6 +442,26 @@ class StructureViewerPage(QWidget):
     
     def refresh(self):
         """Refresh the page."""
-        atoms = self.session_state.get('current_structure')
-        if atoms is not None:
-            self._set_structure(atoms, self.session_state.get('structure_source', 'Unknown'))
+        # Use loading guard to prevent infinite loops
+        if self._loading:
+            return
+        self._loading = True
+        try:
+            atoms = self.session_state.get('current_structure')
+            if atoms is not None:
+                # Don't call _set_structure as it would update session state again
+                # Just refresh the UI with existing structure
+                self.current_group.setVisible(True)
+                formula = atoms.get_chemical_formula()
+                natoms = len(atoms)
+                source = self.session_state.get('structure_source', 'Unknown')
+                
+                self.structure_info_label.setText(f"✅ Structure loaded: {formula}")
+                self.formula_label.setText(f"<b>Formula:</b> {formula}")
+                self.natoms_label.setText(f"<b>Atoms:</b> {natoms}")
+                self.source_label.setText(f"<b>Source:</b> {source}")
+                
+                self._update_structure_info(atoms)
+                self._refresh_visualization()
+        finally:
+            self._loading = False

@@ -26,7 +26,6 @@ except ImportError:
 
 try:
     from xespresso.xio import write_espresso_in
-    from xespresso.schedulers.direct import DirectScheduler
     XESPRESSO_AVAILABLE = True
 except ImportError:
     XESPRESSO_AVAILABLE = False
@@ -569,14 +568,16 @@ class JobSubmissionPage(QWidget):
                     import traceback
                     traceback.print_exc()
                     input_path = os.path.join(full_path, input_filename)
-                    write_espresso_in(
-                        input_path,
-                        atoms,
-                        input_data=input_data,
-                        pseudopotentials=config.get('pseudopotentials', {}),
-                        kspacing=kspacing,
-                        kpts=kpts
-                    )
+                    # Pass either kspacing or kpts, not both
+                    write_kwargs = {
+                        'input_data': input_data,
+                        'pseudopotentials': config.get('pseudopotentials', {}),
+                    }
+                    if kspacing:
+                        write_kwargs['kspacing'] = kspacing
+                    elif kpts:
+                        write_kwargs['kpts'] = kpts
+                    write_espresso_in(input_path, atoms, **write_kwargs)
                     # Create job_file manually as fallback
                     job_file_path = os.path.join(full_path, "job_file")
                     self._create_job_file(job_file_path, prefix, config)

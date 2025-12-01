@@ -215,8 +215,8 @@ class SessionState:
         Returns:
             str: ID of the new session
         """
-        # Generate unique session ID
-        session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Generate unique session ID using microseconds for uniqueness
+        session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         
         # Save current session first
         self.save_session()

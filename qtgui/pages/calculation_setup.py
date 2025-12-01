@@ -30,6 +30,13 @@ try:
 except ImportError:
     ASE_AVAILABLE = False
 
+# Import the pseudopotentials selector widget
+try:
+    from qtgui.utils.pseudopotentials_selector import PseudopotentialsSelectorWidget
+    PSEUDO_SELECTOR_AVAILABLE = True
+except ImportError:
+    PSEUDO_SELECTOR_AVAILABLE = False
+
 
 class CalculationSetupPage(QWidget):
     """Calculation setup page widget."""
@@ -213,13 +220,18 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         pseudo_group = QGroupBox("🔬 Pseudopotentials")
         pseudo_layout = QVBoxLayout(pseudo_group)
         
-        self.pseudo_info_label = QLabel("Load a structure to configure pseudopotentials")
-        pseudo_layout.addWidget(self.pseudo_info_label)
-        
-        # Container for element pseudopotential inputs
-        self.pseudo_container = QWidget()
-        self.pseudo_container_layout = QFormLayout(self.pseudo_container)
-        pseudo_layout.addWidget(self.pseudo_container)
+        if PSEUDO_SELECTOR_AVAILABLE:
+            # Use the advanced selector widget
+            self.pseudo_selector = PseudopotentialsSelectorWidget(self.session_state)
+            pseudo_layout.addWidget(self.pseudo_selector)
+        else:
+            # Fallback to simple manual inputs
+            self.pseudo_info_label = QLabel("Load a structure to configure pseudopotentials")
+            pseudo_layout.addWidget(self.pseudo_info_label)
+            
+            self.pseudo_container = QWidget()
+            self.pseudo_container_layout = QFormLayout(self.pseudo_container)
+            pseudo_layout.addWidget(self.pseudo_container)
         
         scroll_layout.addWidget(pseudo_group)
         
@@ -451,22 +463,27 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
     
     def _update_pseudo_inputs(self, atoms):
         """Update pseudopotential input fields for structure elements."""
-        # Clear existing inputs
-        while self.pseudo_container_layout.count():
-            item = self.pseudo_container_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
         elements = set(atoms.get_chemical_symbols())
-        self.pseudo_edits = {}
         
-        self.pseudo_info_label.setText(f"Configure pseudopotentials for: {', '.join(sorted(elements))}")
-        
-        for element in sorted(elements):
-            edit = QLineEdit()
-            edit.setPlaceholderText(f"e.g., {element}.UPF")
-            self.pseudo_edits[element] = edit
-            self.pseudo_container_layout.addRow(f"{element}:", edit)
+        if PSEUDO_SELECTOR_AVAILABLE and hasattr(self, 'pseudo_selector'):
+            # Use the advanced selector widget
+            self.pseudo_selector.set_elements(elements)
+        else:
+            # Fallback to simple manual inputs
+            while self.pseudo_container_layout.count():
+                item = self.pseudo_container_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            
+            self.pseudo_edits = {}
+            
+            self.pseudo_info_label.setText(f"Configure pseudopotentials for: {', '.join(sorted(elements))}")
+            
+            for element in sorted(elements):
+                edit = QLineEdit()
+                edit.setPlaceholderText(f"e.g., {element}.UPF")
+                self.pseudo_edits[element] = edit
+                self.pseudo_container_layout.addRow(f"{element}:", edit)
     
     def _get_config(self):
         """Get the current configuration as a dictionary."""
@@ -490,11 +507,14 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             config['kpts'] = (self.k1_spin.value(), self.k2_spin.value(), self.k3_spin.value())
         
         # Pseudopotentials
-        config['pseudopotentials'] = {}
-        for element, edit in getattr(self, 'pseudo_edits', {}).items():
-            pseudo = edit.text().strip()
-            if pseudo:
-                config['pseudopotentials'][element] = pseudo
+        if PSEUDO_SELECTOR_AVAILABLE and hasattr(self, 'pseudo_selector'):
+            config['pseudopotentials'] = self.pseudo_selector.get_pseudopotentials()
+        else:
+            config['pseudopotentials'] = {}
+            for element, edit in getattr(self, 'pseudo_edits', {}).items():
+                pseudo = edit.text().strip()
+                if pseudo:
+                    config['pseudopotentials'][element] = pseudo
         
         # Machine
         config['machine_name'] = self.machine_combo.currentText()

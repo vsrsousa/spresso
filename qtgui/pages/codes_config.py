@@ -81,7 +81,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
 """)
         info_label.setTextFormat(Qt.RichText)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("background-color: #e3f2fd; padding: 10px; border-radius: 5px;")
+        info_label.setStyleSheet("background-color: #e3f2fd; color: #1a1a1a; padding: 10px; border-radius: 5px;")
         scroll_layout.addWidget(info_label)
         
         if not XESPRESSO_AVAILABLE:
@@ -134,7 +134,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
 <p>Auto-detection may pick up compiler versions. It's recommended to specify the QE version explicitly!</p>
 """)
         tip_label.setTextFormat(Qt.RichText)
-        tip_label.setStyleSheet("background-color: #fff3e0; padding: 10px; border-radius: 5px;")
+        tip_label.setStyleSheet("background-color: #fff3e0; color: #1a1a1a; padding: 10px; border-radius: 5px;")
         detect_layout.addRow(tip_label)
         
         detect_btn = QPushButton("🔍 Auto-Detect Codes")

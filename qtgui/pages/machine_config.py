@@ -99,7 +99,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
 """)
         info_label.setTextFormat(Qt.RichText)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("background-color: #e3f2fd; padding: 10px; border-radius: 5px;")
+        info_label.setStyleSheet("background-color: #e3f2fd; color: #1a1a1a; padding: 10px; border-radius: 5px;")
         scroll_layout.addWidget(info_label)
         
         if not XESPRESSO_AVAILABLE:

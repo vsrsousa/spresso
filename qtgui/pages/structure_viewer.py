@@ -1,5 +1,5 @@
 """
-Structure Viewer Page for xespresso PyQt GUI.
+Structure Viewer Page for xespresso PySide6 GUI.
 
 This page handles loading and visualizing atomic structures.
 """
@@ -7,14 +7,14 @@ This page handles loading and visualizing atomic structures.
 import os
 import tempfile
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QFileDialog, QTabWidget, QTextEdit, QCheckBox,
     QDoubleSpinBox, QSpinBox, QSlider
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 try:
     from ase import io as ase_io
@@ -26,8 +26,10 @@ except ImportError:
 
 try:
     import matplotlib
-    matplotlib.use('Qt5Agg')
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    # Only set backend if not already set to avoid conflicts
+    if matplotlib.get_backend() != 'QtAgg':
+        matplotlib.use('QtAgg')
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
     import numpy as np
     MATPLOTLIB_AVAILABLE = True

@@ -1,5 +1,5 @@
 """
-GUI pages for the xespresso PyQt application.
+GUI pages for the xespresso PySide6 application.
 
 Each page module is responsible for rendering a specific section of the GUI.
 """

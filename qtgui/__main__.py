@@ -1,5 +1,5 @@
 """
-PyQt5 entry point for xespresso GUI.
+PySide6 entry point for xespresso GUI.
 
 Run with: python -m qtgui
 """

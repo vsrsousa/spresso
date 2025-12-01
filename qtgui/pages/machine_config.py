@@ -1,5 +1,5 @@
 """
-Machine Configuration Page for xespresso PyQt GUI.
+Machine Configuration Page for xespresso PySide6 GUI.
 
 This module handles the machine configuration interface, allowing users to:
 - Create and edit machine configurations
@@ -10,13 +10,14 @@ This module handles the machine configuration interface, allowing users to:
 import os
 import traceback
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QSpinBox, QTextEdit, QCheckBox, QPushButton,
     QGroupBox, QFormLayout, QMessageBox, QScrollArea,
-    QFrame, QTableWidget, QTableWidgetItem, QHeaderView
+    QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
+    QApplication
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 try:
     from xespresso.machines.machine import Machine
@@ -509,7 +510,6 @@ in the Calculation Setup or Workflow Builder pages.</p>
             self.results_label.setStyleSheet("color: blue;")
             
             # Process events to update UI
-            from PyQt5.QtWidgets import QApplication
             QApplication.processEvents()
             
             try:

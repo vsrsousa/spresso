@@ -1,18 +1,18 @@
 """
-Workflow Builder Page for xespresso PyQt GUI.
+Workflow Builder Page for xespresso PySide6 GUI.
 
 This page creates multi-step workflows.
 """
 
 import os
 
-from PyQt5.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QDoubleSpinBox,
     QSpinBox, QCheckBox, QTextEdit, QRadioButton
 )
-from PyQt5.QtCore import Qt
+from PySide6.QtCore import Qt
 
 try:
     from xespresso.machines.config.loader import (

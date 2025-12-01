@@ -222,46 +222,65 @@ class TestWriteEspressoInIntegration:
 class TestLabelInversion:
     """Tests for label inversion in Calculation Setup and Workflow Builder."""
     
-    def test_calculation_setup_has_cycle_emoji(self, mock_qapplication):
-        """Test that Calculation Setup page has the cycle/refresh emoji."""
+    def test_calculation_setup_label_format(self, mock_qapplication):
+        """Test that Calculation Setup creates label in structure/calc_type format."""
         from qtgui.pages.calculation_setup import CalculationSetupPage
         from qtgui.main_app import SessionState
+        from ase.build import bulk
         
         # Reset singleton
         SessionState._instance = None
         state = SessionState()
         
-        page = CalculationSetupPage(state)
+        # Set a structure
+        atoms = bulk('Al', 'fcc', a=4.05)
+        state['current_structure'] = atoms
         
-        # Just verify import works - actual label check is visual
-        assert page is not None
+        page = CalculationSetupPage(state)
+        page._update_structure_status()
+        
+        # Check the label format is structure/calc_type (e.g., Al/scf not scf/Al)
+        label = page.label_edit.text()
+        assert label == "Al/scf", f"Expected 'Al/scf' but got '{label}'"
     
-    def test_workflow_builder_has_chart_emoji(self, mock_qapplication):
-        """Test that Workflow Builder page has the chart emoji."""
-        from qtgui.pages.workflow_builder import WorkflowBuilderPage
+    def test_job_submission_label_format(self, mock_qapplication):
+        """Test that Job Submission creates label in structure/calc_type format."""
+        from qtgui.pages.job_submission import JobSubmissionPage
+        from qtgui.main_app import SessionState
+        from ase.build import bulk
+        
+        # Reset singleton
+        SessionState._instance = None
+        state = SessionState()
+        
+        # Set a structure and config
+        atoms = bulk('Fe', 'bcc', a=2.87)
+        state['current_structure'] = atoms
+        state['workflow_config'] = {'calc_type': 'relax'}
+        
+        page = JobSubmissionPage(state)
+        page._update_dry_run_config()
+        
+        # Check the label format is structure/calc_type (e.g., Fe/relax not relax/Fe)
+        label = page.label_edit.text()
+        assert label == "Fe/relax", f"Expected 'Fe/relax' but got '{label}'"
+    
+    def test_placeholder_text_format(self, mock_qapplication):
+        """Test that placeholder text shows structure/calc_type format."""
+        from qtgui.pages.calculation_setup import CalculationSetupPage
+        from qtgui.pages.job_submission import JobSubmissionPage
         from qtgui.main_app import SessionState
         
         # Reset singleton
         SessionState._instance = None
         state = SessionState()
         
-        page = WorkflowBuilderPage(state)
+        calc_page = CalculationSetupPage(state)
+        job_page = JobSubmissionPage(state)
         
-        # Just verify import works - actual label check is visual
-        assert page is not None
-    
-    def test_nav_items_have_inverted_emojis(self):
-        """Test that navigation items in main_app have inverted emojis."""
-        # Check the nav_items list in main_app.py
-        import qtgui.main_app as main_app
-        
-        # Read the source to verify the nav_items
-        import inspect
-        source = inspect.getsource(main_app.MainWindow._create_sidebar)
-        
-        # Check for inverted emojis
-        assert '"🔄 Calculation Setup"' in source or "'🔄 Calculation Setup'" in source
-        assert '"📊 Workflow Builder"' in source or "'📊 Workflow Builder'" in source
+        # Check placeholders show inverted format (structure/calc_type)
+        assert "Al/scf" in calc_page.label_edit.placeholderText()
+        assert "Al/scf" in job_page.label_edit.placeholderText()
 
 
 if __name__ == "__main__":

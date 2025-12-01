@@ -179,7 +179,7 @@ class JobSubmissionPage(QWidget):
         output_layout.addRow("Base Directory:", self.output_dir_label)
         
         self.label_edit = QLineEdit()
-        self.label_edit.setPlaceholderText("e.g., scf/Al")
+        self.label_edit.setPlaceholderText("e.g., Al/scf")
         output_layout.addRow("Calculation Label:", self.label_edit)
         
         self.full_path_label = QLabel("")
@@ -269,7 +269,7 @@ class JobSubmissionPage(QWidget):
         output_layout.addRow("Base Directory:", self.run_output_dir_label)
         
         self.run_label_edit = QLineEdit()
-        self.run_label_edit.setPlaceholderText("e.g., scf/Al")
+        self.run_label_edit.setPlaceholderText("e.g., Al/scf")
         output_layout.addRow("Calculation Label:", self.run_label_edit)
         
         self.run_full_path_label = QLabel("")
@@ -403,10 +403,10 @@ class JobSubmissionPage(QWidget):
         elif atoms is not None and ASE_AVAILABLE and isinstance(atoms, Atoms):
             calc_type = config.get('calc_type', 'scf')
             formula = atoms.get_chemical_formula()
-            self.label_edit.setText(f"{calc_type}/{formula}")
+            self.label_edit.setText(f"{formula}/{calc_type}")
         
         # Update full path
-        label = self.label_edit.text() or "scf/structure"
+        label = self.label_edit.text() or "structure/scf"
         self.full_path_label.setText(os.path.join(workdir, label))
     
     def _update_run_config(self):
@@ -424,10 +424,10 @@ class JobSubmissionPage(QWidget):
         elif atoms is not None and ASE_AVAILABLE and isinstance(atoms, Atoms):
             calc_type = config.get('calc_type', 'scf')
             formula = atoms.get_chemical_formula()
-            self.run_label_edit.setText(f"{calc_type}/{formula}")
+            self.run_label_edit.setText(f"{formula}/{calc_type}")
         
         # Update full path
-        label = self.run_label_edit.text() or "scf/structure"
+        label = self.run_label_edit.text() or "structure/scf"
         self.run_full_path_label.setText(os.path.join(workdir, label))
     
     def _update_status_and_config(self, run_tab=False):
@@ -465,9 +465,9 @@ class JobSubmissionPage(QWidget):
     def _generate_files(self):
         """Generate calculation files (dry run).
         
-        Uses xespresso's write_espresso_in to generate a proper QE input file
-        with atomic positions and cell parameters from the loaded structure.
-        Also creates a job_file script for execution.
+        Uses xespresso's Espresso calculator to generate a proper QE input file
+        with atomic positions and cell parameters from the loaded structure,
+        and creates the job_file script via xespresso's scheduler.
         """
         atoms = self.session_state.get('current_structure')
         config = self.session_state.get('workflow_config', {})
@@ -509,7 +509,6 @@ class JobSubmissionPage(QWidget):
             # Prepare input parameters for xespresso
             prefix = label.split('/')[-1] if '/' in label else label
             input_filename = f"{prefix}.pwi"
-            input_path = os.path.join(full_path, input_filename)
             
             # Build input_data dictionary for xespresso
             input_data = self._build_input_data(config, prefix)
@@ -518,32 +517,91 @@ class JobSubmissionPage(QWidget):
             kspacing = config.get('kspacing')
             kpts = config.get('kpts')
             
-            # Generate proper QE input file using xespresso's write_espresso_in
+            # Use xespresso's Espresso calculator for proper dry run
             if XESPRESSO_AVAILABLE:
-                write_espresso_in(
-                    input_path,
-                    atoms,
-                    input_data=input_data,
-                    pseudopotentials=config.get('pseudopotentials', {}),
-                    kspacing=kspacing,
-                    kpts=kpts
-                )
+                try:
+                    from xespresso import Espresso
+                    
+                    # Build queue configuration for job_file generation
+                    queue = {
+                        'execution': 'local',
+                        'scheduler': 'direct',
+                    }
+                    
+                    # Add resources if configured
+                    if config.get('adjust_resources'):
+                        resources = config.get('resources', {})
+                        queue.update(resources)
+                    
+                    # Create Espresso calculator
+                    calc_kwargs = {
+                        'label': full_path,
+                        'pseudopotentials': config.get('pseudopotentials', {}),
+                        'input_data': input_data,
+                        'queue': queue,
+                    }
+                    
+                    if kspacing:
+                        calc_kwargs['kspacing'] = kspacing
+                    elif kpts:
+                        calc_kwargs['kpts'] = kpts
+                    else:
+                        calc_kwargs['kpts'] = (4, 4, 4)  # Default k-points
+                    
+                    # Set parallel command if multiple processors
+                    nprocs = config.get('nprocs', 1)
+                    if nprocs > 1:
+                        calc_kwargs['parallel'] = f'-np {nprocs}'
+                    
+                    calc = Espresso(**calc_kwargs)
+                    
+                    # Make a copy of atoms to avoid modifying the original
+                    atoms_copy = atoms.copy()
+                    atoms_copy.calc = calc
+                    
+                    # Call write_input to generate input file AND job_file via scheduler
+                    calc.write_input(atoms_copy)
+                    
+                    input_path = f"{calc.label}.pwi"
+                    
+                except Exception as e:
+                    # If xespresso calculator fails, fall back to direct write
+                    import traceback
+                    traceback.print_exc()
+                    input_path = os.path.join(full_path, input_filename)
+                    write_espresso_in(
+                        input_path,
+                        atoms,
+                        input_data=input_data,
+                        pseudopotentials=config.get('pseudopotentials', {}),
+                        kspacing=kspacing,
+                        kpts=kpts
+                    )
+                    # Create job_file manually as fallback
+                    job_file_path = os.path.join(full_path, "job_file")
+                    self._create_job_file(job_file_path, prefix, config)
             else:
                 # Fallback to simple preview if xespresso not available
+                input_path = os.path.join(full_path, input_filename)
                 input_content = self._generate_input_preview(atoms, config, label)
                 with open(input_path, 'w') as f:
                     f.write(input_content)
-            
-            # Create job_file script
-            job_file_path = os.path.join(full_path, "job_file")
-            self._create_job_file(job_file_path, prefix, config)
+                # Create job_file manually
+                job_file_path = os.path.join(full_path, "job_file")
+                self._create_job_file(job_file_path, prefix, config)
             
             # Read the generated input file for preview
             with open(input_path, 'r') as f:
                 input_content = f.read()
             
+            # Check if job_file was created
+            job_file_path = os.path.join(full_path, "job_file")
+            job_file_exists = os.path.exists(job_file_path)
+            
             # Update displays
-            generated = [input_filename, "job_file"]
+            generated = [input_filename]
+            if job_file_exists:
+                generated.append("job_file")
             if structure_filename:
                 generated.append(structure_filename)
             
@@ -558,7 +616,7 @@ Files created in: <code>{full_path}</code>
 <b>Generated Files:</b>
 <ul>
 <li><b>{input_filename}</b> - QE input file with atomic positions and cell</li>
-<li><b>job_file</b> - Execution script</li>
+{f'<li><b>job_file</b> - Execution script</li>' if job_file_exists else ''}
 {f'<li><b>{structure_filename}</b> - Structure file</li>' if structure_filename else ''}
 </ul>
 
@@ -576,6 +634,8 @@ Files created in: <code>{full_path}</code>
             self._refresh_browser()
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.dry_run_results.setText(f"❌ Error generating files: {e}")
             self.dry_run_results.setStyleSheet("color: red;")
     

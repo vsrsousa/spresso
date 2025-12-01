@@ -857,8 +857,8 @@ class MainWindow(QMainWindow):
         self.nav_list = QListWidget()
         nav_items = [
             "🔬 Structure",
-            "🔄 Calculation Setup",
-            "📊 Workflow Builder",
+            "📊 Calculation Setup",
+            "🔄 Workflow Builder",
             "🚀 Job Submission",
             "📈 Results & Post-Processing"
         ]

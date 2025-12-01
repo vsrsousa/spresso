@@ -76,7 +76,7 @@ class CalculationSetupPage(QWidget):
         scroll_layout = QVBoxLayout(scroll_widget)
         
         # Header
-        header_label = QLabel("<h2>🔄 Calculation Setup</h2>")
+        header_label = QLabel("<h2>📊 Calculation Setup</h2>")
         header_label.setTextFormat(Qt.RichText)
         scroll_layout.addWidget(header_label)
         
@@ -127,7 +127,7 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         calc_layout.addRow("Calculation:", self.calc_type_combo)
         
         self.label_edit = QLineEdit()
-        self.label_edit.setPlaceholderText("e.g., scf/Al")
+        self.label_edit.setPlaceholderText("e.g., Al/scf")
         calc_layout.addRow("Label (subfolder name):", self.label_edit)
         
         scroll_layout.addWidget(calc_group)
@@ -524,9 +524,9 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 self.structure_status.setText(f"✅ Structure loaded: {formula} ({natoms} atoms)")
                 self.structure_status.setStyleSheet("color: green;")
                 
-                # Update label default
+                # Update label default (structure/calculation_type format)
                 calc_type = self.calc_type_combo.currentText()
-                self.label_edit.setText(f"{calc_type}/{formula}")
+                self.label_edit.setText(f"{formula}/{calc_type}")
                 
                 # Update pseudopotential inputs
                 self._update_pseudo_inputs(atoms)

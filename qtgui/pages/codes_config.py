@@ -214,6 +214,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
         
         try:
             machines_list = list_machines(DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR)
+            self.machine_combo.blockSignals(True)
             self.machine_combo.clear()
             
             if machines_list:
@@ -222,7 +223,12 @@ in the Calculation Setup or Workflow Builder pages.</p>
             else:
                 self.results_label.setText("⚠️ No machines configured. Please configure a machine first.")
                 self.results_label.setStyleSheet("color: orange;")
+            self.machine_combo.blockSignals(False)
+            # Manually trigger the handler for the first item if any
+            if self.machine_combo.count() > 0:
+                self._on_machine_changed(self.machine_combo.currentText())
         except Exception as e:
+            self.machine_combo.blockSignals(False)
             self.results_label.setText(f"⚠️ Could not load machines: {e}")
             self.results_label.setStyleSheet("color: orange;")
     
@@ -348,18 +354,24 @@ in the Calculation Setup or Workflow Builder pages.</p>
                 # Check for versions
                 if existing_codes.versions:
                     available_versions = existing_codes.list_versions()
+                    self.version_combo.blockSignals(True)
                     self.version_combo.clear()
                     for version in available_versions:
                         self.version_combo.addItem(version)
+                    self.version_combo.blockSignals(False)
                 else:
                     # No version structure, show all codes
+                    self.version_combo.blockSignals(True)
                     self.version_combo.clear()
+                    self.version_combo.blockSignals(False)
                     self._display_existing_codes(existing_codes.codes)
                     self.session_state['current_codes'] = existing_codes
             else:
                 self.existing_status_label.setText(f"ℹ️ No codes configuration found for this machine.")
                 self.existing_status_label.setStyleSheet("color: blue;")
+                self.version_combo.blockSignals(True)
                 self.version_combo.clear()
+                self.version_combo.blockSignals(False)
                 self.existing_codes_table.setRowCount(0)
                 
         except Exception as e:

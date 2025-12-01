@@ -532,8 +532,8 @@ class JobSubmissionPage(QWidget):
                     # First check if machine is configured and use it
                     machine = self.session_state.get('calc_machine')
                     if machine:
-                        # Machine object is configured, use it for queue
-                        queue = machine
+                        # Machine object is configured, convert to queue dict using to_queue()
+                        queue = machine.to_queue()
                     else:
                         # Build queue configuration manually
                         queue = {

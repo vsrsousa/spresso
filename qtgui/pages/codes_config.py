@@ -212,6 +212,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
         if not XESPRESSO_AVAILABLE:
             return
         
+        self.machine_combo.blockSignals(True)
         try:
             machines_list = list_machines(DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR)
             self.machine_combo.clear()
@@ -225,6 +226,11 @@ in the Calculation Setup or Workflow Builder pages.</p>
         except Exception as e:
             self.results_label.setText(f"⚠️ Could not load machines: {e}")
             self.results_label.setStyleSheet("color: orange;")
+        finally:
+            self.machine_combo.blockSignals(False)
+        # Manually trigger the handler for the first item if any
+        if self.machine_combo.count() > 0:
+            self._on_machine_changed(self.machine_combo.currentText())
     
     def _on_machine_changed(self, machine_name):
         """Handle machine selection change."""
@@ -338,6 +344,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
         if not XESPRESSO_AVAILABLE or not machine_name:
             return
         
+        self.version_combo.blockSignals(True)
         try:
             existing_codes = load_codes_config(machine_name, DEFAULT_CODES_DIR)
             
@@ -365,6 +372,8 @@ in the Calculation Setup or Workflow Builder pages.</p>
         except Exception as e:
             self.existing_status_label.setText(f"⚠️ Could not load codes configuration: {e}")
             self.existing_status_label.setStyleSheet("color: orange;")
+        finally:
+            self.version_combo.blockSignals(False)
     
     def _on_version_changed(self, version):
         """Handle version selection change."""

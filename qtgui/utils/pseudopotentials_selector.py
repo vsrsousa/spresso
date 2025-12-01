@@ -234,6 +234,9 @@ class PseudopotentialsSelectorWidget(QWidget):
             self.status_label.setStyleSheet("color: green;")
             
             # Set ESPRESSO_PSEUDO environment variable
+            # Note: This affects the entire process and allows xespresso to find
+            # pseudopotential files. This is the standard way to configure
+            # pseudopotential paths in Quantum ESPRESSO / ASE.
             os.environ["ESPRESSO_PSEUDO"] = config.base_path
     
     def get_pseudopotentials(self):

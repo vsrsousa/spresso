@@ -449,6 +449,8 @@ then view them in the "View Structure" tab.</p>
         scroll_area.setWidget(scroll_widget)
         view_layout.addWidget(scroll_area)
         
+        # Store reference to view tab for later use
+        self.view_tab = view_tab
         self.tabs.addTab(view_tab, "🔬 View Structure")
     
     def _on_build_type_changed(self, build_type):
@@ -789,7 +791,8 @@ then view them in the "View Structure" tab.</p>
             self.results_label.setStyleSheet("color: green;")
             
             # Switch to the view tab after loading
-            self.tabs.setCurrentIndex(3)  # View Structure tab
+            if hasattr(self, 'view_tab'):
+                self.tabs.setCurrentWidget(self.view_tab)
             
         except Exception as e:
             self.db_load_result.setText(f"❌ Error loading structure: {e}")

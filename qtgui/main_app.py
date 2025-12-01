@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QListWidget, QListWidgetItem, QLabel, QGroupBox,
     QFileDialog, QMessageBox, QSplitter, QFrame, QPushButton,
     QStatusBar, QMenuBar, QMenu, QToolBar, QComboBox,
-    QInputDialog, QLineEdit
+    QInputDialog, QLineEdit, QSizePolicy
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QIcon, QFont, QAction, QScreen
@@ -426,7 +426,11 @@ class MainWindow(QMainWindow):
         self.session_state.add_listener(self._on_session_changed)
         
         # Select default page (Structure)
-        self.nav_list.setCurrentRow(0)  # Now index 0 is Structure
+        # Find the Structure item in the navigation list
+        for i in range(self.nav_list.count()):
+            if "Structure" in self.nav_list.item(i).text():
+                self.nav_list.setCurrentRow(i)
+                break
     
     def _setup_ui(self):
         """Setup the main user interface."""
@@ -688,8 +692,6 @@ Version: 1.2.0<br>
         
         # Spacer to push quit button to the right
         spacer = QWidget()
-        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
-        from PySide6.QtWidgets import QSizePolicy
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         toolbar.addWidget(spacer)
         

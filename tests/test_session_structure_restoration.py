@@ -44,6 +44,38 @@ class TestStructureSourceParsing:
         structure_id = int(source.replace("Database: ID ", "").strip())
         assert structure_id == 12345
     
+    def test_database_source_regex_pattern(self):
+        """Test regex parsing of database source pattern."""
+        import re
+        pattern = r'^Database:\s*ID\s*(\d+)$'
+        
+        # Valid patterns
+        match = re.match(pattern, "Database: ID 1")
+        assert match is not None
+        assert match.group(1) == "1"
+        
+        match = re.match(pattern, "Database: ID 12345")
+        assert match is not None
+        assert match.group(1) == "12345"
+        
+        match = re.match(pattern, "Database:ID 1")
+        assert match is not None
+        assert match.group(1) == "1"
+        
+        match = re.match(pattern, "Database:  ID  999")
+        assert match is not None
+        assert match.group(1) == "999"
+        
+        # Invalid patterns should not match
+        match = re.match(pattern, "Database: ID abc")
+        assert match is None
+        
+        match = re.match(pattern, "Database: ID")
+        assert match is None
+        
+        match = re.match(pattern, "Database: 1")
+        assert match is None
+    
     def test_file_source_pattern(self):
         """Test parsing file source pattern."""
         source = "File: structure.cif"

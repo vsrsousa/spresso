@@ -12,6 +12,7 @@ Performance optimizations:
 import sys
 import os
 import json
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -28,6 +29,9 @@ from PySide6.QtGui import QIcon, QFont, QAction, QScreen
 
 # Default session data directory
 DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.xespresso/sessions")
+
+# Default database path for structures
+DEFAULT_STRUCTURES_DB_PATH = os.path.expanduser("~/.xespresso/structures.db")
 
 # Invalid characters in filenames (cross-platform)
 INVALID_FILENAME_CHARS = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
@@ -611,18 +615,19 @@ class SessionState:
             print("Warning: ASE not available, cannot restore structure")
             return
         
-        # Try to restore from database
-        if structure_source.startswith("Database: ID "):
+        # Try to restore from database using regex for robust parsing
+        db_match = re.match(r'^Database:\s*ID\s*(\d+)$', structure_source)
+        if db_match:
             try:
                 from ase.db import connect as ase_db_connect
                 
-                # Extract the ID
-                structure_id = int(structure_source.replace("Database: ID ", "").strip())
+                # Extract the ID using regex match
+                structure_id = int(db_match.group(1))
                 
                 # Use saved db_path or default
                 db_path = self._state.get('structure_db_path')
                 if not db_path:
-                    db_path = os.path.expanduser("~/.xespresso/structures.db")
+                    db_path = DEFAULT_STRUCTURES_DB_PATH
                 db_path = os.path.abspath(os.path.expanduser(db_path))
                 
                 if os.path.exists(db_path):

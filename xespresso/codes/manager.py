@@ -678,7 +678,8 @@ def create_codes_config(machine_name: str = "local",
 
 def load_codes_config(machine_name: str,
                      codes_dir: str = DEFAULT_CODES_DIR,
-                     version: Optional[str] = None) -> Optional[CodesConfig]:
+                     version: Optional[str] = None,
+                     verbose: bool = False) -> Optional[CodesConfig]:
     """
     Load a codes configuration from file.
     
@@ -686,6 +687,7 @@ def load_codes_config(machine_name: str,
         machine_name: Name of the machine
         codes_dir: Directory containing codes configurations
         version: Optional QE version to use. If None, uses default or main codes.
+        verbose: If True, prints status messages to stdout. Default is False.
     
     Returns:
         CodesConfig object or None if not found
@@ -695,19 +697,22 @@ def load_codes_config(machine_name: str,
     if config:
         versions = config.list_versions()
         if versions:
-            print(f"✅ Loaded codes configuration for '{machine_name}'")
-            print(f"   Available versions: {', '.join(versions)}")
+            if verbose:
+                print(f"✅ Loaded codes configuration for '{machine_name}'")
+                print(f"   Available versions: {', '.join(versions)}")
             
             # Show codes for specified version or default
             target_version = version or config.qe_version or versions[0]
             codes = config.list_codes(version=target_version)
-            if codes:
+            if codes and verbose:
                 print(f"   Codes in version {target_version}: {', '.join(codes)}")
         else:
-            print(f"✅ Loaded codes configuration for '{machine_name}'")
-            print(f"   Available codes: {', '.join(config.list_codes())}")
+            if verbose:
+                print(f"✅ Loaded codes configuration for '{machine_name}'")
+                print(f"   Available codes: {', '.join(config.list_codes())}")
     else:
-        print(f"⚠️  No codes configuration found for '{machine_name}'")
+        if verbose:
+            print(f"⚠️  No codes configuration found for '{machine_name}'")
     
     return config
 

@@ -40,6 +40,7 @@ class CodesConfigPage(QWidget):
         super().__init__()
         self.session_state = session_state
         self.detected_codes = None
+        self._loading = False  # Guard to prevent infinite loops
         self._setup_ui()
         self._load_machines_list()
     
@@ -346,7 +347,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
         
         self.version_combo.blockSignals(True)
         try:
-            existing_codes = load_codes_config(machine_name, DEFAULT_CODES_DIR)
+            existing_codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
             
             if existing_codes:
                 self.existing_status_label.setText(f"✅ Loaded existing configuration for '{machine_name}'")
@@ -391,7 +392,8 @@ in the Calculation Setup or Workflow Builder pages.</p>
             version_config = load_codes_config(
                 machine_name,
                 DEFAULT_CODES_DIR,
-                version=selected_version
+                version=selected_version,
+                verbose=False
             )
             
             if version_config:
@@ -422,4 +424,11 @@ in the Calculation Setup or Workflow Builder pages.</p>
     
     def refresh(self):
         """Refresh the page."""
-        self._load_machines_list()
+        # Use loading guard to prevent infinite loops
+        if self._loading:
+            return
+        self._loading = True
+        try:
+            self._load_machines_list()
+        finally:
+            self._loading = False

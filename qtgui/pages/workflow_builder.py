@@ -37,6 +37,7 @@ class WorkflowBuilderPage(QWidget):
     def __init__(self, session_state):
         super().__init__()
         self.session_state = session_state
+        self._loading = False  # Guard to prevent infinite loops
         self._setup_ui()
     
     def _setup_ui(self):
@@ -279,7 +280,12 @@ class WorkflowBuilderPage(QWidget):
         if not machine_name or not XESPRESSO_AVAILABLE:
             return
         
+        # Prevent recursive updates
+        if self._loading:
+            return
+        
         try:
+            self._loading = True
             machine = load_machine(DEFAULT_CONFIG_PATH, machine_name, DEFAULT_MACHINES_DIR, return_object=True)
             self.session_state['workflow_machine'] = machine
             self.session_state['selected_machine'] = machine_name
@@ -292,6 +298,8 @@ class WorkflowBuilderPage(QWidget):
             self._load_codes(machine_name)
         except Exception as e:
             self.machine_info_label.setText(f"Error: {e}")
+        finally:
+            self._loading = False
     
     def _load_codes(self, machine_name):
         """Load codes for a machine."""
@@ -301,7 +309,7 @@ class WorkflowBuilderPage(QWidget):
         self.version_combo.blockSignals(True)
         self.code_combo.blockSignals(True)
         try:
-            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR)
+            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
             
             self.version_combo.clear()
             self.code_combo.clear()
@@ -335,7 +343,7 @@ class WorkflowBuilderPage(QWidget):
         
         self.code_combo.blockSignals(True)
         try:
-            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, version=version)
+            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, version=version, verbose=False)
             
             self.code_combo.clear()
             if codes:
@@ -490,5 +498,12 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
     
     def refresh(self):
         """Refresh the page."""
-        self._load_machines()
-        self._update_structure_status()
+        # Use loading guard to prevent infinite loops
+        if self._loading:
+            return
+        self._loading = True
+        try:
+            self._load_machines()
+            self._update_structure_status()
+        finally:
+            self._loading = False

@@ -337,7 +337,7 @@ def list_sessions(session_dir: Optional[str] = None) -> List[Dict[str, Any]]:
         session_dir: Directory containing session files. If None, uses default
         
     Returns:
-        List of dictionaries with session info (filename, path, saved_at)
+        List of dictionaries with session info (filename, path, saved_at, name)
     """
     if session_dir is None:
         session_dir = DEFAULT_SESSION_DIR
@@ -352,11 +352,15 @@ def list_sessions(session_dir: Optional[str] = None) -> List[Dict[str, Any]]:
             try:
                 with open(filepath, 'r') as f:
                     data = json.load(f)
-                    saved_at = data.get('metadata', {}).get('saved_at', 'Unknown')
+                    metadata = data.get('metadata', {})
+                    saved_at = metadata.get('saved_at', 'Unknown')
+                    # Get session name from metadata, fallback to filename without extension
+                    session_name = metadata.get('session_name', filename.replace('.json', '').replace('_', ' '))
                     sessions.append({
                         'filename': filename,
                         'path': filepath,
-                        'saved_at': saved_at
+                        'saved_at': saved_at,
+                        'name': session_name
                     })
             except:
                 # Skip invalid files
@@ -661,7 +665,8 @@ def render_session_manager(key: str = "session_manager"):
             for session in sessions[:5]:  # Show last 5
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.caption(f"📄 {session['filename']}")
+                    # Display session name from metadata (not filename)
+                    st.caption(f"📄 {session['name']}")
                     st.caption(f"🕐 {session['saved_at'][:19]}")
                 with col2:
                     if st.button("Load", key=f"{key}_load_{session['filename']}", 
@@ -672,13 +677,8 @@ def render_session_manager(key: str = "session_manager"):
                             # Create new session for loaded state
                             new_id = create_new_session()
                             
-                            # Set session name from metadata (or filename as fallback)
-                            if session_name:
-                                active_sessions[new_id]['name'] = session_name
-                            else:
-                                # Fallback: use filename without .json
-                                name = session['filename'].replace('.json', '').replace('_', ' ')
-                                active_sessions[new_id]['name'] = name
+                            # Set session name from metadata (use name from list_sessions which already has fallback)
+                            active_sessions[new_id]['name'] = session['name']
                             
                             # Restore state
                             restore_session(state, clear_first=True)

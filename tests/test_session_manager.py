@@ -384,3 +384,50 @@ def test_save_load_structure(mock_st, temp_session_dir):
     assert isinstance(restored_atoms, Atoms)
     assert restored_atoms.get_chemical_formula() == 'H2'
     assert len(restored_atoms) == 2
+
+
+def test_list_sessions_includes_session_name(temp_session_dir):
+    """Test that list_sessions returns session name from metadata."""
+    from gui.utils.session_manager import list_sessions
+    
+    # Create session files with different session names
+    session1 = {
+        'metadata': {'saved_at': '2024-01-01T10:00:00', 'session_name': 'Al SCF Calculation'},
+        'state': {'key': 'value1'}
+    }
+    session2 = {
+        'metadata': {'saved_at': '2024-01-02T10:00:00', 'session_name': 'Cu Band Structure'},
+        'state': {'key': 'value2'}
+    }
+    # Session without session_name (should fallback to filename)
+    session3 = {
+        'metadata': {'saved_at': '2024-01-03T10:00:00'},
+        'state': {'key': 'value3'}
+    }
+    
+    with open(os.path.join(temp_session_dir, 'session1.json'), 'w') as f:
+        json.dump(session1, f)
+    
+    with open(os.path.join(temp_session_dir, 'session2.json'), 'w') as f:
+        json.dump(session2, f)
+    
+    with open(os.path.join(temp_session_dir, 'old_file.json'), 'w') as f:
+        json.dump(session3, f)
+    
+    # List sessions
+    sessions = list_sessions(session_dir=temp_session_dir)
+    
+    # Verify results
+    assert len(sessions) == 3
+    assert all('name' in s for s in sessions)  # All sessions have 'name' key
+    
+    # Find sessions by filename
+    session1_data = next(s for s in sessions if s['filename'] == 'session1.json')
+    session2_data = next(s for s in sessions if s['filename'] == 'session2.json')
+    session3_data = next(s for s in sessions if s['filename'] == 'old_file.json')
+    
+    # Verify session names from metadata
+    assert session1_data['name'] == 'Al SCF Calculation'
+    assert session2_data['name'] == 'Cu Band Structure'
+    # Fallback: filename without extension, underscores replaced with spaces
+    assert session3_data['name'] == 'old file'

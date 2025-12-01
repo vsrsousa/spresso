@@ -38,6 +38,20 @@ except ImportError:
     PSEUDO_SELECTOR_AVAILABLE = False
 
 
+# Predefined magnetic moments for common elements
+PREDEFINED_MAGNETIC_MOMENTS = {
+    'Fe': 2.2, 'Co': 1.7, 'Ni': 0.6, 'Mn': 5.0, 'Cr': 3.0,
+    'V': 2.0, 'Ti': 1.0, 'Gd': 7.0, 'Nd': 3.0
+}
+
+# Typical Hubbard U values for common elements
+TYPICAL_HUBBARD_U = {
+    'Fe': 4.0, 'Co': 3.5, 'Ni': 3.0, 'Mn': 4.0, 'Cr': 3.5,
+    'V': 3.0, 'Ti': 2.5, 'Cu': 4.0, 'Zn': 4.0,
+    'Gd': 6.0, 'Nd': 5.0, 'Ce': 5.0, 'O': 0.0
+}
+
+
 class CalculationSetupPage(QWidget):
     """Calculation setup page widget."""
     
@@ -45,6 +59,9 @@ class CalculationSetupPage(QWidget):
         super().__init__()
         self.session_state = session_state
         self._loading = False  # Guard to prevent infinite loops
+        # Initialize dictionaries for dynamic inputs
+        self.magnetic_edits = {}
+        self.hubbard_edits = {}
         self._setup_ui()
     
     def _setup_ui(self):
@@ -234,6 +251,65 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             pseudo_layout.addWidget(self.pseudo_container)
         
         scroll_layout.addWidget(pseudo_group)
+        
+        # Magnetic Configuration (optional)
+        self.magnetic_group = QGroupBox("🧲 Magnetic Configuration (Optional)")
+        self.magnetic_group.setCheckable(True)
+        self.magnetic_group.setChecked(False)
+        magnetic_layout = QVBoxLayout(self.magnetic_group)
+        
+        magnetic_info = QLabel("""
+<p><b>Configure magnetic properties for spin-polarized calculations.</b></p>
+<p>Specify starting magnetization for each element. Values typically range from -1 to 1.</p>
+""")
+        magnetic_info.setTextFormat(Qt.RichText)
+        magnetic_info.setWordWrap(True)
+        magnetic_layout.addWidget(magnetic_info)
+        
+        # Preset selector
+        preset_layout = QHBoxLayout()
+        preset_layout.addWidget(QLabel("Preset:"))
+        self.magnetic_preset_combo = QComboBox()
+        self.magnetic_preset_combo.addItems(["Custom", "Ferromagnetic", "Antiferromagnetic"])
+        self.magnetic_preset_combo.currentTextChanged.connect(self._on_magnetic_preset_changed)
+        preset_layout.addWidget(self.magnetic_preset_combo)
+        magnetic_layout.addLayout(preset_layout)
+        
+        # Container for per-element magnetic inputs
+        self.magnetic_container = QWidget()
+        self.magnetic_container_layout = QFormLayout(self.magnetic_container)
+        magnetic_layout.addWidget(self.magnetic_container)
+        
+        scroll_layout.addWidget(self.magnetic_group)
+        
+        # Hubbard (DFT+U) Configuration (optional)
+        self.hubbard_group = QGroupBox("⚛️ Hubbard (DFT+U) Configuration (Optional)")
+        self.hubbard_group.setCheckable(True)
+        self.hubbard_group.setChecked(False)
+        hubbard_layout = QVBoxLayout(self.hubbard_group)
+        
+        hubbard_info = QLabel("""
+<p><b>Configure Hubbard U corrections for strongly correlated systems.</b></p>
+<p>Common for transition metals (Fe, Mn, Co, Ni) and rare earths. U values typically range from 2-8 eV.</p>
+""")
+        hubbard_info.setTextFormat(Qt.RichText)
+        hubbard_info.setWordWrap(True)
+        hubbard_layout.addWidget(hubbard_info)
+        
+        # Hubbard format selector
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+        self.hubbard_format_combo = QComboBox()
+        self.hubbard_format_combo.addItems(["New (QE >= 7.0)", "Old (QE < 7.0)"])
+        format_layout.addWidget(self.hubbard_format_combo)
+        hubbard_layout.addLayout(format_layout)
+        
+        # Container for per-element Hubbard U inputs
+        self.hubbard_container = QWidget()
+        self.hubbard_container_layout = QFormLayout(self.hubbard_container)
+        hubbard_layout.addWidget(self.hubbard_container)
+        
+        scroll_layout.addWidget(self.hubbard_group)
         
         # Resources Configuration
         resources_group = QGroupBox("⚙️ Resources Configuration")
@@ -484,6 +560,67 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 edit.setPlaceholderText(f"e.g., {element}.UPF")
                 self.pseudo_edits[element] = edit
                 self.pseudo_container_layout.addRow(f"{element}:", edit)
+        
+        # Update magnetic inputs
+        self._update_magnetic_inputs(elements)
+        
+        # Update Hubbard inputs
+        self._update_hubbard_inputs(elements)
+    
+    def _update_magnetic_inputs(self, elements):
+        """Update magnetic input fields for structure elements."""
+        # Clear existing inputs
+        while self.magnetic_container_layout.count():
+            item = self.magnetic_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        self.magnetic_edits = {}
+        
+        for element in sorted(elements):
+            spin = QDoubleSpinBox()
+            spin.setRange(-10.0, 10.0)
+            spin.setSingleStep(0.1)
+            spin.setDecimals(2)
+            default_val = PREDEFINED_MAGNETIC_MOMENTS.get(element, 0.0)
+            spin.setValue(default_val)
+            self.magnetic_edits[element] = spin
+            self.magnetic_container_layout.addRow(f"{element}:", spin)
+    
+    def _update_hubbard_inputs(self, elements):
+        """Update Hubbard U input fields for structure elements."""
+        # Clear existing inputs
+        while self.hubbard_container_layout.count():
+            item = self.hubbard_container_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        self.hubbard_edits = {}
+        
+        for element in sorted(elements):
+            spin = QDoubleSpinBox()
+            spin.setRange(0.0, 20.0)
+            spin.setSingleStep(0.5)
+            spin.setDecimals(1)
+            spin.setSuffix(" eV")
+            default_val = TYPICAL_HUBBARD_U.get(element, 0.0)
+            spin.setValue(default_val)
+            self.hubbard_edits[element] = spin
+            self.hubbard_container_layout.addRow(f"{element}:", spin)
+    
+    def _on_magnetic_preset_changed(self, preset):
+        """Handle magnetic preset selection."""
+        if preset == "Custom":
+            return
+        
+        for element, spin in self.magnetic_edits.items():
+            if element in PREDEFINED_MAGNETIC_MOMENTS:
+                if preset == "Ferromagnetic":
+                    spin.setValue(PREDEFINED_MAGNETIC_MOMENTS[element])
+                elif preset == "Antiferromagnetic":
+                    spin.setValue(-PREDEFINED_MAGNETIC_MOMENTS[element])
+            else:
+                spin.setValue(0.0)
     
     def _get_config(self):
         """Get the current configuration as a dictionary."""
@@ -531,6 +668,31 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 'time': self.time_edit.text(),
                 'partition': self.partition_edit.text()
             }
+        
+        # Magnetic configuration
+        if self.magnetic_group.isChecked():
+            config['enable_magnetism'] = True
+            config['magnetic_config'] = {}
+            for element, spin in self.magnetic_edits.items():
+                value = spin.value()
+                if value != 0.0:
+                    config['magnetic_config'][element] = [value]
+        else:
+            config['enable_magnetism'] = False
+            config['magnetic_config'] = {}
+        
+        # Hubbard configuration
+        if self.hubbard_group.isChecked():
+            config['enable_hubbard'] = True
+            config['hubbard_format'] = 'new' if 'New' in self.hubbard_format_combo.currentText() else 'old'
+            config['hubbard_u'] = {}
+            for element, spin in self.hubbard_edits.items():
+                value = spin.value()
+                if value > 0.0:
+                    config['hubbard_u'][element] = value
+        else:
+            config['enable_hubbard'] = False
+            config['hubbard_u'] = {}
         
         return config
     

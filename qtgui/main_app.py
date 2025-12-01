@@ -29,6 +29,9 @@ from PySide6.QtGui import QIcon, QFont, QAction, QScreen
 # Default session data directory
 DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.xespresso/sessions")
 
+# Invalid characters in filenames (cross-platform)
+INVALID_FILENAME_CHARS = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+
 
 # Lazy import helper for page modules (improves startup time)
 _page_modules = {}
@@ -88,9 +91,11 @@ class SessionState:
             cls._instance = super().__new__(cls)
             cls._instance._state = {}
             cls._instance._sessions = {}
-            cls._instance._current_session_id = "default"
+            cls._instance._current_session_id = None  # No session active initially
             cls._instance._sessions_dir = DEFAULT_SESSIONS_DIR
             cls._instance._listeners = []
+            # Track sessions created/loaded in this app session (for combo box)
+            cls._instance._active_session_names = []  # List of session names shown in combo
             # Guard against recursive notifications - this prevents infinite loops
             # when listeners update state during notification, which would otherwise
             # trigger another notification cycle
@@ -206,6 +211,39 @@ class SessionState:
         """
         return dict(self._sessions)
     
+    def get_active_session_names(self):
+        """
+        Get list of session names that are currently active in the combo box.
+        
+        These are sessions that the user has created or loaded in this app session.
+        
+        Returns:
+            list: List of session names (without .json extension)
+        """
+        return list(self._active_session_names)
+    
+    def add_active_session(self, session_name):
+        """
+        Add a session name to the active sessions list (for combo box).
+        
+        Args:
+            session_name: Name of the session (without .json extension)
+        """
+        if session_name and session_name not in self._active_session_names:
+            self._active_session_names.append(session_name)
+    
+    def rename_active_session(self, old_name, new_name):
+        """
+        Rename a session in the active sessions list.
+        
+        Args:
+            old_name: Old session name
+            new_name: New session name
+        """
+        if old_name in self._active_session_names:
+            idx = self._active_session_names.index(old_name)
+            self._active_session_names[idx] = new_name
+    
     def get_sessions_dir(self):
         """
         Get the directory where sessions are stored.
@@ -264,8 +302,8 @@ class SessionState:
         """
         Load a session directly from a file path.
         
-        The session ID is read from inside the JSON file (stored as '_session_id').
-        If not present, falls back to using the filename.
+        The session name becomes the filename (without .json extension).
+        This is what appears in the "Active:" dropdown.
         
         Args:
             file_path (str): Path to the session JSON file
@@ -281,6 +319,9 @@ class SessionState:
         if not filename.endswith('.json'):
             return False
         
+        # Session name is the filename without .json extension
+        session_name = filename[:-5]
+        
         # Save current session first
         self.save_session()
         
@@ -293,7 +334,7 @@ class SessionState:
                 raise ValueError("Invalid session data format")
             
             # Get session ID from inside the file, or fall back to filename
-            session_id = loaded_state.get('_session_id', filename[:-5])
+            session_id = loaded_state.get('_session_id', session_name)
             
             # Set new session ID
             self._current_session_id = session_id
@@ -305,13 +346,21 @@ class SessionState:
                 if isinstance(key, str) and key in self.ALLOWED_SESSION_KEYS:
                     self._state[key] = value
             
+            # IMPORTANT: Set the session name to the filename (without .json)
+            # This ensures the "Active:" dropdown shows the correct name
+            self._state['session_name'] = session_name
+            
             # Register in index if not already
             if session_id not in self._sessions:
                 self._sessions[session_id] = {
-                    'name': self._state.get('session_name', session_id),
+                    'name': session_name,
                     'created': self._state.get('session_created', ''),
                     'modified': self._state.get('session_modified', '')
                 }
+                self._save_sessions_index()
+            else:
+                # Update the name in case it differs
+                self._sessions[session_id]['name'] = session_name
                 self._save_sessions_index()
             
             self._notify_listeners()
@@ -386,15 +435,48 @@ class SessionState:
     
     def rename_session(self, new_name):
         """
-        Rename the current session.
+        Rename the current session and its JSON file.
         
         Args:
             new_name: New name for the session
         """
+        old_name = self._state.get('session_name', '')
+        
+        # Update in-memory state
         self._state['session_name'] = new_name
         if self._current_session_id in self._sessions:
             self._sessions[self._current_session_id]['name'] = new_name
             self._save_sessions_index()
+        
+        # Rename the JSON file if it exists
+        if old_name and old_name != new_name:
+            # Sanitize filenames
+            old_safe = old_name
+            new_safe = new_name
+            for char in INVALID_FILENAME_CHARS:
+                old_safe = old_safe.replace(char, '_')
+                new_safe = new_safe.replace(char, '_')
+            
+            old_path = os.path.join(self._sessions_dir, f"{old_safe}.json")
+            new_path = os.path.join(self._sessions_dir, f"{new_safe}.json")
+            
+            if os.path.exists(old_path) and old_path != new_path:
+                try:
+                    # Read the old file
+                    with open(old_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    
+                    # Update session name in the data
+                    data['session_name'] = new_name
+                    
+                    # Write to new file
+                    with open(new_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+                    
+                    # Remove old file
+                    os.remove(old_path)
+                except Exception as e:
+                    print(f"Warning: Could not rename session file: {e}")
     
     def delete_session(self, session_id):
         """
@@ -439,11 +521,8 @@ class SessionState:
         # Use session name for the filename, not the session ID
         session_name = self._state.get('session_name', 'Unnamed')
         # Sanitize filename: replace characters that are invalid in filenames
-        # Invalid chars on Windows: < > : " / \ | ? *
-        # Invalid chars on Unix: / and null
-        invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
         safe_filename = session_name
-        for char in invalid_chars:
+        for char in INVALID_FILENAME_CHARS:
             safe_filename = safe_filename.replace(char, '_')
         session_path = os.path.join(self._sessions_dir, f"{safe_filename}.json")
         
@@ -628,11 +707,11 @@ class MainWindow(QMainWindow):
         session_group = QGroupBox("📋 Session")
         session_layout = QVBoxLayout(session_group)
         
-        # Session selector
+        # Session selector - starts empty, populated when user creates/loads sessions
         session_selector_layout = QHBoxLayout()
         session_selector_layout.addWidget(QLabel("Active:"))
         self.session_combo = QComboBox()
-        self.session_combo.setToolTip("Select active session")
+        self.session_combo.setToolTip("Active session (create new or load saved session)")
         self.session_combo.currentTextChanged.connect(self._on_session_selected)
         session_selector_layout.addWidget(self.session_combo, 1)
         session_layout.addLayout(session_selector_layout)
@@ -643,30 +722,40 @@ class MainWindow(QMainWindow):
         self._update_session_name_label()
         session_layout.addWidget(self.session_name_label)
         
-        # Session buttons
-        session_btn_layout = QHBoxLayout()
+        # Session buttons - row 1: New, Load
+        session_btn_layout1 = QHBoxLayout()
         
         new_session_btn = QPushButton("New")
         new_session_btn.setToolTip("Create a new session")
         new_session_btn.clicked.connect(self._new_session)
-        session_btn_layout.addWidget(new_session_btn)
+        session_btn_layout1.addWidget(new_session_btn)
+        
+        load_session_btn = QPushButton("Load")
+        load_session_btn.setToolTip("Load a saved session")
+        load_session_btn.clicked.connect(self._load_session_dialog)
+        session_btn_layout1.addWidget(load_session_btn)
+        
+        session_layout.addLayout(session_btn_layout1)
+        
+        # Session buttons - row 2: Rename, Save
+        session_btn_layout2 = QHBoxLayout()
         
         rename_session_btn = QPushButton("Rename")
         rename_session_btn.setToolTip("Rename current session")
         rename_session_btn.clicked.connect(self._rename_session)
-        session_btn_layout.addWidget(rename_session_btn)
+        session_btn_layout2.addWidget(rename_session_btn)
         
         save_session_btn = QPushButton("Save")
         save_session_btn.setToolTip("Save current session")
         save_session_btn.clicked.connect(self._save_session)
-        session_btn_layout.addWidget(save_session_btn)
+        session_btn_layout2.addWidget(save_session_btn)
         
-        session_layout.addLayout(session_btn_layout)
+        session_layout.addLayout(session_btn_layout2)
         
         layout.addWidget(session_group)
         
-        # Populate session combo
-        self._refresh_session_list()
+        # Session combo starts empty - don't populate until user creates/loads session
+        # self._refresh_session_list()  # Removed - combo starts empty
         
         # Working directory section
         workdir_group = QGroupBox("📁 Working Directory")
@@ -854,32 +943,24 @@ Version: 1.2.0<br>
     def _refresh_session_list(self):
         """Refresh the session list in the combo box.
         
-        Displays the actual JSON file names from ~/.xespresso/sessions directory
-        to allow users to switch between saved sessions.
+        Only shows sessions that have been created or loaded by the user in this app session.
+        The combo box starts empty until the user creates a new session or loads a saved one.
         """
         self.session_combo.blockSignals(True)
         self.session_combo.clear()
         
-        # Get list of session files from the filesystem (actual JSON files)
-        session_files = self.session_state.list_session_files()
-        current_id = self.session_state.get_current_session_id()
+        # Get list of active session names (created or loaded in this app session)
+        active_names = self.session_state.get_active_session_names()
+        current_name = self.session_state.get_session_name()
         
-        # Add each session file to the combo box using the filename
-        for session_id, session_name, file_path in session_files:
-            # Use session_id (filename without .json) as the display name
-            filename = os.path.basename(file_path)
-            self.session_combo.addItem(filename, session_id)
+        # Add each active session to the combo box
+        for name in active_names:
+            self.session_combo.addItem(name, name)
         
-        # If no sessions exist, show current session name
-        if self.session_combo.count() == 0:
-            current_name = self.session_state.get_session_name()
-            self.session_combo.addItem(f"{current_id}.json", current_id)
-        
-        # Select current session
-        for i in range(self.session_combo.count()):
-            if self.session_combo.itemData(i) == current_id:
-                self.session_combo.setCurrentIndex(i)
-                break
+        # Select current session if it's in the list
+        if current_name in active_names:
+            index = active_names.index(current_name)
+            self.session_combo.setCurrentIndex(index)
         
         self.session_combo.blockSignals(False)
     
@@ -989,6 +1070,8 @@ Version: 1.2.0<br>
         
         if ok and name:
             session_id = self.session_state.create_session(name)
+            # Add to active sessions list (for combo box)
+            self.session_state.add_active_session(name)
             self._refresh_session_list()
             self._on_session_changed()
             self.statusbar.showMessage(f"Created new session: {name}")
@@ -1005,6 +1088,9 @@ Version: 1.2.0<br>
         )
         
         if ok and name:
+            # Update the active sessions list
+            self.session_state.rename_active_session(current_name, name)
+            # Rename the session (in-memory and JSON file)
             self.session_state.rename_session(name)
             self._refresh_session_list()
             self._update_session_name_label()
@@ -1027,7 +1113,11 @@ Version: 1.2.0<br>
         self.statusbar.showMessage("Session saved")
     
     def _load_session_dialog(self):
-        """Open a dialog to load a saved session from the sessions directory."""
+        """Open a dialog to load a saved session from the sessions directory.
+        
+        Lists the JSON filenames (without .json extension) from ~/.xespresso/sessions.
+        When user selects one, it becomes the active session.
+        """
         sessions_dir = self.session_state.get_sessions_dir()
         
         # Ensure sessions directory exists
@@ -1051,10 +1141,13 @@ Version: 1.2.0<br>
             # Fall through to file dialog
         else:
             # Build list of session names for selection
+            # Display name is the filename without .json extension
             session_items = []
             session_paths = {}
             for session_id, session_name, file_path in session_files:
-                display_name = f"{session_name} ({session_id})"
+                # Use filename without .json as the display name
+                filename = os.path.basename(file_path)
+                display_name = filename[:-5] if filename.endswith('.json') else filename
                 session_items.append(display_name)
                 session_paths[display_name] = file_path
             
@@ -1078,6 +1171,8 @@ Version: 1.2.0<br>
                 # Load the selected session file
                 file_path = session_paths[selected]
                 if self.session_state.load_session_from_file(file_path):
+                    # Add to active sessions list (for combo box)
+                    self.session_state.add_active_session(selected)
                     self.workdir_label.setText(self.session_state.get('working_directory', '~'))
                     self._refresh_session_list()
                     self._on_session_changed()
@@ -1100,6 +1195,10 @@ Version: 1.2.0<br>
         
         if file_path:
             if self.session_state.load_session_from_file(file_path):
+                # Add to active sessions list (for combo box) using filename without .json
+                filename = os.path.basename(file_path)
+                session_name = filename[:-5] if filename.endswith('.json') else filename
+                self.session_state.add_active_session(session_name)
                 self.workdir_label.setText(self.session_state.get('working_directory', '~'))
                 self._refresh_session_list()
                 self._on_session_changed()

@@ -83,7 +83,8 @@ class SessionState:
         'current_codes', 'selected_code_version', 'workflow_config',
         'working_directory', 'session_name', 'session_created',
         'session_modified', 'calc_machine', 'selected_machine',
-        'selected_qe_version', 'structure_source', 'workflow_machine'
+        'selected_qe_version', 'structure_source', 'workflow_machine',
+        'structure_file_path', 'structure_db_path'  # For restoring structures on session load
     }
     
     def __new__(cls):
@@ -350,6 +351,9 @@ class SessionState:
             # This ensures the "Active:" dropdown shows the correct name
             self._state['session_name'] = session_name
             
+            # Try to restore the structure from the saved source
+            self._restore_structure_from_source()
+            
             # Register in index if not already
             if session_id not in self._sessions:
                 self._sessions[session_id] = {
@@ -578,12 +582,83 @@ class SessionState:
                     # Only load keys that are strings and in allowed set
                     if isinstance(key, str) and key in self.ALLOWED_SESSION_KEYS:
                         self._state[key] = value
+                
+                # Try to restore the structure from the saved source
+                self._restore_structure_from_source()
                     
             except Exception as e:
                 print(f"Warning: Could not load session: {e}")
                 self._initialize_defaults()
         else:
             self._initialize_defaults()
+    
+    def _restore_structure_from_source(self):
+        """
+        Restore the structure from the saved structure_source.
+        
+        This method attempts to reload the structure based on the source type:
+        - "Database: ID X" - loads from ASE database
+        - "File: <path>" - loads from file if structure_file_path is saved
+        - "Built: ..." - cannot be automatically restored
+        """
+        structure_source = self._state.get('structure_source', '')
+        if not structure_source:
+            return
+        
+        try:
+            from ase import io as ase_io
+        except ImportError:
+            print("Warning: ASE not available, cannot restore structure")
+            return
+        
+        # Try to restore from database
+        if structure_source.startswith("Database: ID "):
+            try:
+                from ase.db import connect as ase_db_connect
+                
+                # Extract the ID
+                structure_id = int(structure_source.replace("Database: ID ", "").strip())
+                
+                # Use saved db_path or default
+                db_path = self._state.get('structure_db_path')
+                if not db_path:
+                    db_path = os.path.expanduser("~/.xespresso/structures.db")
+                db_path = os.path.abspath(os.path.expanduser(db_path))
+                
+                if os.path.exists(db_path):
+                    db = ase_db_connect(db_path)
+                    row = db.get(id=structure_id)
+                    atoms = row.toatoms()
+                    self._state['current_structure'] = atoms
+                    print(f"Restored structure from database: ID {structure_id}")
+                else:
+                    print(f"Warning: Database not found at {db_path}")
+                    
+            except Exception as e:
+                print(f"Warning: Could not restore structure from database: {e}")
+        
+        # Try to restore from file
+        elif structure_source.startswith("File: "):
+            try:
+                # Try to use the saved full path
+                file_path = self._state.get('structure_file_path')
+                if file_path and os.path.exists(file_path):
+                    atoms = ase_io.read(file_path)
+                    self._state['current_structure'] = atoms
+                    print(f"Restored structure from file: {file_path}")
+                else:
+                    # File path not saved or file doesn't exist
+                    filename = structure_source.replace("File: ", "").strip()
+                    print(f"Warning: Structure file path not saved or file not found. "
+                          f"Original filename was: {filename}")
+                    
+            except Exception as e:
+                print(f"Warning: Could not restore structure from file: {e}")
+        
+        # Built structures cannot be automatically restored
+        elif structure_source.startswith("Built: "):
+            print(f"Info: Built structure '{structure_source}' cannot be automatically restored. "
+                  f"Please rebuild the structure.")
     
     def reset(self):
         """Reset the current session to defaults."""

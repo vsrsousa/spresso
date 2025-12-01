@@ -471,6 +471,8 @@ then view them in the "View Structure" tab.</p>
             try:
                 atoms = ase_io.read(file_path)
                 self._set_structure(atoms, f"File: {os.path.basename(file_path)}")
+                # Save the full file path for session restoration
+                self.session_state['structure_file_path'] = file_path
                 self.file_path_label.setText(file_path)
                 self.results_label.setText(f"✅ Loaded: {os.path.basename(file_path)}")
                 self.results_label.setStyleSheet("color: green;")
@@ -784,6 +786,8 @@ then view them in the "View Structure" tab.</p>
             atoms = row.toatoms()
             
             self._set_structure(atoms, f"Database: ID {structure_id}")
+            # Save the database path for session restoration
+            self.session_state['structure_db_path'] = db_path
             
             self.db_load_result.setText(f"✅ Loaded structure ID {structure_id}: {atoms.get_chemical_formula()}")
             self.db_load_result.setStyleSheet("color: green;")

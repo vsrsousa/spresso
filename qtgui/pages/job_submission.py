@@ -565,7 +565,8 @@ class JobSubmissionPage(QWidget):
                     }
                     
                     # K-points: pass either kspacing OR kpts, never both
-                    # Following xespresso's sort_qe_input pattern where these are mutually exclusive
+                    # This ensures mutual exclusivity as expected by xespresso's Espresso calculator
+                    # (only one k-point specification method should be provided at a time)
                     if kspacing:
                         calc_kwargs['kspacing'] = kspacing
                     elif kpts:

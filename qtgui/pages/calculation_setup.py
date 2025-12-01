@@ -630,13 +630,22 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         """Load modules from codes configuration.
         
         Helper method to load modules for a specific machine and QE version
-        from the codes configuration JSON file.
+        from the codes configuration JSON file. This is used to automatically
+        include the correct module load commands in generated job scripts.
         
         Args:
-            config: Configuration dictionary containing machine_name and qe_version
-            
+            config (dict): Configuration dictionary that must contain:
+                - machine_name (str): Name of the machine configuration
+                - qe_version (str): Quantum ESPRESSO version string (e.g., '7.2')
+                
         Returns:
-            list: Modules to load, or None if not found
+            list or None: List of module names to load (e.g., ['quantum-espresso/7.2']),
+                         or None if modules not found or config is incomplete
+                         
+        Note:
+            This method gracefully handles missing xespresso, missing config files,
+            or incomplete config dictionaries by returning None. Modules are optional
+            for local execution but typically required for HPC environments.
         """
         try:
             if not XESPRESSO_AVAILABLE:

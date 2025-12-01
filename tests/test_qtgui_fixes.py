@@ -11,7 +11,27 @@ import pytest
 import os
 import tempfile
 from pathlib import Path
-from ase.build import bulk
+
+# Import ASE with graceful handling
+try:
+    from ase.build import bulk
+    ASE_AVAILABLE = True
+except ImportError:
+    ASE_AVAILABLE = False
+    bulk = None
+
+# Import xespresso with graceful handling
+try:
+    from xespresso import Espresso
+    from xespresso.machines.machine import Machine
+    from xespresso.codes.config import Code, CodesConfig
+    XESPRESSO_AVAILABLE = True
+except ImportError:
+    XESPRESSO_AVAILABLE = False
+    Espresso = None
+    Machine = None
+    Code = None
+    CodesConfig = None
 
 
 def test_ase_espresso_command_set_in_qtgui():
@@ -25,10 +45,9 @@ def test_ase_espresso_command_set_in_qtgui():
     assert 'PREFIX.PACKAGEi > PREFIX.PACKAGEo' in os.environ['ASE_ESPRESSO_COMMAND']
 
 
+@pytest.mark.skipif(not ASE_AVAILABLE or not XESPRESSO_AVAILABLE, reason="ASE or xespresso not available")
 def test_kpoints_mutually_exclusive():
     """Test that Espresso calculator receives EITHER kspacing OR kpts, never both."""
-    from xespresso import Espresso
-    
     atoms = bulk('Fe', 'bcc', a=2.87)
     
     # Set environment variable
@@ -72,10 +91,9 @@ def test_kpoints_mutually_exclusive():
         assert calc3 is not None
 
 
+@pytest.mark.skipif(not XESPRESSO_AVAILABLE, reason="xespresso not available")
 def test_launcher_from_machine_config():
     """Test that job_file uses launcher from machine configuration."""
-    from xespresso.machines.machine import Machine
-    
     # Create a machine with custom launcher
     machine = Machine(
         name='test_machine',
@@ -94,10 +112,9 @@ def test_launcher_from_machine_config():
     assert '8' in launcher
 
 
+@pytest.mark.skipif(not XESPRESSO_AVAILABLE, reason="xespresso not available")
 def test_modules_from_codes_config():
     """Test that modules are loaded from codes configuration."""
-    from xespresso.codes.config import Code, CodesConfig
-    
     # Create a codes configuration with modules
     codes_config = CodesConfig(
         machine_name='test_machine',

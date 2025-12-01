@@ -564,6 +564,8 @@ class JobSubmissionPage(QWidget):
                         'queue': queue,
                     }
                     
+                    # K-points: pass either kspacing OR kpts, never both (xespresso pattern)
+                    # xespresso's sort_qe_input treats these as mutually exclusive (lines 559-560 in xio.py)
                     if kspacing:
                         calc_kwargs['kspacing'] = kspacing
                     elif kpts:
@@ -780,18 +782,42 @@ Files created in: <code>{full_path}</code>
         lines.append(f"# Calculation: {config.get('calc_type', 'scf')}")
         lines.append("")
         
+        # Module loading from codes configuration
+        modules = config.get('modules')
+        if modules:
+            lines.append("# Load required modules")
+            if isinstance(modules, list):
+                for module in modules:
+                    lines.append(f"module load {module}")
+            else:
+                lines.append(f"module load {modules}")
+            lines.append("")
+        
         # Environment setup (user can customize)
-        lines.append("# Environment setup (uncomment and modify as needed)")
+        lines.append("# Additional environment setup (uncomment and modify as needed)")
         lines.append("# source /path/to/espresso/env.sh")
-        lines.append("# module load quantum-espresso")
+        if not modules:
+            lines.append("# module load quantum-espresso")
         lines.append("")
         
-        # Execution command
+        # Get launcher from machine configuration
+        launcher = ""
         nprocs = config.get('nprocs', 1)
-        if nprocs > 1:
-            lines.append(f"mpirun -np {nprocs} pw.x -in {prefix}.pwi > {prefix}.pwo")
-        else:
-            lines.append(f"pw.x -in {prefix}.pwi > {prefix}.pwo")
+        machine = self.session_state.get('calc_machine')
+        
+        if machine and hasattr(machine, 'launcher') and machine.launcher:
+            # Use launcher from machine config
+            launcher = machine.launcher
+            # Replace {nprocs} placeholder if present
+            if '{nprocs}' in launcher:
+                launcher = launcher.replace('{nprocs}', str(nprocs))
+            launcher = launcher + " "
+        elif nprocs > 1:
+            # Fallback to default mpirun launcher
+            launcher = f"mpirun -np {nprocs} "
+        
+        # Execution command
+        lines.append(f"{launcher}pw.x -in {prefix}.pwi > {prefix}.pwo")
         lines.append("")
         
         # Write the job file

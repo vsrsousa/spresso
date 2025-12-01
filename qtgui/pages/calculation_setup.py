@@ -658,6 +658,26 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         config['qe_version'] = self.version_combo.currentText()
         config['selected_code'] = self.code_combo.currentText()
         
+        # Try to load modules from codes configuration
+        try:
+            if XESPRESSO_AVAILABLE:
+                from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
+                
+                machine_name = config['machine_name']
+                qe_version = config['qe_version']
+                
+                if machine_name and qe_version:
+                    codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
+                    
+                    if codes and codes.versions and qe_version in codes.versions:
+                        version_config = codes.versions[qe_version]
+                        # Store modules in config if they exist
+                        if version_config.get('modules'):
+                            config['modules'] = version_config['modules']
+        except Exception:
+            # Silently fail - modules are optional
+            pass
+        
         # Resources
         if self.adjust_resources_check.isChecked():
             config['adjust_resources'] = True
@@ -711,6 +731,33 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             QMessageBox.warning(self, "Warning", "Please specify pseudopotentials for all elements")
             return
         
+        # Set up environment for Espresso calculator
+        # 1. Set ASE_ESPRESSO_COMMAND environment variable (like Streamlit GUI does)
+        # This tells xespresso's Espresso calculator how to run QE executables
+        import os
+        os.environ['ASE_ESPRESSO_COMMAND'] = "LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo"
+        
+        # 2. Load modules from codes configuration if available
+        try:
+            if XESPRESSO_AVAILABLE:
+                from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
+                
+                machine_name = config.get('machine_name')
+                qe_version = config.get('qe_version')
+                
+                if machine_name and qe_version:
+                    codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
+                    
+                    if codes and codes.versions and qe_version in codes.versions:
+                        version_config = codes.versions[qe_version]
+                        # Store modules in config so they can be used by scheduler/job_file
+                        if version_config.get('modules'):
+                            config['modules'] = version_config['modules']
+        except Exception as e:
+            # Log but don't fail if module loading fails
+            import logging
+            logging.warning(f"Could not load modules from codes config: {e}")
+        
         # Store config in session state
         self.session_state['workflow_config'] = config
         
@@ -745,8 +792,106 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         try:
             self._load_machines()
             self._update_structure_status()
+            # Restore UI state from saved configuration if exists
+            self._restore_config_to_ui()
         finally:
             self._loading = False
+    
+    def _restore_config_to_ui(self):
+        """Restore UI state from saved workflow_config in session state.
+        
+        This ensures that when a session is loaded, the magnetic and hubbard
+        checkboxes and other UI elements reflect the saved configuration,
+        allowing continued editing after session save/reload.
+        """
+        config = self.session_state.get('workflow_config')
+        if not config:
+            return
+        
+        # Restore magnetic configuration checkbox state
+        if config.get('enable_magnetism'):
+            self.magnetic_group.setChecked(True)
+            # Restore magnetic values if elements exist
+            if config.get('magnetic_config'):
+                for element, mag_value in config['magnetic_config'].items():
+                    if element in self.magnetic_edits:
+                        # mag_value might be a list from setup_magnetic_config
+                        value = mag_value[0] if isinstance(mag_value, list) else mag_value
+                        self.magnetic_edits[element].setValue(value)
+        
+        # Restore Hubbard configuration checkbox state
+        if config.get('enable_hubbard'):
+            self.hubbard_group.setChecked(True)
+            # Restore Hubbard U values if elements exist
+            if config.get('hubbard_u'):
+                for element, u_value in config['hubbard_u'].items():
+                    if element in self.hubbard_edits:
+                        self.hubbard_edits[element].setValue(u_value)
+            # Restore Hubbard format
+            if config.get('hubbard_format'):
+                format_str = "New (QE >= 7.0)" if config['hubbard_format'] == 'new' else "Old (QE < 7.0)"
+                idx = self.hubbard_format_combo.findText(format_str)
+                if idx >= 0:
+                    self.hubbard_format_combo.setCurrentIndex(idx)
+        
+        # Restore other configuration values
+        if config.get('calc_type'):
+            idx = self.calc_type_combo.findText(config['calc_type'])
+            if idx >= 0:
+                self.calc_type_combo.setCurrentIndex(idx)
+        
+        if config.get('label'):
+            self.label_edit.setText(config['label'])
+        
+        if 'ecutwfc' in config:
+            self.ecutwfc_spin.setValue(config['ecutwfc'])
+        
+        if 'ecutrho' in config:
+            self.ecutrho_spin.setValue(config['ecutrho'])
+        
+        if config.get('occupations'):
+            idx = self.occupations_combo.findText(config['occupations'])
+            if idx >= 0:
+                self.occupations_combo.setCurrentIndex(idx)
+        
+        if 'conv_thr' in config:
+            self.conv_thr_edit.setText(str(config['conv_thr']))
+        
+        # Restore smearing parameters
+        if config.get('smearing'):
+            idx = self.smearing_combo.findText(config['smearing'])
+            if idx >= 0:
+                self.smearing_combo.setCurrentIndex(idx)
+        
+        if 'degauss' in config:
+            self.degauss_spin.setValue(config['degauss'])
+        
+        # Restore k-points
+        if 'kspacing' in config:
+            self.kspacing_radio.setChecked(True)
+            self.kspacing_spin.setValue(config['kspacing'])
+        elif 'kpts' in config:
+            self.explicit_radio.setChecked(True)
+            kpts = config['kpts']
+            if isinstance(kpts, (list, tuple)) and len(kpts) == 3:
+                self.k1_spin.setValue(kpts[0])
+                self.k2_spin.setValue(kpts[1])
+                self.k3_spin.setValue(kpts[2])
+        
+        # Restore resources configuration
+        if config.get('adjust_resources'):
+            self.adjust_resources_check.setChecked(True)
+            if 'nprocs' in config:
+                self.nprocs_spin.setValue(config['nprocs'])
+            resources = config.get('resources', {})
+            if 'nodes' in resources:
+                self.nodes_spin.setValue(resources['nodes'])
+            if 'ntasks-per-node' in resources:
+                self.ntasks_spin.setValue(resources['ntasks-per-node'])
+            if 'time' in resources:
+                self.time_edit.setText(resources['time'])
+            if 'partition' in resources:
+                self.partition_edit.setText(resources['partition'])
     
     def _should_save_config(self, config, existing_config):
         """Determine if the current config should overwrite existing config.

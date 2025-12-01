@@ -38,6 +38,20 @@ except ImportError:
     PSEUDO_SELECTOR_AVAILABLE = False
 
 
+# Predefined magnetic moments for common elements
+PREDEFINED_MAGNETIC_MOMENTS = {
+    'Fe': 2.2, 'Co': 1.7, 'Ni': 0.6, 'Mn': 5.0, 'Cr': 3.0,
+    'V': 2.0, 'Ti': 1.0, 'Gd': 7.0, 'Nd': 3.0
+}
+
+# Typical Hubbard U values for common elements
+TYPICAL_HUBBARD_U = {
+    'Fe': 4.0, 'Co': 3.5, 'Ni': 3.0, 'Mn': 4.0, 'Cr': 3.5,
+    'V': 3.0, 'Ti': 2.5, 'Cu': 4.0, 'Zn': 4.0,
+    'Gd': 6.0, 'Nd': 5.0, 'Ce': 5.0, 'O': 0.0
+}
+
+
 class CalculationSetupPage(QWidget):
     """Calculation setup page widget."""
     
@@ -45,6 +59,9 @@ class CalculationSetupPage(QWidget):
         super().__init__()
         self.session_state = session_state
         self._loading = False  # Guard to prevent infinite loops
+        # Initialize dictionaries for dynamic inputs
+        self.magnetic_edits = {}
+        self.hubbard_edits = {}
         self._setup_ui()
     
     def _setup_ui(self):
@@ -560,18 +577,12 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         self.magnetic_edits = {}
         
-        # Predefined magnetic moments for common elements
-        predefined = {
-            'Fe': 2.2, 'Co': 1.7, 'Ni': 0.6, 'Mn': 5.0, 'Cr': 3.0,
-            'V': 2.0, 'Ti': 1.0, 'Gd': 7.0, 'Nd': 3.0
-        }
-        
         for element in sorted(elements):
             spin = QDoubleSpinBox()
             spin.setRange(-10.0, 10.0)
             spin.setSingleStep(0.1)
             spin.setDecimals(2)
-            default_val = predefined.get(element, 0.0)
+            default_val = PREDEFINED_MAGNETIC_MOMENTS.get(element, 0.0)
             spin.setValue(default_val)
             self.magnetic_edits[element] = spin
             self.magnetic_container_layout.addRow(f"{element}:", spin)
@@ -586,20 +597,13 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         self.hubbard_edits = {}
         
-        # Typical U values for common elements
-        typical_u = {
-            'Fe': 4.0, 'Co': 3.5, 'Ni': 3.0, 'Mn': 4.0, 'Cr': 3.5,
-            'V': 3.0, 'Ti': 2.5, 'Cu': 4.0, 'Zn': 4.0,
-            'Gd': 6.0, 'Nd': 5.0, 'Ce': 5.0, 'O': 0.0
-        }
-        
         for element in sorted(elements):
             spin = QDoubleSpinBox()
             spin.setRange(0.0, 20.0)
             spin.setSingleStep(0.5)
             spin.setDecimals(1)
             spin.setSuffix(" eV")
-            default_val = typical_u.get(element, 0.0)
+            default_val = TYPICAL_HUBBARD_U.get(element, 0.0)
             spin.setValue(default_val)
             self.hubbard_edits[element] = spin
             self.hubbard_container_layout.addRow(f"{element}:", spin)
@@ -609,17 +613,12 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         if preset == "Custom":
             return
         
-        predefined = {
-            'Fe': 2.2, 'Co': 1.7, 'Ni': 0.6, 'Mn': 5.0, 'Cr': 3.0,
-            'V': 2.0, 'Ti': 1.0, 'Gd': 7.0, 'Nd': 3.0
-        }
-        
-        for element, spin in getattr(self, 'magnetic_edits', {}).items():
-            if element in predefined:
+        for element, spin in self.magnetic_edits.items():
+            if element in PREDEFINED_MAGNETIC_MOMENTS:
                 if preset == "Ferromagnetic":
-                    spin.setValue(predefined[element])
+                    spin.setValue(PREDEFINED_MAGNETIC_MOMENTS[element])
                 elif preset == "Antiferromagnetic":
-                    spin.setValue(-predefined[element])
+                    spin.setValue(-PREDEFINED_MAGNETIC_MOMENTS[element])
             else:
                 spin.setValue(0.0)
     
@@ -674,7 +673,7 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         if self.magnetic_group.isChecked():
             config['enable_magnetism'] = True
             config['magnetic_config'] = {}
-            for element, spin in getattr(self, 'magnetic_edits', {}).items():
+            for element, spin in self.magnetic_edits.items():
                 value = spin.value()
                 if value != 0.0:
                     config['magnetic_config'][element] = [value]
@@ -687,7 +686,7 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             config['enable_hubbard'] = True
             config['hubbard_format'] = 'new' if 'New' in self.hubbard_format_combo.currentText() else 'old'
             config['hubbard_u'] = {}
-            for element, spin in getattr(self, 'hubbard_edits', {}).items():
+            for element, spin in self.hubbard_edits.items():
                 value = spin.value()
                 if value > 0.0:
                     config['hubbard_u'][element] = value

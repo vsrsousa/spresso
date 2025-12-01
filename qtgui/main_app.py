@@ -29,6 +29,9 @@ from PySide6.QtGui import QIcon, QFont, QAction, QScreen
 # Default session data directory
 DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.xespresso/sessions")
 
+# Invalid characters in filenames (cross-platform)
+INVALID_FILENAME_CHARS = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+
 
 # Lazy import helper for page modules (improves startup time)
 _page_modules = {}
@@ -448,10 +451,9 @@ class SessionState:
         # Rename the JSON file if it exists
         if old_name and old_name != new_name:
             # Sanitize filenames
-            invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
             old_safe = old_name
             new_safe = new_name
-            for char in invalid_chars:
+            for char in INVALID_FILENAME_CHARS:
                 old_safe = old_safe.replace(char, '_')
                 new_safe = new_safe.replace(char, '_')
             
@@ -519,11 +521,8 @@ class SessionState:
         # Use session name for the filename, not the session ID
         session_name = self._state.get('session_name', 'Unnamed')
         # Sanitize filename: replace characters that are invalid in filenames
-        # Invalid chars on Windows: < > : " / \ | ? *
-        # Invalid chars on Unix: / and null
-        invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
         safe_filename = session_name
-        for char in invalid_chars:
+        for char in INVALID_FILENAME_CHARS:
             safe_filename = safe_filename.replace(char, '_')
         session_path = os.path.join(self._sessions_dir, f"{safe_filename}.json")
         

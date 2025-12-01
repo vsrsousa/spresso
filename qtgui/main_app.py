@@ -82,6 +82,7 @@ class SessionState:
             cls._instance._current_session_id = "default"
             cls._instance._sessions_dir = DEFAULT_SESSIONS_DIR
             cls._instance._listeners = []
+            cls._instance._notifying = False  # Guard against recursive notifications
             cls._instance._initialize_defaults()
             cls._instance._load_sessions_index()
         return cls._instance
@@ -132,12 +133,24 @@ class SessionState:
             self._listeners.remove(callback)
     
     def _notify_listeners(self):
-        """Notify all listeners of state change."""
-        for listener in self._listeners:
-            try:
-                listener()
-            except Exception:
-                pass  # Don't let listener errors crash the app
+        """Notify all listeners of state change.
+        
+        Uses a guard to prevent recursive notifications which could occur
+        if a listener updates the state during notification.
+        """
+        # Prevent recursive notifications
+        if self._notifying:
+            return
+        
+        self._notifying = True
+        try:
+            for listener in self._listeners:
+                try:
+                    listener()
+                except Exception:
+                    pass  # Don't let listener errors crash the app
+        finally:
+            self._notifying = False
     
     def _load_sessions_index(self):
         """Load the index of available sessions."""
@@ -391,8 +404,8 @@ class MainWindow(QMainWindow):
             (screen.height() - height) // 2
         )
         
-        # Initialize session state
-        self.session_state = session_state
+        # Initialize session state - use singleton directly for robustness
+        self.session_state = SessionState()
         
         # Configuration dialog (created on demand)
         self._config_dialog = None

@@ -1181,16 +1181,23 @@ Version: 1.2.0<br>
         
         First collects current state from all pages, then saves to disk.
         """
-        # Collect current state from all pages before saving
-        for page in self.pages:
-            if hasattr(page, 'save_state'):
-                try:
-                    page.save_state()
-                except Exception as e:
-                    print(f"Warning: Could not save state from page: {e}")
-        
-        self.session_state.save_session()
-        self.statusbar.showMessage("Session saved")
+        # Set updating flag to prevent refresh during save
+        # This prevents the session state listener from triggering page refreshes
+        # while we're collecting state from pages, which would restore old UI values
+        self._updating = True
+        try:
+            # Collect current state from all pages before saving
+            for page in self.pages:
+                if hasattr(page, 'save_state'):
+                    try:
+                        page.save_state()
+                    except Exception as e:
+                        print(f"Warning: Could not save state from page: {e}")
+            
+            self.session_state.save_session()
+            self.statusbar.showMessage("Session saved")
+        finally:
+            self._updating = False
     
     def _load_session_dialog(self):
         """Open a dialog to load a saved session from the sessions directory.

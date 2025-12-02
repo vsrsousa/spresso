@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTextEdit,
     QTabWidget, QTreeWidget, QTreeWidgetItem, QFileDialog,
-    QHeaderView, QSplitter
+    QHeaderView, QSplitter, QApplication
 )
 from PySide6.QtCore import Qt
 
@@ -845,7 +845,15 @@ Files created in: <code>{full_path}</code>
         os.chmod(job_file_path, 0o755)
     
     def _run_calculation(self):
-        """Run the calculation."""
+        """Run the calculation using xespresso.
+        
+        This method creates an Espresso calculator and runs the calculation
+        by calling get_potential_energy(), which will:
+        1. Check for previous results
+        2. Generate input files if needed
+        3. Execute the calculation via the configured launcher
+        4. Parse output and return energy
+        """
         atoms = self.session_state.get('current_structure')
         config = self.session_state.get('workflow_config', {})
         
@@ -857,33 +865,245 @@ Files created in: <code>{full_path}</code>
             QMessageBox.warning(self, "Warning", "No calculation configured.")
             return
         
-        # Note: In a real implementation, this would use xespresso to run the calculation
-        # For now, we show a message that the calculation framework is not available
+        if not XESPRESSO_AVAILABLE:
+            QMessageBox.warning(
+                self,
+                "xespresso Not Available",
+                "xespresso module is not installed or not available.\n\n"
+                "Install it with: pip install xespresso\n\n"
+                "Or use the Streamlit GUI for integrated execution."
+            )
+            return
         
-        QMessageBox.information(
-            self,
-            "Run Calculation",
-            "To run calculations, please use the command line:\n\n"
-            "python -m xespresso\n\n"
-            "Or use the Streamlit GUI which has full calculation support.\n\n"
-            "This PyQt GUI currently supports configuration and file generation."
-        )
+        workdir = self.session_state.get('working_directory', os.path.expanduser("~"))
+        label = self.run_label_edit.text()
         
-        self.run_results.setText("""
-ℹ️ <b>Calculation Execution</b>
+        if not label:
+            QMessageBox.warning(self, "Warning", "Please enter a calculation label.")
+            return
+        
+        full_path = os.path.join(workdir, label)
+        
+        # Validate path using centralized validation utility
+        from qtgui.utils import validate_path_under_base, safe_makedirs
+        is_valid, full_path, error_msg = validate_path_under_base(full_path, workdir)
+        if not is_valid:
+            QMessageBox.critical(self, "Error", f"Invalid calculation label: {error_msg}")
+            return
+        
+        try:
+            # Create output directory
+            safe_makedirs(full_path)
+            
+            # Update status
+            self.run_status.setText("⏳ Preparing calculation...")
+            self.run_status.setStyleSheet("color: blue;")
+            self.run_results.setText("Initializing calculator...")
+            QApplication.processEvents()  # Update UI
+            
+            # Prepare input parameters
+            prefix = label.split('/')[-1] if '/' in label else label
+            input_data = self._build_input_data(config, prefix)
+            
+            # Get k-points configuration
+            kspacing = config.get('kspacing')
+            kpts = config.get('kpts')
+            
+            # Convert kspacing to kpts if needed
+            if kspacing and not kpts:
+                try:
+                    from xespresso import kpts_from_spacing
+                    kpts = kpts_from_spacing(atoms, kspacing)
+                    kspacing = None
+                except ImportError as e:
+                    # kpts_from_spacing not available in this xespresso version
+                    # Fall back to using kspacing directly (may not work correctly)
+                    import logging
+                    logging.warning(f"kpts_from_spacing not available: {e}. Using kspacing directly.")
+                    pass
+            
+            # Build queue configuration
+            machine = self.session_state.get('calc_machine')
+            if machine:
+                # Try to convert machine to queue configuration
+                # Validate that machine has the to_queue() method before calling
+                if hasattr(machine, 'to_queue') and callable(machine.to_queue):
+                    try:
+                        queue = machine.to_queue()
+                    except Exception as e:
+                        # Conversion failed - use default local queue
+                        import logging
+                        logging.warning(f"Failed to convert machine to queue: {e}. Using default local queue.")
+                        queue = {'execution': 'local', 'scheduler': 'direct'}
+                else:
+                    # Machine doesn't have to_queue() method - use default
+                    import logging
+                    logging.warning(f"Machine object doesn't have to_queue() method. Using default local queue.")
+                    queue = {'execution': 'local', 'scheduler': 'direct'}
+            else:
+                queue = {'execution': 'local', 'scheduler': 'direct'}
+                if config.get('adjust_resources'):
+                    resources = config.get('resources', {})
+                    queue.update(resources)
+            
+            # Add modules to queue
+            if config.get('modules'):
+                queue['use_modules'] = True
+                queue['modules'] = config['modules']
+            
+            # Create Espresso calculator
+            from xespresso import Espresso
+            
+            calc_kwargs = {
+                'label': full_path,
+                'pseudopotentials': config.get('pseudopotentials', {}),
+                'input_data': input_data,
+                'queue': queue,
+            }
+            
+            # K-points
+            if kpts:
+                calc_kwargs['kpts'] = kpts
+            else:
+                calc_kwargs['kpts'] = (4, 4, 4)
+            
+            # Parallel command
+            nprocs = config.get('nprocs', 1)
+            if nprocs > 1:
+                calc_kwargs['parallel'] = f'-np {nprocs}'
+            
+            calc = Espresso(**calc_kwargs)
+            
+            # Make a copy of atoms and attach calculator
+            atoms_copy = atoms.copy()
+            atoms_copy.calc = calc
+            
+            # Update status
+            self.run_status.setText("⏳ Running calculation... (this may take a while)")
+            self.run_status.setStyleSheet("color: blue;")
+            self.run_results.setText(f"""
+<b>Calculation started</b>
 
-Full calculation execution requires xespresso to be properly installed
-with all dependencies (Quantum ESPRESSO, MPI, etc.).
+Working directory: <code>{full_path}</code>
 
-<b>To run a calculation:</b>
-<ol>
-<li>Use the "Generate Files" tab to create input files</li>
-<li>Review and edit files as needed</li>
-<li>Run manually: <code>pw.x -in espresso.pwi > espresso.pwo</code></li>
-<li>Or use the Streamlit GUI for integrated execution</li>
-</ol>
+The calculation is now running. This may take several minutes to hours
+depending on system size and computational resources.
+
+<b>Note:</b> The GUI may appear frozen during calculation execution.
+This is normal for local calculations.
 """)
-        self.run_results.setTextFormat(Qt.RichText)
+            self.run_results.setTextFormat(Qt.RichText)
+            QApplication.processEvents()  # Update UI
+            
+            # Run the calculation
+            # This calls xespresso's Espresso.get_potential_energy() which will:
+            # 1. Generate input files if needed
+            # 2. Submit the job to the configured scheduler/launcher
+            # 3. Wait for completion and parse output
+            # Any errors during calculation will be caught by the outer try-except
+            energy = calc.get_potential_energy(atoms_copy)
+            
+            # Success! Display results
+            self.run_status.setText("✅ Calculation completed successfully!")
+            self.run_status.setStyleSheet("color: green;")
+            
+            self.energy_label.setText(f"Energy: {energy:.6f} eV")
+            
+            # Get additional results if available
+            results_text = f"""
+<b>✅ Calculation Completed Successfully!</b>
+
+<b>Energy:</b> {energy:.6f} eV
+
+<b>Output Directory:</b> <code>{full_path}</code>
+
+<b>Output Files:</b>
+<ul>
+<li>Input file: <code>{prefix}.pwi</code></li>
+<li>Output file: <code>{prefix}.pwo</code></li>
+<li>Job script: <code>job_file</code> (if using scheduler)</li>
+</ul>
+
+<b>Next Steps:</b>
+<ul>
+<li>View output files in the File Browser tab</li>
+<li>Analyze results in Results & Post-Processing</li>
+<li>Continue workflow (e.g., bands, DOS calculation)</li>
+</ul>
+"""
+            
+            # Add forces if available
+            # Some calculation types may not have forces available
+            if hasattr(atoms_copy, 'get_forces'):
+                try:
+                    forces = atoms_copy.get_forces()
+                    max_force = float((forces**2).sum(axis=1).max()**0.5)
+                    results_text += f"\n<b>Max Force:</b> {max_force:.6f} eV/Å\n"
+                except (RuntimeError, KeyError) as e:
+                    # Forces not available for this calculation type (e.g., SCF)
+                    # This is expected and not an error
+                    import logging
+                    logging.debug(f"Forces not available: {e}")
+                except Exception as e:
+                    # Unexpected error getting forces
+                    import logging
+                    logging.warning(f"Unexpected error getting forces: {e}")
+            
+            self.run_results.setText(results_text)
+            self.run_results.setTextFormat(Qt.RichText)
+            
+            # Refresh browser to show new files
+            self._refresh_browser()
+            
+            QMessageBox.information(
+                self,
+                "Calculation Complete",
+                f"Calculation completed successfully!\n\nEnergy: {energy:.6f} eV"
+            )
+            
+        except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
+            
+            self.run_status.setText("❌ Calculation failed!")
+            self.run_status.setStyleSheet("color: red;")
+            
+            self.energy_label.setText("")
+            
+            self.run_results.setText(f"""
+<b>❌ Calculation Failed</b>
+
+<b>Error:</b> {str(e)}
+
+<b>Possible Causes:</b>
+<ul>
+<li>Quantum ESPRESSO not installed or not in PATH</li>
+<li>Missing pseudopotential files</li>
+<li>Invalid calculation parameters</li>
+<li>Insufficient computational resources</li>
+<li>MPI not configured correctly (for parallel runs)</li>
+</ul>
+
+<b>Troubleshooting:</b>
+<ol>
+<li>Check that QE is installed: <code>which pw.x</code></li>
+<li>Verify pseudopotential paths are correct</li>
+<li>Review input file in: <code>{full_path}</code></li>
+<li>Try running manually: <code>bash job_file</code></li>
+<li>Check QE output for detailed error messages</li>
+</ol>
+
+<b>Detailed Error:</b>
+<pre>{error_traceback}</pre>
+""")
+            self.run_results.setTextFormat(Qt.RichText)
+            
+            QMessageBox.critical(
+                self,
+                "Calculation Error",
+                f"Calculation failed with error:\n\n{str(e)}\n\n"
+                f"See details in the Results section below."
+            )
     
     def refresh(self):
         """Refresh the page."""

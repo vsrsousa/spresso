@@ -53,7 +53,7 @@ class TestQtGuiHubbardFix:
         page = JobSubmissionPage(session_state)
         
         # Call the private method to prepare input data
-        input_data = page._prepare_input_data(config, 'test')
+        input_data = page._build_input_data(config, 'test')
         
         # Verify old format structure
         assert 'SYSTEM' in input_data
@@ -111,7 +111,7 @@ class TestQtGuiHubbardFix:
         page = JobSubmissionPage(session_state)
         
         # Call the private method to prepare input data
-        input_data = page._prepare_input_data(config, 'test')
+        input_data = page._build_input_data(config, 'test')
         
         # Verify new format structure
         assert 'SYSTEM' in input_data
@@ -152,7 +152,7 @@ class TestQtGuiHubbardFix:
         session_state = {'workflow_config': config}
         page = JobSubmissionPage(session_state)
         
-        input_data = page._prepare_input_data(config, 'test')
+        input_data = page._build_input_data(config, 'test')
         
         # With version 7.2 and old format selected, should still use old format
         # as user explicitly chose it
@@ -182,7 +182,7 @@ class TestQtGuiHubbardFix:
         session_state = {'workflow_config': config}
         page = JobSubmissionPage(session_state)
         
-        input_data = page._prepare_input_data(config, 'test')
+        input_data = page._build_input_data(config, 'test')
         
         # With version 6.8 and new format selected, should use new format
         # as user explicitly chose it (they might have backported support)
@@ -220,7 +220,7 @@ class TestQtGuiHubbardFix:
         session_state = {'workflow_config': config}
         page = JobSubmissionPage(session_state)
         
-        input_data = page._prepare_input_data(config, 'test')
+        input_data = page._build_input_data(config, 'test')
         
         # Verify default orbitals are used
         assert 'hubbard' in input_data
@@ -254,7 +254,7 @@ class TestQtGuiHubbardFix:
         session_state = {'workflow_config': config}
         page = JobSubmissionPage(session_state)
         
-        input_data = page._prepare_input_data(config, 'test')
+        input_data = page._build_input_data(config, 'test')
         
         # Verify Hubbard is not set
         assert 'lda_plus_u' not in input_data['SYSTEM'] or not input_data['SYSTEM']['lda_plus_u']

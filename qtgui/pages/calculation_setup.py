@@ -66,6 +66,7 @@ class CalculationSetupPage(QWidget):
         # Initialize dictionaries for dynamic inputs
         self.magnetic_edits = {}
         self.hubbard_edits = {}
+        self.hubbard_orbital_edits = {}
         self._setup_ui()
     
     def _setup_ui(self):

@@ -31,6 +31,36 @@ except ImportError:
     XESPRESSO_AVAILABLE = False
 
 
+# Default orbitals for common elements in DFT+U calculations
+DEFAULT_HUBBARD_ORBITALS = {
+    # 3d transition metals
+    'Ti': '3d', 'V': '3d', 'Cr': '3d', 'Mn': '3d', 'Fe': '3d',
+    'Co': '3d', 'Ni': '3d', 'Cu': '3d', 'Zn': '3d',
+    # 4d transition metals
+    'Zr': '4d', 'Nb': '4d', 'Mo': '4d', 'Tc': '4d', 'Ru': '4d',
+    'Rh': '4d', 'Pd': '4d', 'Ag': '4d', 'Cd': '4d',
+    # 4f rare earths
+    'Ce': '4f', 'Pr': '4f', 'Nd': '4f', 'Pm': '4f', 'Sm': '4f',
+    'Eu': '4f', 'Gd': '4f', 'Tb': '4f', 'Dy': '4f', 'Ho': '4f',
+    'Er': '4f', 'Tm': '4f', 'Yb': '4f', 'Lu': '4f',
+    # p-block elements (often used with oxygen)
+    'O': '2p', 'S': '3p', 'Se': '4p',
+    'N': '2p', 'P': '3p', 'As': '4p',
+}
+
+
+def _get_default_orbital(element):
+    """Get default orbital for element in Hubbard calculations.
+    
+    Args:
+        element: Chemical symbol (e.g., 'Fe', 'Mn')
+    
+    Returns:
+        str: Default orbital (e.g., '3d', '4f', '2p')
+    """
+    return DEFAULT_HUBBARD_ORBITALS.get(element, '3d')
+
+
 class JobSubmissionPage(QWidget):
     """Job submission page widget."""
     
@@ -769,12 +799,54 @@ Files created in: <code>{full_path}</code>
         # Add Hubbard U configuration if enabled
         if config.get('enable_hubbard') and config.get('hubbard_u'):
             input_data['SYSTEM']['lda_plus_u'] = True
-            # Use lowercase 'input_ntyp' as required by xespresso
-            ensure_input_ntyp(input_data)
-            input_data['input_ntyp']['Hubbard_U'] = {}
-            for element, u_value in config.get('hubbard_u', {}).items():
-                if u_value > 0:
-                    input_data['input_ntyp']['Hubbard_U'][element] = u_value
+            
+            # Determine Hubbard format
+            hubbard_format = config.get('hubbard_format', 'old')
+            qe_version = config.get('qe_version', '')
+            
+            # Auto-detect format from QE version if not explicitly set
+            use_new_format = False
+            if hubbard_format == 'new':
+                use_new_format = True
+            elif hubbard_format == 'old':
+                use_new_format = False
+            elif qe_version:
+                # Parse version and determine format
+                try:
+                    major = int(qe_version.split('.')[0])
+                    use_new_format = (major >= 7)
+                except (ValueError, IndexError):
+                    pass
+            
+            if use_new_format:
+                # NEW FORMAT (QE >= 7.0): Use 'hubbard' dictionary with HUBBARD card
+                hubbard_dict = {
+                    'projector': config.get('hubbard_projector', 'atomic'),
+                    'u': {},
+                    'v': []
+                }
+                
+                # Build U parameters with orbital specifications
+                for element, u_value in config.get('hubbard_u', {}).items():
+                    if u_value > 0:
+                        # Get orbital from config, default to common orbitals
+                        orbital = config.get('hubbard_orbitals', {}).get(element, _get_default_orbital(element))
+                        hubbard_dict['u'][f"{element}-{orbital}"] = u_value
+                
+                # Add V parameters if present
+                if config.get('hubbard_v'):
+                    hubbard_dict['v'] = config['hubbard_v']
+                
+                input_data['hubbard'] = hubbard_dict
+                if qe_version:
+                    input_data['qe_version'] = qe_version
+            else:
+                # OLD FORMAT (QE < 7.0): Use 'input_ntyp' with Hubbard_U
+                ensure_input_ntyp(input_data)
+                input_data['input_ntyp']['Hubbard_U'] = {}
+                for element, u_value in config.get('hubbard_u', {}).items():
+                    if u_value > 0:
+                        input_data['input_ntyp']['Hubbard_U'][element] = u_value
         
         # Add relaxation parameters if doing relaxation
         if config.get('calc_type') in ('relax', 'vc-relax'):

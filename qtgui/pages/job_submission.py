@@ -570,6 +570,12 @@ class JobSubmissionPage(QWidget):
                             resources = config.get('resources', {})
                             queue.update(resources)
                     
+                    # Add modules from codes configuration to queue
+                    # This ensures modules are properly passed to the scheduler for job_file generation
+                    if config.get('modules'):
+                        queue['use_modules'] = True
+                        queue['modules'] = config['modules']
+                    
                     # Create Espresso calculator
                     calc_kwargs = {
                         'label': full_path,

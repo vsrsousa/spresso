@@ -44,7 +44,6 @@ def test_should_save_config_merges_pseudopotentials():
     
     # After fix: _should_save_config should return True and merge pseudopotentials
     # Simulate the fixed logic
-    should_save = True
     if new_config.get('pseudopotentials'):
         should_save = True
     elif not existing_config:
@@ -73,7 +72,6 @@ def test_should_save_config_with_no_existing():
     }
     
     # Should save even without pseudopotentials
-    should_save = True
     if new_config.get('pseudopotentials'):
         should_save = True
     elif not existing_config:
@@ -99,7 +97,7 @@ def test_should_save_config_with_new_pseudopotentials():
     }
     
     # Should save when new config has pseudopotentials
-    should_save = True if new_config.get('pseudopotentials') else False
+    should_save = bool(new_config.get('pseudopotentials'))
     
     assert should_save is True
 

@@ -226,8 +226,6 @@ class CalculationPreparation(BaseCalculationPreparation):
             # Ensure modules from codes configuration are included in queue
             # This is important for HPC environments where specific modules need to be loaded
             if 'modules' in config and config['modules']:
-                if 'queue' not in calc_params:
-                    calc_params['queue'] = {}
                 calc_params['queue']['use_modules'] = True
                 calc_params['queue']['modules'] = config['modules']
         elif 'modules' in config and config['modules']:

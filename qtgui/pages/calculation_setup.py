@@ -924,6 +924,8 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         Decision logic:
             - If new config has pseudopotentials: Save (it's a valid prepared config)
             - If no existing config: Save new config even if incomplete (preserve UI state)
+            - If existing config has pseudopotentials but new config doesn't:
+              Merge the new config (especially magnetic/hubbard settings) into existing
             - Otherwise: Keep existing (don't overwrite valid with incomplete)
         """
         # Always save if new config has pseudopotentials (indicates a prepared config)
@@ -933,6 +935,16 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         # If no existing config, save current state even if incomplete
         # to preserve other fields like calc_type, ecutwfc, kpts, etc.
         if not existing_config:
+            return True
+        
+        # If existing config has pseudopotentials but new one doesn't,
+        # merge important fields (magnetic/hubbard settings, basic params) into existing
+        # This allows users to edit magnetic/hubbard settings after session reload
+        # without having to re-prepare the calculation
+        if existing_config.get('pseudopotentials') and not config.get('pseudopotentials'):
+            # Preserve pseudopotentials from existing config
+            config['pseudopotentials'] = existing_config['pseudopotentials']
+            # Return True to save the merged config
             return True
         
         # Otherwise, keep existing config to avoid overwriting valid with incomplete

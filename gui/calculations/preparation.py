@@ -223,6 +223,17 @@ class CalculationPreparation(BaseCalculationPreparation):
         # Add queue configuration if present (for job submission)
         if 'queue' in config and config['queue']:
             calc_params['queue'] = config['queue']
+            # Ensure modules from codes configuration are included in queue
+            # This is important for HPC environments where specific modules need to be loaded
+            if 'modules' in config and config['modules']:
+                calc_params['queue']['use_modules'] = True
+                calc_params['queue']['modules'] = config['modules']
+        elif 'modules' in config and config['modules']:
+            # No queue config, but we have modules - create a basic queue with modules
+            calc_params['queue'] = {
+                'use_modules': True,
+                'modules': config['modules']
+            }
         
         # Add parallel execution parameters if present
         if 'parallel' in config and config['parallel']:

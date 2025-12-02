@@ -870,7 +870,7 @@ Files created in: <code>{full_path}</code>
                 self,
                 "xespresso Not Available",
                 "xespresso module is not installed or not available.\n\n"
-                "Install it with: pip install spresso\n\n"
+                "Install it with: pip install xespresso\n\n"
                 "Or use the Streamlit GUI for integrated execution."
             )
             return
@@ -915,15 +915,30 @@ Files created in: <code>{full_path}</code>
                     from xespresso import kpts_from_spacing
                     kpts = kpts_from_spacing(atoms, kspacing)
                     kspacing = None
-                except ImportError:
+                except ImportError as e:
+                    # kpts_from_spacing not available in this xespresso version
+                    # Fall back to using kspacing directly (may not work correctly)
+                    import logging
+                    logging.warning(f"kpts_from_spacing not available: {e}. Using kspacing directly.")
                     pass
             
             # Build queue configuration
             machine = self.session_state.get('calc_machine')
             if machine:
-                try:
-                    queue = machine.to_queue()
-                except (AttributeError, TypeError):
+                # Try to convert machine to queue configuration
+                # Validate that machine has the to_queue() method before calling
+                if hasattr(machine, 'to_queue') and callable(machine.to_queue):
+                    try:
+                        queue = machine.to_queue()
+                    except Exception as e:
+                        # Conversion failed - use default local queue
+                        import logging
+                        logging.warning(f"Failed to convert machine to queue: {e}. Using default local queue.")
+                        queue = {'execution': 'local', 'scheduler': 'direct'}
+                else:
+                    # Machine doesn't have to_queue() method - use default
+                    import logging
+                    logging.warning(f"Machine object doesn't have to_queue() method. Using default local queue.")
                     queue = {'execution': 'local', 'scheduler': 'direct'}
             else:
                 queue = {'execution': 'local', 'scheduler': 'direct'}
@@ -981,7 +996,11 @@ This is normal for local calculations.
             QApplication.processEvents()  # Update UI
             
             # Run the calculation
-            # This will generate input files, submit job, and parse results
+            # This calls xespresso's Espresso.get_potential_energy() which will:
+            # 1. Generate input files if needed
+            # 2. Submit the job to the configured scheduler/launcher
+            # 3. Wait for completion and parse output
+            # Any errors during calculation will be caught by the outer try-except
             energy = calc.get_potential_energy(atoms_copy)
             
             # Success! Display results
@@ -1014,13 +1033,21 @@ This is normal for local calculations.
 """
             
             # Add forces if available
+            # Some calculation types may not have forces available
             if hasattr(atoms_copy, 'get_forces'):
                 try:
                     forces = atoms_copy.get_forces()
                     max_force = float((forces**2).sum(axis=1).max()**0.5)
                     results_text += f"\n<b>Max Force:</b> {max_force:.6f} eV/Å\n"
-                except Exception:
-                    pass
+                except (RuntimeError, KeyError) as e:
+                    # Forces not available for this calculation type (e.g., SCF)
+                    # This is expected and not an error
+                    import logging
+                    logging.debug(f"Forces not available: {e}")
+                except Exception as e:
+                    # Unexpected error getting forces
+                    import logging
+                    logging.warning(f"Unexpected error getting forces: {e}")
             
             self.run_results.setText(results_text)
             self.run_results.setTextFormat(Qt.RichText)

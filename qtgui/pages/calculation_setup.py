@@ -72,7 +72,7 @@ class CalculationSetupPage(QWidget):
         self._setup_ui()
     
     def _get_combobox_stylesheet(self):
-        """Get the stylesheet for comboboxes."""
+        """Get the stylesheet for comboboxes with proper contrast."""
         return """
             QComboBox {
                 padding: 2px;
@@ -81,14 +81,14 @@ class CalculationSetupPage(QWidget):
                 border: 0px;
             }
             QComboBox QAbstractItemView {
-                selection-background-color: #4A90E2;
-                selection-color: white;
-                background-color: white;
+                selection-background-color: #B3D9FF;
+                selection-color: black;
+                background-color: #F5F5F5;
                 color: black;
             }
             QComboBox QAbstractItemView::item:hover {
-                background-color: #7BADF5;
-                color: white;
+                background-color: #D6EBFF;
+                color: black;
             }
         """
     
@@ -816,10 +816,23 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 if pseudo:
                     config['pseudopotentials'][element] = pseudo
         
-        # Machine
+        # Machine and Queue configuration
         config['machine_name'] = self.machine_combo.currentText()
         config['qe_version'] = self.version_combo.currentText()
         config['selected_code'] = self.code_combo.currentText()
+        
+        # Get the machine object and convert to queue configuration
+        # This ensures the scheduler settings (slurm/direct, local/remote) are passed to Espresso
+        machine = self.session_state.get('calc_machine')
+        if machine:
+            try:
+                # Machine's to_queue() method returns the complete queue configuration
+                # including execution mode, scheduler type, and all settings
+                config['queue'] = machine.to_queue()
+            except (AttributeError, TypeError) as e:
+                import logging
+                logging.warning(f"Could not convert machine to queue: {e}")
+                # Don't set a default queue - let prepare_calculation_from_gui handle it
         
         # Load modules from codes configuration
         modules = self._load_modules_from_codes(config)
@@ -873,7 +886,7 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         return config
     
     def _prepare_calculation(self):
-        """Prepare the calculation."""
+        """Prepare the calculation - creates Espresso calculator and stores in session state."""
         atoms = self.session_state.get('current_structure')
         
         if atoms is None:
@@ -885,6 +898,18 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Validate pseudopotentials
         if not config.get('pseudopotentials'):
             QMessageBox.warning(self, "Warning", "Please specify pseudopotentials for all elements")
+            return
+        
+        # Validate machine selection
+        machine = self.session_state.get('calc_machine')
+        if not machine:
+            QMessageBox.warning(
+                self, 
+                "No Machine Selected",
+                "Please select a machine configuration before preparing the calculation.\n\n"
+                "A machine defines where and how the calculation will run (local/remote, scheduler type, resources, etc.).\n\n"
+                "Go to Machine Configuration page to create or select a machine."
+            )
             return
         
         # Set up environment for Espresso calculator
@@ -901,27 +926,58 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Store config in session state
         self.session_state['workflow_config'] = config
         
-        # Update config display
-        import json
-        self.config_text.setText(json.dumps(config, indent=2))
-        
-        self.results_label.setText("""
-✅ <b>Calculation configuration saved!</b>
+        try:
+            # Create a default label for preparation (can be changed in job submission)
+            preparation_label = config.get("label", f"{config.get('calc_type', 'scf')}/{atoms.get_chemical_formula()}")
+            
+            # Use gui.calculations.preparation to create Espresso calculator
+            # This follows the same pattern as Streamlit version
+            from gui.calculations import prepare_calculation_from_gui
+            
+            # Prepare atoms and calculator
+            prepared_atoms, calc = prepare_calculation_from_gui(
+                atoms, config, label=preparation_label
+            )
+            
+            # Store prepared objects in session state for use in job_submission
+            self.session_state['espresso_calculator'] = calc
+            self.session_state['prepared_atoms'] = prepared_atoms
+            
+            # Update config display
+            import json
+            self.config_text.setText(json.dumps(config, indent=2))
+            
+            self.results_label.setText(f"""
+✅ <b>Calculation prepared successfully!</b>
 
-The configuration has been stored in session state and is ready for:
+The calculation module has created:
+• ✓ Prepared atoms object (with magnetic/Hubbard config if enabled)
+• ✓ Espresso calculator object
+• ✓ Configuration: {preparation_label}
+
+Ready for:
 • Dry run (generate input files)
 • Job submission (execute calculation)
 
-Go to <b>Job Submission</b> page to generate files or run the calculation.
+Go to <b>Job Submission</b> page to use these objects.
 """)
-        self.results_label.setStyleSheet("color: green;")
-        self.results_label.setTextFormat(Qt.RichText)
-        
-        QMessageBox.information(
-            self, 
-            "Configuration Saved",
-            "Calculation configuration has been saved.\n\nGo to Job Submission page to generate files or run the calculation."
-        )
+            self.results_label.setStyleSheet("color: green;")
+            self.results_label.setTextFormat(Qt.RichText)
+            
+            QMessageBox.information(
+                self, 
+                "Calculation Prepared",
+                "Espresso calculator and atoms objects have been created and stored.\n\nGo to Job Submission page to generate files or run the calculation."
+            )
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            QMessageBox.critical(
+                self,
+                "Preparation Failed",
+                f"Failed to prepare calculation: {e}\n\nSee console for details."
+            )
+            print(f"Error preparing calculation:\n{error_details}")
     
     def refresh(self):
         """Refresh the page."""

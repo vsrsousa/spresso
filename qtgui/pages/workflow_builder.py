@@ -1,7 +1,7 @@
 """
 Workflow Builder Page for xespresso PySide6 GUI.
 
-This page creates multi-step workflows.
+This page creates multi-step workflows using the GUIWorkflow class.
 """
 
 import os
@@ -36,6 +36,13 @@ try:
     PSEUDO_SELECTOR_AVAILABLE = True
 except ImportError:
     PSEUDO_SELECTOR_AVAILABLE = False
+
+# Import GUIWorkflow for creating workflow objects
+try:
+    from gui.workflows.base import GUIWorkflow
+    WORKFLOW_AVAILABLE = True
+except ImportError:
+    WORKFLOW_AVAILABLE = False
 
 
 class WorkflowBuilderPage(QWidget):
@@ -639,15 +646,28 @@ class WorkflowBuilderPage(QWidget):
                     config['hubbard_u'][element] = u_value
                     config['hubbard_orbital'][element] = self.hubbard_orbital_edits[element].currentText()
         
-        # Machine
+        # Machine and Queue configuration
         config['machine_name'] = self.machine_combo.currentText()
         config['qe_version'] = self.version_combo.currentText()
         config['selected_code'] = self.code_combo.currentText()
         
+        # Get the machine object and convert to queue configuration
+        # This ensures the scheduler settings (slurm/direct, local/remote) are passed to workflow
+        machine = self.session_state.get('calc_machine')
+        if machine:
+            try:
+                # Machine's to_queue() method returns the complete queue configuration
+                # including execution mode, scheduler type, and all settings
+                config['queue'] = machine.to_queue()
+            except (AttributeError, TypeError) as e:
+                import logging
+                logging.warning(f"Could not convert machine to queue: {e}")
+                # Don't set a default queue - let workflow handle it
+        
         return config
     
     def _build_workflow(self):
-        """Build the workflow."""
+        """Build the workflow using GUIWorkflow class to create calculator objects."""
         atoms = self.session_state.get('current_structure')
         
         if atoms is None:
@@ -661,23 +681,78 @@ class WorkflowBuilderPage(QWidget):
             QMessageBox.warning(self, "Warning", "Please specify pseudopotentials for all elements")
             return
         
-        # Store config in session state
-        self.session_state['workflow_config'] = config
+        # Validate machine selection
+        machine = self.session_state.get('calc_machine')
+        if not machine:
+            QMessageBox.warning(
+                self, 
+                "No Machine Selected",
+                "Please select a machine configuration before building the workflow.\n\n"
+                "A machine defines where and how the calculations will run (local/remote, scheduler type, resources, etc.).\n\n"
+                "Go to Machine Configuration page to create or select a machine."
+            )
+            return
         
-        # Build workflow summary
-        workflow_type = config['workflow_type']
+        # Check if GUIWorkflow is available
+        if not WORKFLOW_AVAILABLE:
+            QMessageBox.critical(
+                self,
+                "Workflow Module Not Available",
+                "The gui.workflows.base module is not available.\n\n"
+                "Workflow functionality requires the GUIWorkflow class."
+            )
+            return
         
-        steps = []
-        if workflow_type == "Single SCF":
-            steps = ["scf"]
-        elif workflow_type == "SCF + Relaxation":
-            steps = ["scf", config.get('relax_type', 'relax')]
-        elif workflow_type == "SCF + Relax + SCF (on relaxed structure)":
-            steps = ["scf_initial", config.get('relax_type', 'relax'), "scf_final"]
-        else:
-            steps = ["custom"]
-        
-        self.summary_text.setText(f"""
+        try:
+            # Get workflow type
+            workflow_type = config['workflow_type']
+            
+            # Create base label for workflow
+            base_label = config.get('label', f"workflow/{atoms.get_chemical_formula()}")
+            
+            # Create GUIWorkflow object
+            workflow = GUIWorkflow(atoms, config, base_label)
+            
+            # Add calculation steps based on workflow type
+            if workflow_type == "Single SCF":
+                # Single SCF calculation
+                scf_config = self._create_step_config(config, 'scf')
+                workflow.add_calculation("scf", scf_config)
+                steps = ["scf"]
+                
+            elif workflow_type == "SCF + Relaxation":
+                # SCF followed by relaxation
+                scf_config = self._create_step_config(config, 'scf')
+                workflow.add_calculation("scf", scf_config)
+                
+                relax_config = self._create_step_config(config, config.get('relax_type', 'relax'))
+                workflow.add_calculation("relax", relax_config)
+                steps = ["scf", config.get('relax_type', 'relax')]
+                
+            elif workflow_type == "SCF + Relax + SCF (on relaxed structure)":
+                # Initial SCF
+                scf_initial_config = self._create_step_config(config, 'scf')
+                workflow.add_calculation("scf_initial", scf_initial_config)
+                
+                # Relaxation
+                relax_config = self._create_step_config(config, config.get('relax_type', 'relax'))
+                workflow.add_calculation("relax", relax_config)
+                
+                # Final SCF on relaxed structure
+                scf_final_config = self._create_step_config(config, 'scf')
+                workflow.add_calculation("scf_final", scf_final_config)
+                steps = ["scf_initial", config.get('relax_type', 'relax'), "scf_final"]
+                
+            else:
+                # Custom workflow - just store config
+                steps = ["custom"]
+            
+            # Store workflow object in session state
+            self.session_state['gui_workflow'] = workflow
+            self.session_state['workflow_config'] = config
+            
+            # Update summary display
+            self.summary_text.setText(f"""
 Workflow Type: {workflow_type}
 Steps: {len(steps)}
   - {chr(10).join([f'  {i+1}. {s}' for i, s in enumerate(steps)])}
@@ -685,22 +760,58 @@ Steps: {len(steps)}
 Energy Cutoff: {config['ecutwfc']} Ry
 Machine: {config.get('machine_name', 'Not selected')}
 QE Version: {config.get('qe_version', 'Not selected')}
+
+Calculators created: {len(workflow.calculations)}
 """)
-        
-        self.results_label.setText("""
+            
+            self.results_label.setText(f"""
 ✅ <b>Workflow built successfully!</b>
 
-The workflow configuration has been stored in session state.
+The GUIWorkflow object has been created with {len(workflow.calculations)} calculation step(s).
+Each step has its own Espresso calculator object ready to use.
+
 Go to <b>Job Submission</b> page to execute the workflow steps.
 """)
-        self.results_label.setStyleSheet("color: green;")
-        self.results_label.setTextFormat(Qt.RichText)
+            self.results_label.setStyleSheet("color: green;")
+            self.results_label.setTextFormat(Qt.RichText)
+            
+            QMessageBox.information(
+                self,
+                "Workflow Built",
+                f"Workflow '{workflow_type}' has been built with {len(workflow.calculations)} calculator(s).\n\n"
+                f"Each step has a prepared Espresso calculator object.\n\n"
+                "Go to Job Submission page to execute the workflow."
+            )
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            QMessageBox.critical(
+                self,
+                "Workflow Build Failed",
+                f"Failed to build workflow: {e}\n\nSee console for details."
+            )
+            print(f"Error building workflow:\n{error_details}")
+    
+    def _create_step_config(self, base_config, calc_type):
+        """
+        Create configuration for a specific calculation step.
         
-        QMessageBox.information(
-            self,
-            "Workflow Built",
-            f"Workflow '{workflow_type}' has been built with {len(steps)} step(s).\n\nGo to Job Submission page to execute."
-        )
+        Args:
+            base_config: Base workflow configuration
+            calc_type: Type of calculation (scf, relax, vc-relax, etc.)
+            
+        Returns:
+            dict: Configuration for this step
+        """
+        step_config = base_config.copy()
+        step_config['calc_type'] = calc_type
+        
+        # Add relaxation-specific parameters if needed
+        if calc_type in ['relax', 'vc-relax']:
+            step_config['forc_conv_thr'] = base_config.get('forc_conv_thr', 1.0e-3)
+        
+        return step_config
     
     def refresh(self):
         """Refresh the page."""

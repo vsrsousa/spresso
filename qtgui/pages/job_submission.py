@@ -512,19 +512,26 @@ class JobSubmissionPage(QWidget):
     def _generate_files(self):
         """Generate calculation files (dry run).
         
-        Uses the gui.calculations.preparation module to create the Espresso calculator
-        following xespresso patterns, then generates input files via write_input().
-        This ensures the same calculator setup is used for both dry run and job execution.
+        Uses the pre-created Espresso calculator and prepared_atoms from Calculation Setup page.
+        Simply updates the label and calls write_input().
         """
         atoms = self.session_state.get('current_structure')
-        config = self.session_state.get('workflow_config', {})
         
         if atoms is None:
             QMessageBox.warning(self, "Warning", "No structure loaded.")
             return
         
-        if not config.get('pseudopotentials'):
-            QMessageBox.warning(self, "Warning", "No calculation configured.")
+        # Check if calculator was prepared in Calculation Setup
+        calc = self.session_state.get('espresso_calculator')
+        prepared_atoms = self.session_state.get('prepared_atoms', atoms)
+        
+        if calc is None:
+            QMessageBox.warning(
+                self, 
+                "Calculator Not Prepared",
+                "Please go to Calculation Setup page and click 'Prepare Calculation' first.\n\n"
+                "This will create the Espresso calculator object that's needed for file generation."
+            )
             return
         
         workdir = self.session_state.get('working_directory', os.path.expanduser("~"))
@@ -546,98 +553,29 @@ class JobSubmissionPage(QWidget):
             # Create output directory using safe utility
             safe_makedirs(full_path)
             
-            # Save structure file
+            # Save structure file using the PREPARED atoms (may have magnetic/Hubbard config)
             structure_filename = None
             if ASE_AVAILABLE:
-                structure_filename = f"{atoms.get_chemical_formula()}.cif"
+                structure_filename = f"{prepared_atoms.get_chemical_formula()}.cif"
                 structure_path = os.path.join(full_path, structure_filename)
-                ase_io.write(structure_path, atoms)
+                ase_io.write(structure_path, prepared_atoms)
             
             # Prepare input parameters for xespresso
             prefix = self._get_prefix_from_label(label)
             input_filename = f"{prefix}.pwi"
             
-            # Prepare configuration for calculator creation
-            # Make a copy to avoid modifying the original config
-            calc_config = config.copy()
+            # Update calculator label to match the user's input
+            # Espresso.set_label() handles path resolution
+            calc.set_label(label, prefix)
             
-            # Convert kspacing to kpts if needed
-            kspacing = calc_config.get('kspacing')
-            kpts = calc_config.get('kpts')
-            if kspacing and not kpts:
-                try:
-                    from xespresso import kpts_from_spacing
-                    calc_config['kpts'] = kpts_from_spacing(atoms, kspacing)
-                    calc_config.pop('kspacing', None)
-                except ImportError:
-                    pass
+            # Call write_input to generate input file AND job_file via scheduler
+            # xespresso's write_input method:
+            # 1. Writes the input file (.pwi)
+            # 2. Calls set_queue() to set up the scheduler
+            # 3. Scheduler writes job_file
+            calc.write_input(prepared_atoms)
             
-            # Build queue configuration from machine
-            machine = self.session_state.get('calc_machine')
-            if machine:
-                try:
-                    calc_config['queue'] = machine.to_queue()
-                except (AttributeError, TypeError) as e:
-                    import logging
-                    logging.warning(f"Could not convert machine to queue: {e}. Using default local queue.")
-                    calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-            elif 'queue' not in calc_config:
-                calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-            
-            # Use xespresso's Espresso calculator for proper dry run
-            if XESPRESSO_AVAILABLE:
-                try:
-                    # Use gui.calculations.preparation module to create calculator
-                    # This follows the same pattern as streamlit version
-                    from gui.calculations import prepare_calculation_from_gui
-                    
-                    # Prepare atoms and calculator using the centralized module
-                    prepared_atoms, calc = prepare_calculation_from_gui(
-                        atoms, calc_config, label=label
-                    )
-                    
-                    # Call write_input to generate input file AND job_file via scheduler
-                    calc.write_input(prepared_atoms)
-                    
-                    input_path = f"{calc.label}.pwi"
-                    
-                except Exception as e:
-                    # If calculator preparation fails, fall back to direct write
-                    import traceback
-                    error_details = traceback.format_exc()
-                    QMessageBox.warning(
-                        self,
-                        "Calculator Setup Failed",
-                        f"Failed to create calculator: {e}\n\n"
-                        "Falling back to basic file generation.\n"
-                        "Some advanced features may not be available."
-                    )
-                    # Log detailed error for debugging
-                    import logging
-                    logging.error(f"Calculator preparation failed: {error_details}")
-                    
-                    input_path = os.path.join(full_path, input_filename)
-                    input_data = self._build_input_data(calc_config, prefix)
-                    write_kwargs = {
-                        'input_data': input_data,
-                        'pseudopotentials': calc_config.get('pseudopotentials', {}),
-                    }
-                    kpts = calc_config.get('kpts')
-                    if kpts:
-                        write_kwargs['kpts'] = kpts
-                    write_espresso_in(input_path, atoms, **write_kwargs)
-                    # Create job_file manually as fallback
-                    job_file_path = os.path.join(full_path, "job_file")
-                    self._create_job_file(job_file_path, prefix, calc_config)
-            else:
-                # Fallback to simple preview if xespresso not available
-                input_path = os.path.join(full_path, input_filename)
-                input_content = self._generate_input_preview(atoms, config, label)
-                with open(input_path, 'w') as f:
-                    f.write(input_content)
-                # Create job_file manually
-                job_file_path = os.path.join(full_path, "job_file")
-                self._create_job_file(job_file_path, prefix, config)
+            input_path = f"{calc.label}.pwi"
             
             # Read the generated input file for preview
             with open(input_path, 'r') as f:
@@ -892,21 +830,28 @@ Files created in: <code>{full_path}</code>
         os.chmod(job_file_path, 0o755)
     
     def _run_calculation(self):
-        """Run the calculation using xespresso.
+        """Run the calculation.
         
-        Uses the gui.calculations.preparation module to create the Espresso calculator
-        following xespresso patterns, then runs the calculation via get_potential_energy().
-        This ensures the same calculator setup is used for both dry run and job execution.
+        Uses the pre-created Espresso calculator and prepared_atoms from Calculation Setup page.
+        Simply updates the label and calls atoms.get_potential_energy().
         """
         atoms = self.session_state.get('current_structure')
-        config = self.session_state.get('workflow_config', {})
         
         if atoms is None:
             QMessageBox.warning(self, "Warning", "No structure loaded.")
             return
         
-        if not config.get('pseudopotentials'):
-            QMessageBox.warning(self, "Warning", "No calculation configured.")
+        # Check if calculator was prepared in Calculation Setup
+        calc = self.session_state.get('espresso_calculator')
+        prepared_atoms = self.session_state.get('prepared_atoms', atoms)
+        
+        if calc is None:
+            QMessageBox.warning(
+                self, 
+                "Calculator Not Prepared",
+                "Please go to Calculation Setup page and click 'Prepare Calculation' first.\n\n"
+                "This will create the Espresso calculator object that's needed for execution."
+            )
             return
         
         if not XESPRESSO_AVAILABLE:
@@ -914,8 +859,7 @@ Files created in: <code>{full_path}</code>
                 self,
                 "xespresso Not Available",
                 "xespresso module is not installed or not available.\n\n"
-                "Install it with: pip install xespresso\n\n"
-                "Or use the Streamlit GUI for integrated execution."
+                "Install it with: pip install xespresso"
             )
             return
         
@@ -939,54 +883,10 @@ Files created in: <code>{full_path}</code>
             # Create output directory
             safe_makedirs(full_path)
             
-            # Update status
-            self.run_status.setText("⏳ Preparing calculation...")
-            self.run_status.setStyleSheet("color: blue;")
-            self.run_results.setText("Initializing calculator...")
-            QApplication.processEvents()  # Update UI
-            
-            # Prepare configuration for calculator creation
-            # Make a copy to avoid modifying the original config
-            calc_config = config.copy()
-            
-            # Convert kspacing to kpts if needed
-            kspacing = calc_config.get('kspacing')
-            kpts = calc_config.get('kpts')
-            if kspacing and not kpts:
-                try:
-                    from xespresso import kpts_from_spacing
-                    calc_config['kpts'] = kpts_from_spacing(atoms, kspacing)
-                    calc_config.pop('kspacing', None)
-                except ImportError as e:
-                    import logging
-                    logging.warning(f"kpts_from_spacing not available: {e}. Using kspacing directly.")
-                    pass
-            
-            # Build queue configuration from machine
-            machine = self.session_state.get('calc_machine')
-            if machine:
-                try:
-                    calc_config['queue'] = machine.to_queue()
-                except Exception as e:
-                    import logging
-                    logging.warning(f"Failed to convert machine to queue: {e}. Using default local queue.")
-                    calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-            elif 'queue' not in calc_config:
-                calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-                if calc_config.get('adjust_resources'):
-                    resources = calc_config.get('resources', {})
-                    calc_config['queue'].update(resources)
-            
-            # Use gui.calculations.preparation module to create calculator
-            # This follows the same pattern as streamlit version
-            from gui.calculations import prepare_calculation_from_gui
-            
-            # Prepare atoms and calculator using the centralized module
-            # Note: prepared_atoms may differ from original atoms if magnetic/Hubbard
-            # configurations are applied by setup_magnetic_config()
-            prepared_atoms, calc = prepare_calculation_from_gui(
-                atoms, calc_config, label=label
-            )
+            # Update calculator label to match the user's input
+            # Espresso.set_label() handles path resolution
+            prefix = self._get_prefix_from_label(label)
+            calc.set_label(label, prefix)
             
             # Update status
             self.run_status.setText("⏳ Running calculation... (this may take a while)")
@@ -1004,14 +904,13 @@ This is normal for local calculations.
 """)
             QApplication.processEvents()  # Update UI
             
-            # Run the calculation
-            # Attach calculator to prepared atoms and call get_potential_energy()
+            # Run the calculation using ASE/xespresso pattern
+            # The calculator is already attached to prepared_atoms
             # xespresso's get_potential_energy() will:
             # 1. Check for previous results
             # 2. Generate input files if needed using write_input()
             # 3. Submit the job via the configured scheduler
             # 4. Wait for completion and parse output
-            prepared_atoms.calc = calc
             energy = prepared_atoms.get_potential_energy()
             
             # Success! Display results

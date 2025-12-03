@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QCheckBox, QTextEdit, QRadioButton, QButtonGroup
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette, QColor
 
 try:
     from xespresso.machines.config.loader import (
@@ -67,7 +68,37 @@ class CalculationSetupPage(QWidget):
         self.magnetic_edits = {}
         self.hubbard_edits = {}
         self.hubbard_orbital_edits = {}
+        self.hubbard_checkboxes = {}  # Track which elements have Hubbard enabled
         self._setup_ui()
+    
+    def _get_combobox_stylesheet(self):
+        """Get the stylesheet for comboboxes."""
+        return """
+            QComboBox {
+                padding: 2px;
+            }
+            QComboBox::drop-down {
+                border: 0px;
+            }
+            QComboBox QAbstractItemView {
+                selection-background-color: #4A90E2;
+                selection-color: white;
+                background-color: white;
+                color: black;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #7BADF5;
+                color: white;
+            }
+        """
+    
+    def _apply_combobox_styling(self):
+        """Apply custom styling to comboboxes for better visibility."""
+        combobox_style = self._get_combobox_stylesheet()
+        
+        # Apply to all comboboxes in the page
+        for widget in self.findChildren(QComboBox):
+            widget.setStyleSheet(combobox_style)
     
     def _setup_ui(self):
         """Setup the user interface."""
@@ -171,7 +202,7 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         smearing_layout = QFormLayout(self.smearing_group)
         
         self.smearing_combo = QComboBox()
-        self.smearing_combo.addItems(["gaussian", "methfessel-paxton", "marzari-vanderbilt", "fermi-dirac"])
+        self.smearing_combo.addItems(["marzari-vanderbilt", "gaussian", "methfessel-paxton", "fermi-dirac"])
         smearing_layout.addRow("Smearing Type:", self.smearing_combo)
         
         self.degauss_spin = QDoubleSpinBox()
@@ -394,6 +425,9 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Load initial data
         self._load_machines()
         self._update_structure_status()
+        
+        # Apply styling after all widgets are created
+        self._apply_combobox_styling()
     
     def _load_machines(self):
         """Load available machines."""
@@ -602,12 +636,19 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         self.hubbard_edits = {}
         self.hubbard_orbital_edits = {}
+        self.hubbard_checkboxes = {}
         
         for element in sorted(elements):
-            # Create a container widget for each element with U value and orbital
+            # Create a container widget for each element with checkbox, U value and orbital
             container = QWidget()
             hlayout = QHBoxLayout(container)
             hlayout.setContentsMargins(0, 0, 0, 0)
+            
+            # Checkbox to enable/disable Hubbard for this element
+            checkbox = QCheckBox()
+            checkbox.setChecked(False)  # Default to unchecked
+            checkbox.setToolTip(f"Enable Hubbard U correction for {element}")
+            hlayout.addWidget(checkbox)
             
             # U value spinbox
             spin = QDoubleSpinBox()
@@ -624,9 +665,12 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             # Common orbitals for the element
             orbitals = self._get_common_orbitals_for_element(element)
             orbital_combo.addItems(orbitals)
+            # Apply styling to this combobox
+            orbital_combo.setStyleSheet(self._get_combobox_stylesheet())
             hlayout.addWidget(QLabel("Orbital:"))
             hlayout.addWidget(orbital_combo)
             
+            self.hubbard_checkboxes[element] = checkbox
             self.hubbard_edits[element] = spin
             self.hubbard_orbital_edits[element] = orbital_combo
             self.hubbard_container_layout.addRow(f"{element}:", container)
@@ -812,9 +856,11 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             config['hubbard_u'] = {}
             config['hubbard_orbitals'] = {}
             
-            for element, spin in self.hubbard_edits.items():
-                value = spin.value()
-                if value > 0.0:
+            for element, checkbox in self.hubbard_checkboxes.items():
+                # Only save Hubbard U if checkbox is checked
+                if checkbox.isChecked():
+                    spin = self.hubbard_edits[element]
+                    value = spin.value()
                     config['hubbard_u'][element] = value
                     # Save orbital information if available (for new format)
                     if element in self.hubbard_orbital_edits:
@@ -912,6 +958,9 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                         # mag_value might be a list from setup_magnetic_config
                         value = mag_value[0] if isinstance(mag_value, list) else mag_value
                         self.magnetic_edits[element].setValue(value)
+        else:
+            # Explicitly uncheck if the config says magnetism is disabled
+            self.magnetic_group.setChecked(False)
         
         # Restore Hubbard configuration checkbox state
         if config.get('enable_hubbard'):
@@ -921,6 +970,9 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                 for element, u_value in config['hubbard_u'].items():
                     if element in self.hubbard_edits:
                         self.hubbard_edits[element].setValue(u_value)
+                    # Check the checkbox for elements that have Hubbard U configured
+                    if element in self.hubbard_checkboxes:
+                        self.hubbard_checkboxes[element].setChecked(True)
             # Restore orbital selections
             if config.get('hubbard_orbitals'):
                 for element, orbital in config['hubbard_orbitals'].items():
@@ -934,6 +986,9 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                 idx = self.hubbard_format_combo.findText(format_str)
                 if idx >= 0:
                     self.hubbard_format_combo.setCurrentIndex(idx)
+        else:
+            # Explicitly uncheck if the config says Hubbard is disabled
+            self.hubbard_group.setChecked(False)
         
         # Restore other configuration values
         if config.get('calc_type'):
@@ -993,9 +1048,20 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                 self.time_edit.setText(resources['time'])
             if 'partition' in resources:
                 self.partition_edit.setText(resources['partition'])
+        
+        # Restore pseudopotentials
+        if config.get('pseudopotentials'):
+            if PSEUDO_SELECTOR_AVAILABLE and hasattr(self, 'pseudo_selector'):
+                # Use the advanced selector widget
+                self.pseudo_selector.set_pseudopotentials(config['pseudopotentials'])
+            else:
+                # Fallback to simple manual inputs
+                for element, pseudo_file in config['pseudopotentials'].items():
+                    if element in getattr(self, 'pseudo_edits', {}):
+                        self.pseudo_edits[element].setText(pseudo_file)
     
-    def _should_save_config(self, config, existing_config):
-        """Determine if the current config should overwrite existing config.
+    def _merge_configs(self, config, existing_config):
+        """Merge current config with existing config and return the result.
         
         A configuration is considered valid if it has pseudopotentials defined,
         which indicates the user has completed the "Prepare Calculation" step.
@@ -1005,36 +1071,38 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
             existing_config (dict or None): Existing workflow configuration in session state
             
         Returns:
-            bool: True if new config should be saved, False to keep existing
+            dict or None: Merged configuration to save, or None to skip saving
             
         Decision logic:
-            - If new config has pseudopotentials: Save (it's a valid prepared config)
+            - If new config has pseudopotentials: Save it (it's a valid prepared config)
             - If no existing config: Save new config even if incomplete (preserve UI state)
             - If existing config has pseudopotentials but new config doesn't:
-              Merge the new config (especially magnetic/hubbard settings) into existing
-            - Otherwise: Keep existing (don't overwrite valid with incomplete)
+              Merge the new config (especially magnetic/hubbard settings) with existing pseudopotentials
+            - Otherwise: Return None to skip saving (don't overwrite valid with incomplete)
         """
         # Always save if new config has pseudopotentials (indicates a prepared config)
         if config.get('pseudopotentials'):
-            return True
+            return config
         
         # If no existing config, save current state even if incomplete
         # to preserve other fields like calc_type, ecutwfc, kpts, etc.
         if not existing_config:
-            return True
+            return config
         
         # If existing config has pseudopotentials but new one doesn't,
         # merge important fields (magnetic/hubbard settings, basic params) into existing
         # This allows users to edit magnetic/hubbard settings after session reload
         # without having to re-prepare the calculation
         if existing_config.get('pseudopotentials') and not config.get('pseudopotentials'):
+            # Create a new merged config by copying the new config
+            merged_config = config.copy()
             # Preserve pseudopotentials from existing config
-            config['pseudopotentials'] = existing_config['pseudopotentials']
-            # Return True to save the merged config
-            return True
+            merged_config['pseudopotentials'] = existing_config['pseudopotentials']
+            # Return the merged config
+            return merged_config
         
-        # Otherwise, keep existing config to avoid overwriting valid with incomplete
-        return False
+        # Otherwise, return None to skip saving (don't overwrite valid with incomplete)
+        return None
     
     def save_state(self):
         """Save current page state to session state.
@@ -1049,5 +1117,7 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         config = self._get_config()
         existing_config = self.session_state.get('workflow_config')
         
-        if self._should_save_config(config, existing_config):
-            self.session_state['workflow_config'] = config
+        # Merge configs if needed and get the final config to save
+        merged_config = self._merge_configs(config, existing_config)
+        if merged_config is not None:
+            self.session_state['workflow_config'] = merged_config

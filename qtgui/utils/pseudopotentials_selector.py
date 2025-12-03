@@ -253,6 +253,23 @@ class PseudopotentialsSelectorWidget(QWidget):
                 result[element] = value
         return result
     
+    def set_pseudopotentials(self, pseudopotentials):
+        """
+        Set pseudopotential values from a saved configuration.
+        
+        This method restores pseudopotential values from a loaded session.
+        It should be called after set_elements() to ensure the input fields exist.
+        
+        Args:
+            pseudopotentials (dict): Mapping of element symbols to pseudopotential filenames
+        """
+        if not pseudopotentials:
+            return
+        
+        for element, pseudo_file in pseudopotentials.items():
+            if element in self.pseudo_edits:
+                self.pseudo_edits[element].setText(pseudo_file)
+    
     def is_complete(self):
         """
         Check if all elements have pseudopotentials assigned.

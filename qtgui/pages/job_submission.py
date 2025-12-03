@@ -589,7 +589,7 @@ class JobSubmissionPage(QWidget):
                 try:
                     # Use gui.calculations.preparation module to create calculator
                     # This follows the same pattern as streamlit version
-                    from gui.calculations.preparation import prepare_calculation_from_gui
+                    from gui.calculations import prepare_calculation_from_gui
                     
                     # Prepare atoms and calculator using the centralized module
                     prepared_atoms, calc = prepare_calculation_from_gui(
@@ -604,17 +604,18 @@ class JobSubmissionPage(QWidget):
                 except Exception as e:
                     # If calculator preparation fails, fall back to direct write
                     import traceback
-                    traceback.print_exc()
+                    error_details = traceback.format_exc()
                     QMessageBox.warning(
                         self,
                         "Calculator Setup Failed",
-                        f"Failed to create calculator using gui.calculations module: {e}\n\n"
-                        "Falling back to manual file generation.\n\n"
-                        "Note: Manual generation may not include all features such as:\n"
-                        "- Proper magnetic/Hubbard configurations\n"
-                        "- Advanced scheduler settings\n"
-                        "- Machine-specific optimizations"
+                        f"Failed to create calculator: {e}\n\n"
+                        "Falling back to basic file generation.\n"
+                        "Some advanced features may not be available."
                     )
+                    # Log detailed error for debugging
+                    import logging
+                    logging.error(f"Calculator preparation failed: {error_details}")
+                    
                     input_path = os.path.join(full_path, input_filename)
                     input_data = self._build_input_data(calc_config, prefix)
                     write_kwargs = {
@@ -978,7 +979,7 @@ Files created in: <code>{full_path}</code>
             
             # Use gui.calculations.preparation module to create calculator
             # This follows the same pattern as streamlit version
-            from gui.calculations.preparation import prepare_calculation_from_gui
+            from gui.calculations import prepare_calculation_from_gui
             
             # Prepare atoms and calculator using the centralized module
             # Note: prepared_atoms may differ from original atoms if magnetic/Hubbard

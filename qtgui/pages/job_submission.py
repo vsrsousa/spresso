@@ -37,23 +37,24 @@ except ImportError:
     SHUTIL_AVAILABLE = False
 
 
-def validate_and_fix_scheduler(queue_config):
+def validate_scheduler_availability(queue_config):
     """
-    Validate scheduler configuration and fix if necessary.
+    Validate that the configured scheduler is available on the system.
     
-    If SLURM scheduler is selected but sbatch is not available,
-    automatically switch to 'direct' scheduler for local execution.
+    This function checks if the required scheduler command is available
+    without modifying the user's configuration. It respects the user's
+    machine configuration choices.
     
     Args:
         queue_config (dict): Queue configuration with 'scheduler' and 'execution' keys
         
     Returns:
-        tuple: (queue_config, warning_message)
-            - queue_config: The validated/fixed configuration
-            - warning_message: String warning if scheduler was changed, None otherwise
+        tuple: (is_valid, error_message)
+            - is_valid: True if scheduler is available, False otherwise
+            - error_message: Detailed error with actionable steps if invalid, None otherwise
     """
     if not queue_config:
-        return queue_config, None
+        return True, None
     
     scheduler = queue_config.get('scheduler', '').lower()
     execution = queue_config.get('execution', 'local').lower()
@@ -61,15 +62,25 @@ def validate_and_fix_scheduler(queue_config):
     # Only validate SLURM for local execution
     if scheduler == 'slurm' and execution == 'local':
         if SHUTIL_AVAILABLE and shutil.which("sbatch") is None:
-            # sbatch not found - switch to direct scheduler
-            queue_config['scheduler'] = 'direct'
-            warning_msg = (
-                "⚠️ SLURM scheduler requested but 'sbatch' command not found.\n"
-                "Automatically switched to 'direct' scheduler for local execution."
+            error_msg = (
+                "❌ SLURM Scheduler Not Available\n\n"
+                "Your machine configuration uses the SLURM scheduler, but the 'sbatch' "
+                "command is not found on this system.\n\n"
+                "To fix this issue, choose ONE of the following:\n\n"
+                "1. Install SLURM on your system:\n"
+                "   - Linux: sudo apt-get install slurm-wlm (Ubuntu/Debian)\n"
+                "   - Or check your distribution's package manager\n\n"
+                "2. Change your machine configuration:\n"
+                "   - Go to Machine Configuration page\n"
+                "   - Select or create a machine with 'direct' scheduler\n"
+                "   - Save and select that machine for this calculation\n\n"
+                "3. For remote execution:\n"
+                "   - Set execution to 'remote' in your machine configuration\n"
+                "   - Configure SSH access to a cluster with SLURM"
             )
-            return queue_config, warning_msg
+            return False, error_msg
     
-    return queue_config, None
+    return True, None
 
 
 # Default orbitals for common elements in DFT+U calculations
@@ -550,6 +561,73 @@ class JobSubmissionPage(QWidget):
         """
         return label.split('/')[-1] if '/' in label else label
     
+    def _prepare_calculator(self, atoms, config, label):
+        """Prepare Espresso calculator and store in session state.
+        
+        This method creates the Espresso calculator object following xespresso patterns:
+        1. Prepares configuration (validates scheduler, converts kspacing, etc.)
+        2. Creates calc = Espresso(parameters)
+        3. Attaches to atoms: atoms.calc = calc
+        4. Stores both in session state for reuse
+        
+        Args:
+            atoms: ASE Atoms object
+            config: Workflow configuration dictionary
+            label: Calculation label/directory
+            
+        Returns:
+            tuple: (prepared_atoms, calc) ready for dry run or job execution
+            
+        Raises:
+            Exception: If calculator preparation fails
+        """
+        # Make a copy to avoid modifying the original config
+        calc_config = config.copy()
+        
+        # Convert kspacing to kpts if needed
+        kspacing = calc_config.get('kspacing')
+        kpts = calc_config.get('kpts')
+        if kspacing and not kpts:
+            try:
+                from xespresso import kpts_from_spacing
+                calc_config['kpts'] = kpts_from_spacing(atoms, kspacing)
+                calc_config.pop('kspacing', None)
+            except ImportError:
+                pass
+        
+        # Build queue configuration from machine
+        machine = self.session_state.get('calc_machine')
+        if machine:
+            try:
+                calc_config['queue'] = machine.to_queue()
+            except (AttributeError, TypeError) as e:
+                import logging
+                logging.warning(f"Could not convert machine to queue: {e}. Using default local queue.")
+                calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
+        elif 'queue' not in calc_config:
+            calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
+        
+        # Validate scheduler availability (but don't modify user's configuration)
+        is_valid, error_msg = validate_scheduler_availability(calc_config.get('queue'))
+        if not is_valid:
+            # Show error to user and raise exception to stop execution
+            QMessageBox.critical(self, "Scheduler Not Available", error_msg)
+            raise RuntimeError(error_msg)
+        
+        # Use gui.calculations.preparation module to create calculator
+        from gui.calculations import prepare_calculation_from_gui
+        
+        # Prepare atoms and calculator using the centralized module
+        prepared_atoms, calc = prepare_calculation_from_gui(
+            atoms, calc_config, label=label
+        )
+        
+        # Store in session state for reuse
+        self.session_state['prepared_atoms'] = prepared_atoms
+        self.session_state['espresso_calculator'] = calc
+        
+        return prepared_atoms, calc
+    
     def _generate_files(self):
         """Generate calculation files (dry run).
         
@@ -598,54 +676,14 @@ class JobSubmissionPage(QWidget):
             prefix = self._get_prefix_from_label(label)
             input_filename = f"{prefix}.pwi"
             
-            # Prepare configuration for calculator creation
-            # Make a copy to avoid modifying the original config
-            calc_config = config.copy()
-            
-            # Convert kspacing to kpts if needed
-            kspacing = calc_config.get('kspacing')
-            kpts = calc_config.get('kpts')
-            if kspacing and not kpts:
-                try:
-                    from xespresso import kpts_from_spacing
-                    calc_config['kpts'] = kpts_from_spacing(atoms, kspacing)
-                    calc_config.pop('kspacing', None)
-                except ImportError:
-                    pass
-            
-            # Build queue configuration from machine
-            machine = self.session_state.get('calc_machine')
-            if machine:
-                try:
-                    calc_config['queue'] = machine.to_queue()
-                except (AttributeError, TypeError) as e:
-                    import logging
-                    logging.warning(f"Could not convert machine to queue: {e}. Using default local queue.")
-                    calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-            elif 'queue' not in calc_config:
-                calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-            
-            # Validate and fix scheduler configuration if needed
-            calc_config['queue'], scheduler_warning = validate_and_fix_scheduler(calc_config.get('queue'))
-            if scheduler_warning:
-                import logging
-                logging.warning(scheduler_warning)
-                # Show warning to user
-                QMessageBox.warning(self, "Scheduler Auto-Corrected", scheduler_warning)
-            
             # Use xespresso's Espresso calculator for proper dry run
             if XESPRESSO_AVAILABLE:
                 try:
-                    # Use gui.calculations.preparation module to create calculator
-                    # This follows the same pattern as streamlit version
-                    from gui.calculations import prepare_calculation_from_gui
-                    
-                    # Prepare atoms and calculator using the centralized module
-                    prepared_atoms, calc = prepare_calculation_from_gui(
-                        atoms, calc_config, label=label
-                    )
+                    # Prepare atoms and calculator - this creates and stores calc in session_state
+                    prepared_atoms, calc = self._prepare_calculator(atoms, config, label)
                     
                     # Call write_input to generate input file AND job_file via scheduler
+                    # xespresso's write_input method uses the attached calculator
                     calc.write_input(prepared_atoms)
                     
                     input_path = f"{calc.label}.pwi"
@@ -666,18 +704,18 @@ class JobSubmissionPage(QWidget):
                     logging.error(f"Calculator preparation failed: {error_details}")
                     
                     input_path = os.path.join(full_path, input_filename)
-                    input_data = self._build_input_data(calc_config, prefix)
+                    input_data = self._build_input_data(config, prefix)
                     write_kwargs = {
                         'input_data': input_data,
-                        'pseudopotentials': calc_config.get('pseudopotentials', {}),
+                        'pseudopotentials': config.get('pseudopotentials', {}),
                     }
-                    kpts = calc_config.get('kpts')
+                    kpts = config.get('kpts')
                     if kpts:
                         write_kwargs['kpts'] = kpts
                     write_espresso_in(input_path, atoms, **write_kwargs)
                     # Create job_file manually as fallback
                     job_file_path = os.path.join(full_path, "job_file")
-                    self._create_job_file(job_file_path, prefix, calc_config)
+                    self._create_job_file(job_file_path, prefix, config)
             else:
                 # Fallback to simple preview if xespresso not available
                 input_path = os.path.join(full_path, input_filename)
@@ -994,56 +1032,22 @@ Files created in: <code>{full_path}</code>
             self.run_results.setText("Initializing calculator...")
             QApplication.processEvents()  # Update UI
             
-            # Prepare configuration for calculator creation
-            # Make a copy to avoid modifying the original config
-            calc_config = config.copy()
+            # Check if we already have a prepared calculator from dry run
+            # If the label matches, we can reuse it
+            prepared_atoms = self.session_state.get('prepared_atoms')
+            calc = self.session_state.get('espresso_calculator')
             
-            # Convert kspacing to kpts if needed
-            kspacing = calc_config.get('kspacing')
-            kpts = calc_config.get('kpts')
-            if kspacing and not kpts:
-                try:
-                    from xespresso import kpts_from_spacing
-                    calc_config['kpts'] = kpts_from_spacing(atoms, kspacing)
-                    calc_config.pop('kspacing', None)
-                except ImportError as e:
-                    import logging
-                    logging.warning(f"kpts_from_spacing not available: {e}. Using kspacing directly.")
-                    pass
-            
-            # Build queue configuration from machine
-            machine = self.session_state.get('calc_machine')
-            if machine:
-                try:
-                    calc_config['queue'] = machine.to_queue()
-                except Exception as e:
-                    import logging
-                    logging.warning(f"Failed to convert machine to queue: {e}. Using default local queue.")
-                    calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-            elif 'queue' not in calc_config:
-                calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
-                if calc_config.get('adjust_resources'):
-                    resources = calc_config.get('resources', {})
-                    calc_config['queue'].update(resources)
-            
-            # Validate and fix scheduler configuration if needed
-            calc_config['queue'], scheduler_warning = validate_and_fix_scheduler(calc_config.get('queue'))
-            if scheduler_warning:
-                import logging
-                logging.warning(scheduler_warning)
-                # Show warning to user
-                QMessageBox.warning(self, "Scheduler Auto-Corrected", scheduler_warning)
-            
-            # Use gui.calculations.preparation module to create calculator
-            # This follows the same pattern as streamlit version
-            from gui.calculations import prepare_calculation_from_gui
-            
-            # Prepare atoms and calculator using the centralized module
-            # Note: prepared_atoms may differ from original atoms if magnetic/Hubbard
-            # configurations are applied by setup_magnetic_config()
-            prepared_atoms, calc = prepare_calculation_from_gui(
-                atoms, calc_config, label=label
+            # Check if we need to create a new calculator
+            # (if no calc exists, or if label has changed)
+            need_new_calc = (
+                calc is None or 
+                prepared_atoms is None or
+                calc.label != label
             )
+            
+            if need_new_calc:
+                # Prepare new calculator and store it
+                prepared_atoms, calc = self._prepare_calculator(atoms, config, label)
             
             # Update status
             self.run_status.setText("⏳ Running calculation... (this may take a while)")
@@ -1061,14 +1065,13 @@ This is normal for local calculations.
 """)
             QApplication.processEvents()  # Update UI
             
-            # Run the calculation
-            # Attach calculator to prepared atoms and call get_potential_energy()
+            # Run the calculation using ASE/xespresso pattern
+            # The calculator is already attached to prepared_atoms by _prepare_calculator
             # xespresso's get_potential_energy() will:
             # 1. Check for previous results
             # 2. Generate input files if needed using write_input()
             # 3. Submit the job via the configured scheduler
             # 4. Wait for completion and parse output
-            prepared_atoms.calc = calc
             energy = prepared_atoms.get_potential_energy()
             
             # Success! Display results

@@ -600,6 +600,9 @@ class JobSubmissionPage(QWidget):
         if machine:
             try:
                 calc_config['queue'] = machine.to_queue()
+                # Log the queue configuration for debugging
+                import logging
+                logging.info(f"Machine '{machine.name}' queue config: {calc_config['queue']}")
             except (AttributeError, TypeError) as e:
                 import logging
                 logging.warning(f"Could not convert machine to queue: {e}. Using default local queue.")
@@ -607,11 +610,11 @@ class JobSubmissionPage(QWidget):
         elif 'queue' not in calc_config:
             calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
         
-        # Validate scheduler availability (but don't modify user's configuration)
+        # Validate scheduler availability and provide helpful error message
         is_valid, error_msg = validate_scheduler_availability(calc_config.get('queue'))
         if not is_valid:
-            # Show error to user and raise exception to stop execution
-            QMessageBox.critical(self, "Scheduler Not Available", error_msg)
+            # Show detailed error to user with actionable steps
+            QMessageBox.critical(self, "Scheduler Configuration Error", error_msg)
             raise RuntimeError(error_msg)
         
         # Use gui.calculations.preparation module to create calculator

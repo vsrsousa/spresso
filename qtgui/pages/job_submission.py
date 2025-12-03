@@ -30,58 +30,6 @@ try:
 except ImportError:
     XESPRESSO_AVAILABLE = False
 
-try:
-    import shutil
-    SHUTIL_AVAILABLE = True
-except ImportError:
-    SHUTIL_AVAILABLE = False
-
-
-def validate_scheduler_availability(queue_config):
-    """
-    Validate that the configured scheduler is available on the system.
-    
-    This function checks if the required scheduler command is available
-    without modifying the user's configuration. It respects the user's
-    machine configuration choices.
-    
-    Args:
-        queue_config (dict): Queue configuration with 'scheduler' and 'execution' keys
-        
-    Returns:
-        tuple: (is_valid, error_message)
-            - is_valid: True if scheduler is available, False otherwise
-            - error_message: Detailed error with actionable steps if invalid, None otherwise
-    """
-    if not queue_config:
-        return True, None
-    
-    scheduler = queue_config.get('scheduler', '').lower()
-    execution = queue_config.get('execution', 'local').lower()
-    
-    # Only validate SLURM for local execution
-    if scheduler == 'slurm' and execution == 'local':
-        if SHUTIL_AVAILABLE and shutil.which("sbatch") is None:
-            error_msg = (
-                "❌ SLURM Scheduler Not Available\n\n"
-                "Your machine configuration uses the SLURM scheduler, but the 'sbatch' "
-                "command is not found on this system.\n\n"
-                "To fix this issue, choose ONE of the following:\n\n"
-                "1. Install SLURM on your system:\n"
-                "   - Linux: sudo apt-get install slurm-wlm (Ubuntu/Debian)\n"
-                "   - Or check your distribution's package manager\n\n"
-                "2. Change your machine configuration:\n"
-                "   - Go to Machine Configuration page\n"
-                "   - Select or create a machine with 'direct' scheduler\n"
-                "   - Save and select that machine for this calculation\n\n"
-                "3. For remote execution:\n"
-                "   - Set execution to 'remote' in your machine configuration\n"
-                "   - Configure SSH access to a cluster with SLURM"
-            )
-            return False, error_msg
-    
-    return True, None
-
 
 # Default orbitals for common elements in DFT+U calculations
 DEFAULT_HUBBARD_ORBITALS = {

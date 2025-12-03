@@ -72,7 +72,7 @@ class CalculationSetupPage(QWidget):
         self._setup_ui()
     
     def _get_combobox_stylesheet(self):
-        """Get the stylesheet for comboboxes."""
+        """Get the stylesheet for comboboxes with proper contrast."""
         return """
             QComboBox {
                 padding: 2px;
@@ -81,14 +81,14 @@ class CalculationSetupPage(QWidget):
                 border: 0px;
             }
             QComboBox QAbstractItemView {
-                selection-background-color: #4A90E2;
-                selection-color: white;
-                background-color: white;
+                selection-background-color: #B3D9FF;
+                selection-color: black;
+                background-color: #F5F5F5;
                 color: black;
             }
             QComboBox QAbstractItemView::item:hover {
-                background-color: #7BADF5;
-                color: white;
+                background-color: #D6EBFF;
+                color: black;
             }
         """
     
@@ -816,10 +816,23 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 if pseudo:
                     config['pseudopotentials'][element] = pseudo
         
-        # Machine
+        # Machine and Queue configuration
         config['machine_name'] = self.machine_combo.currentText()
         config['qe_version'] = self.version_combo.currentText()
         config['selected_code'] = self.code_combo.currentText()
+        
+        # Get the machine object and convert to queue configuration
+        # This ensures the scheduler settings (slurm/direct, local/remote) are passed to Espresso
+        machine = self.session_state.get('calc_machine')
+        if machine:
+            try:
+                # Machine's to_queue() method returns the complete queue configuration
+                # including execution mode, scheduler type, and all settings
+                config['queue'] = machine.to_queue()
+            except (AttributeError, TypeError) as e:
+                import logging
+                logging.warning(f"Could not convert machine to queue: {e}")
+                # Don't set a default queue - let prepare_calculation_from_gui handle it
         
         # Load modules from codes configuration
         modules = self._load_modules_from_codes(config)

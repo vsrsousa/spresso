@@ -501,9 +501,9 @@ class JobSubmissionPage(QWidget):
     def _generate_files(self):
         """Generate calculation files (dry run).
         
-        Uses xespresso's Espresso calculator to generate a proper QE input file
-        with atomic positions and cell parameters from the loaded structure,
-        and creates the job_file script via xespresso's scheduler.
+        Uses the gui.calculations.preparation module to create the Espresso calculator
+        following xespresso patterns, then generates input files via write_input().
+        This ensures the same calculator setup is used for both dry run and job execution.
         """
         atoms = self.session_state.get('current_structure')
         config = self.session_state.get('workflow_config', {})
@@ -546,108 +546,67 @@ class JobSubmissionPage(QWidget):
             prefix = label.split('/')[-1] if '/' in label else label
             input_filename = f"{prefix}.pwi"
             
-            # Build input_data dictionary for xespresso
-            input_data = self._build_input_data(config, prefix)
+            # Prepare configuration for calculator creation
+            # Make a copy to avoid modifying the original config
+            calc_config = config.copy()
             
-            # Get k-points configuration
-            kspacing = config.get('kspacing')
-            kpts = config.get('kpts')
-            
-            # Convert kspacing to kpts if kspacing is provided
-            # xespresso's build_kpts_str expects kspacing in units of (2π/Angstrom),
-            # but GUI provides it in physical units (1/Angstrom), so we need to convert
-            # using kpts_from_spacing which handles the 2π normalization
+            # Convert kspacing to kpts if needed
+            kspacing = calc_config.get('kspacing')
+            kpts = calc_config.get('kpts')
             if kspacing and not kpts:
                 try:
                     from xespresso import kpts_from_spacing
-                    kpts = kpts_from_spacing(atoms, kspacing)
-                    kspacing = None  # Clear kspacing since we converted to kpts
+                    calc_config['kpts'] = kpts_from_spacing(atoms, kspacing)
+                    calc_config.pop('kspacing', None)
                 except ImportError:
-                    # Fallback: keep kspacing and let xespresso handle it
-                    # (though this may give incorrect k-points if kspacing is in physical units)
                     pass
+            
+            # Build queue configuration from machine
+            machine = self.session_state.get('calc_machine')
+            if machine:
+                try:
+                    calc_config['queue'] = machine.to_queue()
+                except (AttributeError, TypeError) as e:
+                    import logging
+                    logging.warning(f"Could not convert machine to queue: {e}. Using default local queue.")
+                    calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
+            elif 'queue' not in calc_config:
+                calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
             
             # Use xespresso's Espresso calculator for proper dry run
             if XESPRESSO_AVAILABLE:
                 try:
-                    from xespresso import Espresso
+                    # Use gui.calculations.preparation module to create calculator
+                    # This follows the same pattern as streamlit version
+                    from gui.calculations.preparation import prepare_calculation_from_gui
                     
-                    # Build queue configuration for job_file generation
-                    # First check if machine is configured and use it
-                    machine = self.session_state.get('calc_machine')
-                    if machine:
-                        # Machine object is configured, convert to queue dict using to_queue()
-                        try:
-                            queue = machine.to_queue()
-                        except (AttributeError, TypeError) as e:
-                            # Fallback if machine doesn't have to_queue() or it fails
-                            # Log error for debugging but don't crash - use default queue
-                            import logging
-                            logging.warning(f"Could not convert machine to queue: {e}. Using default local queue.")
-                            queue = {
-                                'execution': 'local',
-                                'scheduler': 'direct',
-                            }
-                    else:
-                        # Build queue configuration manually
-                        queue = {
-                            'execution': 'local',
-                            'scheduler': 'direct',
-                        }
-                        
-                        # Add resources if configured
-                        if config.get('adjust_resources'):
-                            resources = config.get('resources', {})
-                            queue.update(resources)
-                    
-                    # Add modules from codes configuration to queue
-                    # This ensures modules are properly passed to the scheduler for job_file generation
-                    if config.get('modules'):
-                        queue['use_modules'] = True
-                        queue['modules'] = config['modules']
-                    
-                    # Create Espresso calculator
-                    calc_kwargs = {
-                        'label': full_path,
-                        'pseudopotentials': config.get('pseudopotentials', {}),
-                        'input_data': input_data,
-                        'queue': queue,
-                    }
-                    
-                    # K-points: Since kspacing is converted to kpts above, we only pass kpts
-                    # This avoids the 2π normalization issue where kspacing_to_grid expects
-                    # kspacing in units of (2π/Angstrom) but GUI provides it in (1/Angstrom)
-                    if kpts:
-                        calc_kwargs['kpts'] = kpts
-                    else:
-                        calc_kwargs['kpts'] = (4, 4, 4)  # Default k-points
-                    
-                    # Set parallel command if multiple processors
-                    nprocs = config.get('nprocs', 1)
-                    if nprocs > 1:
-                        calc_kwargs['parallel'] = f'-np {nprocs}'
-                    
-                    calc = Espresso(**calc_kwargs)
-                    
-                    # Make a copy of atoms to avoid modifying the original
-                    atoms_copy = atoms.copy()
-                    atoms_copy.calc = calc
+                    # Prepare atoms and calculator using the centralized module
+                    prepared_atoms, calc = prepare_calculation_from_gui(
+                        atoms, calc_config, label=label
+                    )
                     
                     # Call write_input to generate input file AND job_file via scheduler
-                    calc.write_input(atoms_copy)
+                    calc.write_input(prepared_atoms)
                     
                     input_path = f"{calc.label}.pwi"
                     
                 except Exception as e:
-                    # If xespresso calculator fails, fall back to direct write
+                    # If calculator preparation fails, fall back to direct write
                     import traceback
                     traceback.print_exc()
+                    QMessageBox.warning(
+                        self,
+                        "Calculator Setup Failed",
+                        f"Failed to create calculator using gui.calculations module: {e}\n\n"
+                        "Falling back to manual file generation."
+                    )
                     input_path = os.path.join(full_path, input_filename)
-                    # Since kspacing was already converted to kpts above, just pass kpts
+                    input_data = self._build_input_data(config, prefix)
                     write_kwargs = {
                         'input_data': input_data,
                         'pseudopotentials': config.get('pseudopotentials', {}),
                     }
+                    kpts = calc_config.get('kpts')
                     if kpts:
                         write_kwargs['kpts'] = kpts
                     write_espresso_in(input_path, atoms, **write_kwargs)
@@ -919,12 +878,9 @@ Files created in: <code>{full_path}</code>
     def _run_calculation(self):
         """Run the calculation using xespresso.
         
-        This method creates an Espresso calculator and runs the calculation
-        by calling get_potential_energy(), which will:
-        1. Check for previous results
-        2. Generate input files if needed
-        3. Execute the calculation via the configured launcher
-        4. Parse output and return energy
+        Uses the gui.calculations.preparation module to create the Espresso calculator
+        following xespresso patterns, then runs the calculation via get_potential_energy().
+        This ensures the same calculator setup is used for both dry run and job execution.
         """
         atoms = self.session_state.get('current_structure')
         config = self.session_state.get('workflow_config', {})
@@ -973,82 +929,46 @@ Files created in: <code>{full_path}</code>
             self.run_results.setText("Initializing calculator...")
             QApplication.processEvents()  # Update UI
             
-            # Prepare input parameters
-            prefix = label.split('/')[-1] if '/' in label else label
-            input_data = self._build_input_data(config, prefix)
-            
-            # Get k-points configuration
-            kspacing = config.get('kspacing')
-            kpts = config.get('kpts')
+            # Prepare configuration for calculator creation
+            # Make a copy to avoid modifying the original config
+            calc_config = config.copy()
             
             # Convert kspacing to kpts if needed
+            kspacing = calc_config.get('kspacing')
+            kpts = calc_config.get('kpts')
             if kspacing and not kpts:
                 try:
                     from xespresso import kpts_from_spacing
-                    kpts = kpts_from_spacing(atoms, kspacing)
-                    kspacing = None
+                    calc_config['kpts'] = kpts_from_spacing(atoms, kspacing)
+                    calc_config.pop('kspacing', None)
                 except ImportError as e:
-                    # kpts_from_spacing not available in this xespresso version
-                    # Fall back to using kspacing directly (may not work correctly)
                     import logging
                     logging.warning(f"kpts_from_spacing not available: {e}. Using kspacing directly.")
                     pass
             
-            # Build queue configuration
+            # Build queue configuration from machine
             machine = self.session_state.get('calc_machine')
             if machine:
-                # Try to convert machine to queue configuration
-                # Validate that machine has the to_queue() method before calling
-                if hasattr(machine, 'to_queue') and callable(machine.to_queue):
-                    try:
-                        queue = machine.to_queue()
-                    except Exception as e:
-                        # Conversion failed - use default local queue
-                        import logging
-                        logging.warning(f"Failed to convert machine to queue: {e}. Using default local queue.")
-                        queue = {'execution': 'local', 'scheduler': 'direct'}
-                else:
-                    # Machine doesn't have to_queue() method - use default
+                try:
+                    calc_config['queue'] = machine.to_queue()
+                except Exception as e:
                     import logging
-                    logging.warning(f"Machine object doesn't have to_queue() method. Using default local queue.")
-                    queue = {'execution': 'local', 'scheduler': 'direct'}
-            else:
-                queue = {'execution': 'local', 'scheduler': 'direct'}
-                if config.get('adjust_resources'):
-                    resources = config.get('resources', {})
-                    queue.update(resources)
+                    logging.warning(f"Failed to convert machine to queue: {e}. Using default local queue.")
+                    calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
+            elif 'queue' not in calc_config:
+                calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
+                if calc_config.get('adjust_resources'):
+                    resources = calc_config.get('resources', {})
+                    calc_config['queue'].update(resources)
             
-            # Add modules to queue
-            if config.get('modules'):
-                queue['use_modules'] = True
-                queue['modules'] = config['modules']
+            # Use gui.calculations.preparation module to create calculator
+            # This follows the same pattern as streamlit version
+            from gui.calculations.preparation import prepare_calculation_from_gui
             
-            # Create Espresso calculator
-            from xespresso import Espresso
-            
-            calc_kwargs = {
-                'label': full_path,
-                'pseudopotentials': config.get('pseudopotentials', {}),
-                'input_data': input_data,
-                'queue': queue,
-            }
-            
-            # K-points
-            if kpts:
-                calc_kwargs['kpts'] = kpts
-            else:
-                calc_kwargs['kpts'] = (4, 4, 4)
-            
-            # Parallel command
-            nprocs = config.get('nprocs', 1)
-            if nprocs > 1:
-                calc_kwargs['parallel'] = f'-np {nprocs}'
-            
-            calc = Espresso(**calc_kwargs)
-            
-            # Make a copy of atoms and attach calculator
-            atoms_copy = atoms.copy()
-            atoms_copy.calc = calc
+            # Prepare atoms and calculator using the centralized module
+            prepared_atoms, calc = prepare_calculation_from_gui(
+                atoms, calc_config, label=label
+            )
             
             # Update status
             self.run_status.setText("⏳ Running calculation... (this may take a while)")
@@ -1067,18 +987,23 @@ This is normal for local calculations.
             QApplication.processEvents()  # Update UI
             
             # Run the calculation
-            # This calls xespresso's get_potential_energy() via the atoms object which will:
-            # 1. Generate input files if needed
-            # 2. Submit the job to the configured scheduler/launcher
-            # 3. Wait for completion and parse output
-            # Any errors during calculation will be caught by the outer try-except
-            energy = atoms_copy.get_potential_energy()
+            # Attach calculator to prepared atoms and call get_potential_energy()
+            # xespresso's get_potential_energy() will:
+            # 1. Check for previous results
+            # 2. Generate input files if needed using write_input()
+            # 3. Submit the job via the configured scheduler
+            # 4. Wait for completion and parse output
+            prepared_atoms.calc = calc
+            energy = prepared_atoms.get_potential_energy()
             
             # Success! Display results
             self.run_status.setText("✅ Calculation completed successfully!")
             self.run_status.setStyleSheet("color: green;")
             
             self.energy_label.setText(f"Energy: {energy:.6f} eV")
+            
+            # Get prefix for output files
+            prefix = label.split('/')[-1] if '/' in label else label
             
             # Get additional results if available
             results_text = f"""
@@ -1105,9 +1030,9 @@ This is normal for local calculations.
             
             # Add forces if available
             # Some calculation types may not have forces available
-            if hasattr(atoms_copy, 'get_forces'):
+            if hasattr(prepared_atoms, 'get_forces'):
                 try:
-                    forces = atoms_copy.get_forces()
+                    forces = prepared_atoms.get_forces()
                     max_force = float((forces**2).sum(axis=1).max()**0.5)
                     results_text += f"\n<b>Max Force:</b> {max_force:.6f} eV/Å\n"
                 except (RuntimeError, KeyError) as e:

@@ -498,6 +498,17 @@ class JobSubmissionPage(QWidget):
         import json
         summary_widget.setText(json.dumps(config, indent=2, default=str))
     
+    def _get_prefix_from_label(self, label):
+        """Extract prefix from label.
+        
+        Args:
+            label: Calculation label (may include path separators)
+            
+        Returns:
+            str: Prefix for calculation (basename of label)
+        """
+        return label.split('/')[-1] if '/' in label else label
+    
     def _generate_files(self):
         """Generate calculation files (dry run).
         
@@ -543,7 +554,7 @@ class JobSubmissionPage(QWidget):
                 ase_io.write(structure_path, atoms)
             
             # Prepare input parameters for xespresso
-            prefix = label.split('/')[-1] if '/' in label else label
+            prefix = self._get_prefix_from_label(label)
             input_filename = f"{prefix}.pwi"
             
             # Prepare configuration for calculator creation
@@ -598,13 +609,17 @@ class JobSubmissionPage(QWidget):
                         self,
                         "Calculator Setup Failed",
                         f"Failed to create calculator using gui.calculations module: {e}\n\n"
-                        "Falling back to manual file generation."
+                        "Falling back to manual file generation.\n\n"
+                        "Note: Manual generation may not include all features such as:\n"
+                        "- Proper magnetic/Hubbard configurations\n"
+                        "- Advanced scheduler settings\n"
+                        "- Machine-specific optimizations"
                     )
                     input_path = os.path.join(full_path, input_filename)
-                    input_data = self._build_input_data(config, prefix)
+                    input_data = self._build_input_data(calc_config, prefix)
                     write_kwargs = {
                         'input_data': input_data,
-                        'pseudopotentials': config.get('pseudopotentials', {}),
+                        'pseudopotentials': calc_config.get('pseudopotentials', {}),
                     }
                     kpts = calc_config.get('kpts')
                     if kpts:
@@ -612,7 +627,7 @@ class JobSubmissionPage(QWidget):
                     write_espresso_in(input_path, atoms, **write_kwargs)
                     # Create job_file manually as fallback
                     job_file_path = os.path.join(full_path, "job_file")
-                    self._create_job_file(job_file_path, prefix, config)
+                    self._create_job_file(job_file_path, prefix, calc_config)
             else:
                 # Fallback to simple preview if xespresso not available
                 input_path = os.path.join(full_path, input_filename)
@@ -966,6 +981,8 @@ Files created in: <code>{full_path}</code>
             from gui.calculations.preparation import prepare_calculation_from_gui
             
             # Prepare atoms and calculator using the centralized module
+            # Note: prepared_atoms may differ from original atoms if magnetic/Hubbard
+            # configurations are applied by setup_magnetic_config()
             prepared_atoms, calc = prepare_calculation_from_gui(
                 atoms, calc_config, label=label
             )
@@ -1003,7 +1020,7 @@ This is normal for local calculations.
             self.energy_label.setText(f"Energy: {energy:.6f} eV")
             
             # Get prefix for output files
-            prefix = label.split('/')[-1] if '/' in label else label
+            prefix = self._get_prefix_from_label(label)
             
             # Get additional results if available
             results_text = f"""

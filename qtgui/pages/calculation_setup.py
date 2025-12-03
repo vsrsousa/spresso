@@ -912,6 +912,9 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                         # mag_value might be a list from setup_magnetic_config
                         value = mag_value[0] if isinstance(mag_value, list) else mag_value
                         self.magnetic_edits[element].setValue(value)
+        else:
+            # Explicitly uncheck if the config says magnetism is disabled
+            self.magnetic_group.setChecked(False)
         
         # Restore Hubbard configuration checkbox state
         if config.get('enable_hubbard'):
@@ -934,6 +937,9 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                 idx = self.hubbard_format_combo.findText(format_str)
                 if idx >= 0:
                     self.hubbard_format_combo.setCurrentIndex(idx)
+        else:
+            # Explicitly uncheck if the config says Hubbard is disabled
+            self.hubbard_group.setChecked(False)
         
         # Restore other configuration values
         if config.get('calc_type'):
@@ -994,8 +1000,8 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
             if 'partition' in resources:
                 self.partition_edit.setText(resources['partition'])
     
-    def _should_save_config(self, config, existing_config):
-        """Determine if the current config should overwrite existing config.
+    def _merge_configs(self, config, existing_config):
+        """Merge current config with existing config and return the result.
         
         A configuration is considered valid if it has pseudopotentials defined,
         which indicates the user has completed the "Prepare Calculation" step.
@@ -1005,36 +1011,38 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
             existing_config (dict or None): Existing workflow configuration in session state
             
         Returns:
-            bool: True if new config should be saved, False to keep existing
+            dict or None: Merged configuration to save, or None to skip saving
             
         Decision logic:
-            - If new config has pseudopotentials: Save (it's a valid prepared config)
+            - If new config has pseudopotentials: Save it (it's a valid prepared config)
             - If no existing config: Save new config even if incomplete (preserve UI state)
             - If existing config has pseudopotentials but new config doesn't:
-              Merge the new config (especially magnetic/hubbard settings) into existing
-            - Otherwise: Keep existing (don't overwrite valid with incomplete)
+              Merge the new config (especially magnetic/hubbard settings) with existing pseudopotentials
+            - Otherwise: Return None to skip saving (don't overwrite valid with incomplete)
         """
         # Always save if new config has pseudopotentials (indicates a prepared config)
         if config.get('pseudopotentials'):
-            return True
+            return config
         
         # If no existing config, save current state even if incomplete
         # to preserve other fields like calc_type, ecutwfc, kpts, etc.
         if not existing_config:
-            return True
+            return config
         
         # If existing config has pseudopotentials but new one doesn't,
         # merge important fields (magnetic/hubbard settings, basic params) into existing
         # This allows users to edit magnetic/hubbard settings after session reload
         # without having to re-prepare the calculation
         if existing_config.get('pseudopotentials') and not config.get('pseudopotentials'):
+            # Create a new merged config by copying the new config
+            merged_config = config.copy()
             # Preserve pseudopotentials from existing config
-            config['pseudopotentials'] = existing_config['pseudopotentials']
-            # Return True to save the merged config
-            return True
+            merged_config['pseudopotentials'] = existing_config['pseudopotentials']
+            # Return the merged config
+            return merged_config
         
-        # Otherwise, keep existing config to avoid overwriting valid with incomplete
-        return False
+        # Otherwise, return None to skip saving (don't overwrite valid with incomplete)
+        return None
     
     def save_state(self):
         """Save current page state to session state.
@@ -1049,5 +1057,7 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
         config = self._get_config()
         existing_config = self.session_state.get('workflow_config')
         
-        if self._should_save_config(config, existing_config):
-            self.session_state['workflow_config'] = config
+        # Merge configs if needed and get the final config to save
+        merged_config = self._merge_configs(config, existing_config)
+        if merged_config is not None:
+            self.session_state['workflow_config'] = merged_config

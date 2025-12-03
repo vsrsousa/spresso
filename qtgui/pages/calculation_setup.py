@@ -900,6 +900,18 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             QMessageBox.warning(self, "Warning", "Please specify pseudopotentials for all elements")
             return
         
+        # Validate machine selection
+        machine = self.session_state.get('calc_machine')
+        if not machine:
+            QMessageBox.warning(
+                self, 
+                "No Machine Selected",
+                "Please select a machine configuration before preparing the calculation.\n\n"
+                "A machine defines where and how the calculation will run (local/remote, scheduler type, resources, etc.).\n\n"
+                "Go to Machine Configuration page to create or select a machine."
+            )
+            return
+        
         # Set up environment for Espresso calculator
         # 1. Set ASE_ESPRESSO_COMMAND environment variable (like Streamlit GUI does)
         # This tells xespresso's Espresso calculator how to run QE executables

@@ -171,7 +171,7 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         smearing_layout = QFormLayout(self.smearing_group)
         
         self.smearing_combo = QComboBox()
-        self.smearing_combo.addItems(["gaussian", "methfessel-paxton", "marzari-vanderbilt", "fermi-dirac"])
+        self.smearing_combo.addItems(["marzari-vanderbilt", "gaussian", "methfessel-paxton", "fermi-dirac"])
         smearing_layout.addRow("Smearing Type:", self.smearing_combo)
         
         self.degauss_spin = QDoubleSpinBox()
@@ -999,6 +999,17 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                 self.time_edit.setText(resources['time'])
             if 'partition' in resources:
                 self.partition_edit.setText(resources['partition'])
+        
+        # Restore pseudopotentials
+        if config.get('pseudopotentials'):
+            if PSEUDO_SELECTOR_AVAILABLE and hasattr(self, 'pseudo_selector'):
+                # Use the advanced selector widget
+                self.pseudo_selector.set_pseudopotentials(config['pseudopotentials'])
+            else:
+                # Fallback to simple manual inputs
+                for element, pseudo_file in config['pseudopotentials'].items():
+                    if element in getattr(self, 'pseudo_edits', {}):
+                        self.pseudo_edits[element].setText(pseudo_file)
     
     def _merge_configs(self, config, existing_config):
         """Merge current config with existing config and return the result.

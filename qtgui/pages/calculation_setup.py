@@ -66,6 +66,7 @@ class CalculationSetupPage(QWidget):
         # Initialize dictionaries for dynamic inputs
         self.magnetic_edits = {}
         self.hubbard_edits = {}
+        self.hubbard_orbital_edits = {}
         self._setup_ui()
     
     def _setup_ui(self):
@@ -600,8 +601,15 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 item.widget().deleteLater()
         
         self.hubbard_edits = {}
+        self.hubbard_orbital_edits = {}
         
         for element in sorted(elements):
+            # Create a container widget for each element with U value and orbital
+            container = QWidget()
+            hlayout = QHBoxLayout(container)
+            hlayout.setContentsMargins(0, 0, 0, 0)
+            
+            # U value spinbox
             spin = QDoubleSpinBox()
             spin.setRange(0.0, 20.0)
             spin.setSingleStep(0.5)
@@ -609,8 +617,73 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             spin.setSuffix(" eV")
             default_val = TYPICAL_HUBBARD_U.get(element, 0.0)
             spin.setValue(default_val)
+            hlayout.addWidget(spin)
+            
+            # Orbital selector (for new format)
+            orbital_combo = QComboBox()
+            # Common orbitals for the element
+            orbitals = self._get_common_orbitals_for_element(element)
+            orbital_combo.addItems(orbitals)
+            hlayout.addWidget(QLabel("Orbital:"))
+            hlayout.addWidget(orbital_combo)
+            
             self.hubbard_edits[element] = spin
-            self.hubbard_container_layout.addRow(f"{element}:", spin)
+            self.hubbard_orbital_edits[element] = orbital_combo
+            self.hubbard_container_layout.addRow(f"{element}:", container)
+    
+    def _get_common_orbitals_for_element(self, element):
+        """Get common orbital choices for an element.
+        
+        Returns a list of orbital strings appropriate for the element
+        for use in DFT+U calculations.
+        """
+        # Mapping of elements to their common Hubbard orbitals
+        orbital_map = {
+            # 3d transition metals
+            'Ti': ['3d', '4s', '3p'],
+            'V': ['3d', '4s', '3p'],
+            'Cr': ['3d', '4s', '3p'],
+            'Mn': ['3d', '4s', '3p'],
+            'Fe': ['3d', '4s', '3p'],
+            'Co': ['3d', '4s', '3p'],
+            'Ni': ['3d', '4s', '3p'],
+            'Cu': ['3d', '4s', '3p'],
+            'Zn': ['3d', '4s', '3p'],
+            # 4d transition metals
+            'Zr': ['4d', '5s', '4p'],
+            'Nb': ['4d', '5s', '4p'],
+            'Mo': ['4d', '5s', '4p'],
+            'Tc': ['4d', '5s', '4p'],
+            'Ru': ['4d', '5s', '4p'],
+            'Rh': ['4d', '5s', '4p'],
+            'Pd': ['4d', '5s', '4p'],
+            'Ag': ['4d', '5s', '4p'],
+            'Cd': ['4d', '5s', '4p'],
+            # 4f rare earths
+            'Ce': ['4f', '5d', '5p'],
+            'Pr': ['4f', '5d', '5p'],
+            'Nd': ['4f', '5d', '5p'],
+            'Pm': ['4f', '5d', '5p'],
+            'Sm': ['4f', '5d', '5p'],
+            'Eu': ['4f', '5d', '5p'],
+            'Gd': ['4f', '5d', '5p'],
+            'Tb': ['4f', '5d', '5p'],
+            'Dy': ['4f', '5d', '5p'],
+            'Ho': ['4f', '5d', '5p'],
+            'Er': ['4f', '5d', '5p'],
+            'Tm': ['4f', '5d', '5p'],
+            'Yb': ['4f', '5d', '5p'],
+            'Lu': ['4f', '5d', '5p'],
+            # p-block elements
+            'O': ['2p', '2s'],
+            'S': ['3p', '3s'],
+            'Se': ['4p', '4s'],
+            'N': ['2p', '2s'],
+            'P': ['3p', '3s'],
+            'As': ['4p', '4s'],
+        }
+        
+        return orbital_map.get(element, ['3d', '4d', '4f', '2p', '3p'])
     
     def _on_magnetic_preset_changed(self, preset):
         """Handle magnetic preset selection."""
@@ -737,10 +810,16 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             config['enable_hubbard'] = True
             config['hubbard_format'] = 'new' if 'New' in self.hubbard_format_combo.currentText() else 'old'
             config['hubbard_u'] = {}
+            config['hubbard_orbitals'] = {}
+            
             for element, spin in self.hubbard_edits.items():
                 value = spin.value()
                 if value > 0.0:
                     config['hubbard_u'][element] = value
+                    # Save orbital information if available (for new format)
+                    if element in self.hubbard_orbital_edits:
+                        orbital = self.hubbard_orbital_edits[element].currentText()
+                        config['hubbard_orbitals'][element] = orbital
         else:
             config['enable_hubbard'] = False
             config['hubbard_u'] = {}
@@ -842,6 +921,13 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                 for element, u_value in config['hubbard_u'].items():
                     if element in self.hubbard_edits:
                         self.hubbard_edits[element].setValue(u_value)
+            # Restore orbital selections
+            if config.get('hubbard_orbitals'):
+                for element, orbital in config['hubbard_orbitals'].items():
+                    if element in self.hubbard_orbital_edits:
+                        idx = self.hubbard_orbital_edits[element].findText(orbital)
+                        if idx >= 0:
+                            self.hubbard_orbital_edits[element].setCurrentIndex(idx)
             # Restore Hubbard format
             if config.get('hubbard_format'):
                 format_str = "New (QE >= 7.0)" if config['hubbard_format'] == 'new' else "Old (QE < 7.0)"

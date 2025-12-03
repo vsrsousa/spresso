@@ -261,7 +261,7 @@ class JobSubmissionPage(QWidget):
         # Description
         desc = QLabel("""
 <p><b>Run Calculation</b></p>
-<p>Run a calculation using xespresso by calling <code>calc.get_potential_energy()</code>.</p>
+<p>Run a calculation using xespresso by calling <code>atoms.get_potential_energy()</code>.</p>
 <p>This will:</p>
 <ul>
 <li>Create an Espresso calculator from your configuration</li>

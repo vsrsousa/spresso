@@ -873,7 +873,7 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         return config
     
     def _prepare_calculation(self):
-        """Prepare the calculation."""
+        """Prepare the calculation - creates Espresso calculator and stores in session state."""
         atoms = self.session_state.get('current_structure')
         
         if atoms is None:
@@ -901,27 +901,58 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Store config in session state
         self.session_state['workflow_config'] = config
         
-        # Update config display
-        import json
-        self.config_text.setText(json.dumps(config, indent=2))
-        
-        self.results_label.setText("""
-✅ <b>Calculation configuration saved!</b>
+        try:
+            # Create a default label for preparation (can be changed in job submission)
+            preparation_label = config.get("label", f"{config.get('calc_type', 'scf')}/{atoms.get_chemical_formula()}")
+            
+            # Use gui.calculations.preparation to create Espresso calculator
+            # This follows the same pattern as Streamlit version
+            from gui.calculations import prepare_calculation_from_gui
+            
+            # Prepare atoms and calculator
+            prepared_atoms, calc = prepare_calculation_from_gui(
+                atoms, config, label=preparation_label
+            )
+            
+            # Store prepared objects in session state for use in job_submission
+            self.session_state['espresso_calculator'] = calc
+            self.session_state['prepared_atoms'] = prepared_atoms
+            
+            # Update config display
+            import json
+            self.config_text.setText(json.dumps(config, indent=2))
+            
+            self.results_label.setText(f"""
+✅ <b>Calculation prepared successfully!</b>
 
-The configuration has been stored in session state and is ready for:
+The calculation module has created:
+• ✓ Prepared atoms object (with magnetic/Hubbard config if enabled)
+• ✓ Espresso calculator object
+• ✓ Configuration: {preparation_label}
+
+Ready for:
 • Dry run (generate input files)
 • Job submission (execute calculation)
 
-Go to <b>Job Submission</b> page to generate files or run the calculation.
+Go to <b>Job Submission</b> page to use these objects.
 """)
-        self.results_label.setStyleSheet("color: green;")
-        self.results_label.setTextFormat(Qt.RichText)
-        
-        QMessageBox.information(
-            self, 
-            "Configuration Saved",
-            "Calculation configuration has been saved.\n\nGo to Job Submission page to generate files or run the calculation."
-        )
+            self.results_label.setStyleSheet("color: green;")
+            self.results_label.setTextFormat(Qt.RichText)
+            
+            QMessageBox.information(
+                self, 
+                "Calculation Prepared",
+                "Espresso calculator and atoms objects have been created and stored.\n\nGo to Job Submission page to generate files or run the calculation."
+            )
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            QMessageBox.critical(
+                self,
+                "Preparation Failed",
+                f"Failed to prepare calculation: {e}\n\nSee console for details."
+            )
+            print(f"Error preparing calculation:\n{error_details}")
     
     def refresh(self):
         """Refresh the page."""

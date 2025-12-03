@@ -30,6 +30,47 @@ try:
 except ImportError:
     XESPRESSO_AVAILABLE = False
 
+try:
+    import shutil
+    SHUTIL_AVAILABLE = True
+except ImportError:
+    SHUTIL_AVAILABLE = False
+
+
+def validate_and_fix_scheduler(queue_config):
+    """
+    Validate scheduler configuration and fix if necessary.
+    
+    If SLURM scheduler is selected but sbatch is not available,
+    automatically switch to 'direct' scheduler for local execution.
+    
+    Args:
+        queue_config (dict): Queue configuration with 'scheduler' and 'execution' keys
+        
+    Returns:
+        tuple: (queue_config, warning_message)
+            - queue_config: The validated/fixed configuration
+            - warning_message: String warning if scheduler was changed, None otherwise
+    """
+    if not queue_config:
+        return queue_config, None
+    
+    scheduler = queue_config.get('scheduler', '').lower()
+    execution = queue_config.get('execution', 'local').lower()
+    
+    # Only validate SLURM for local execution
+    if scheduler == 'slurm' and execution == 'local':
+        if SHUTIL_AVAILABLE and shutil.which("sbatch") is None:
+            # sbatch not found - switch to direct scheduler
+            queue_config['scheduler'] = 'direct'
+            warning_msg = (
+                "⚠️ SLURM scheduler requested but 'sbatch' command not found.\n"
+                "Automatically switched to 'direct' scheduler for local execution."
+            )
+            return queue_config, warning_msg
+    
+    return queue_config, None
+
 
 # Default orbitals for common elements in DFT+U calculations
 DEFAULT_HUBBARD_ORBITALS = {
@@ -584,6 +625,14 @@ class JobSubmissionPage(QWidget):
             elif 'queue' not in calc_config:
                 calc_config['queue'] = {'execution': 'local', 'scheduler': 'direct'}
             
+            # Validate and fix scheduler configuration if needed
+            calc_config['queue'], scheduler_warning = validate_and_fix_scheduler(calc_config.get('queue'))
+            if scheduler_warning:
+                import logging
+                logging.warning(scheduler_warning)
+                # Show warning to user
+                QMessageBox.warning(self, "Scheduler Auto-Corrected", scheduler_warning)
+            
             # Use xespresso's Espresso calculator for proper dry run
             if XESPRESSO_AVAILABLE:
                 try:
@@ -976,6 +1025,14 @@ Files created in: <code>{full_path}</code>
                 if calc_config.get('adjust_resources'):
                     resources = calc_config.get('resources', {})
                     calc_config['queue'].update(resources)
+            
+            # Validate and fix scheduler configuration if needed
+            calc_config['queue'], scheduler_warning = validate_and_fix_scheduler(calc_config.get('queue'))
+            if scheduler_warning:
+                import logging
+                logging.warning(scheduler_warning)
+                # Show warning to user
+                QMessageBox.warning(self, "Scheduler Auto-Corrected", scheduler_warning)
             
             # Use gui.calculations.preparation module to create calculator
             # This follows the same pattern as streamlit version

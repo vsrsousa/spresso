@@ -261,7 +261,7 @@ class JobSubmissionPage(QWidget):
         # Description
         desc = QLabel("""
 <p><b>Run Calculation</b></p>
-<p>Run a calculation using xespresso by calling <code>calc.get_potential_energy()</code>.</p>
+<p>Run a calculation using xespresso by calling <code>atoms.get_potential_energy()</code>.</p>
 <p>This will:</p>
 <ul>
 <li>Create an Espresso calculator from your configuration</li>
@@ -1053,7 +1053,7 @@ Files created in: <code>{full_path}</code>
             # Update status
             self.run_status.setText("⏳ Running calculation... (this may take a while)")
             self.run_status.setStyleSheet("color: blue;")
-            self.run_results.setText(f"""
+            self.run_results.setHtml(f"""
 <b>Calculation started</b>
 
 Working directory: <code>{full_path}</code>
@@ -1064,16 +1064,15 @@ depending on system size and computational resources.
 <b>Note:</b> The GUI may appear frozen during calculation execution.
 This is normal for local calculations.
 """)
-            self.run_results.setTextFormat(Qt.RichText)
             QApplication.processEvents()  # Update UI
             
             # Run the calculation
-            # This calls xespresso's Espresso.get_potential_energy() which will:
+            # This calls xespresso's get_potential_energy() via the atoms object which will:
             # 1. Generate input files if needed
             # 2. Submit the job to the configured scheduler/launcher
             # 3. Wait for completion and parse output
             # Any errors during calculation will be caught by the outer try-except
-            energy = calc.get_potential_energy(atoms_copy)
+            energy = atoms_copy.get_potential_energy()
             
             # Success! Display results
             self.run_status.setText("✅ Calculation completed successfully!")
@@ -1121,8 +1120,7 @@ This is normal for local calculations.
                     import logging
                     logging.warning(f"Unexpected error getting forces: {e}")
             
-            self.run_results.setText(results_text)
-            self.run_results.setTextFormat(Qt.RichText)
+            self.run_results.setHtml(results_text)
             
             # Refresh browser to show new files
             self._refresh_browser()
@@ -1142,7 +1140,7 @@ This is normal for local calculations.
             
             self.energy_label.setText("")
             
-            self.run_results.setText(f"""
+            self.run_results.setHtml(f"""
 <b>❌ Calculation Failed</b>
 
 <b>Error:</b> {str(e)}
@@ -1168,7 +1166,6 @@ This is normal for local calculations.
 <b>Detailed Error:</b>
 <pre>{error_traceback}</pre>
 """)
-            self.run_results.setTextFormat(Qt.RichText)
             
             QMessageBox.critical(
                 self,

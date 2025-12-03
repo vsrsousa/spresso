@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QSpinBox, QCheckBox, QTextEdit, QRadioButton, QButtonGroup
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette, QColor
 
 try:
     from xespresso.machines.config.loader import (
@@ -67,7 +68,37 @@ class CalculationSetupPage(QWidget):
         self.magnetic_edits = {}
         self.hubbard_edits = {}
         self.hubbard_orbital_edits = {}
+        self.hubbard_checkboxes = {}  # Track which elements have Hubbard enabled
         self._setup_ui()
+    
+    def _get_combobox_stylesheet(self):
+        """Get the stylesheet for comboboxes."""
+        return """
+            QComboBox {
+                padding: 2px;
+            }
+            QComboBox::drop-down {
+                border: 0px;
+            }
+            QComboBox QAbstractItemView {
+                selection-background-color: #4A90E2;
+                selection-color: white;
+                background-color: white;
+                color: black;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #7BADF5;
+                color: white;
+            }
+        """
+    
+    def _apply_combobox_styling(self):
+        """Apply custom styling to comboboxes for better visibility."""
+        combobox_style = self._get_combobox_stylesheet()
+        
+        # Apply to all comboboxes in the page
+        for widget in self.findChildren(QComboBox):
+            widget.setStyleSheet(combobox_style)
     
     def _setup_ui(self):
         """Setup the user interface."""
@@ -394,6 +425,9 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Load initial data
         self._load_machines()
         self._update_structure_status()
+        
+        # Apply styling after all widgets are created
+        self._apply_combobox_styling()
     
     def _load_machines(self):
         """Load available machines."""
@@ -602,12 +636,19 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         self.hubbard_edits = {}
         self.hubbard_orbital_edits = {}
+        self.hubbard_checkboxes = {}
         
         for element in sorted(elements):
-            # Create a container widget for each element with U value and orbital
+            # Create a container widget for each element with checkbox, U value and orbital
             container = QWidget()
             hlayout = QHBoxLayout(container)
             hlayout.setContentsMargins(0, 0, 0, 0)
+            
+            # Checkbox to enable/disable Hubbard for this element
+            checkbox = QCheckBox()
+            checkbox.setChecked(False)  # Default to unchecked
+            checkbox.setToolTip(f"Enable Hubbard U correction for {element}")
+            hlayout.addWidget(checkbox)
             
             # U value spinbox
             spin = QDoubleSpinBox()
@@ -624,9 +665,12 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             # Common orbitals for the element
             orbitals = self._get_common_orbitals_for_element(element)
             orbital_combo.addItems(orbitals)
+            # Apply styling to this combobox
+            orbital_combo.setStyleSheet(self._get_combobox_stylesheet())
             hlayout.addWidget(QLabel("Orbital:"))
             hlayout.addWidget(orbital_combo)
             
+            self.hubbard_checkboxes[element] = checkbox
             self.hubbard_edits[element] = spin
             self.hubbard_orbital_edits[element] = orbital_combo
             self.hubbard_container_layout.addRow(f"{element}:", container)
@@ -812,9 +856,11 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             config['hubbard_u'] = {}
             config['hubbard_orbitals'] = {}
             
-            for element, spin in self.hubbard_edits.items():
-                value = spin.value()
-                if value > 0.0:
+            for element, checkbox in self.hubbard_checkboxes.items():
+                # Only save Hubbard U if checkbox is checked
+                if checkbox.isChecked():
+                    spin = self.hubbard_edits[element]
+                    value = spin.value()
                     config['hubbard_u'][element] = value
                     # Save orbital information if available (for new format)
                     if element in self.hubbard_orbital_edits:
@@ -924,6 +970,9 @@ Go to <b>Job Submission</b> page to generate files or run the calculation.
                 for element, u_value in config['hubbard_u'].items():
                     if element in self.hubbard_edits:
                         self.hubbard_edits[element].setValue(u_value)
+                    # Check the checkbox for elements that have Hubbard U configured
+                    if element in self.hubbard_checkboxes:
+                        self.hubbard_checkboxes[element].setChecked(True)
             # Restore orbital selections
             if config.get('hubbard_orbitals'):
                 for element, orbital in config['hubbard_orbitals'].items():

@@ -1345,6 +1345,21 @@ def main():
     # Set application style
     app.setStyle("Fusion")
     
+    # Set global stylesheet for consistent dropdown menu styling
+    # This ensures all comboboxes use black text with good contrast
+    app.setStyleSheet("""
+        QComboBox QAbstractItemView {
+            selection-background-color: #B3D9FF;
+            selection-color: black;
+            background-color: #F5F5F5;
+            color: black;
+        }
+        QComboBox QAbstractItemView::item:hover {
+            background-color: #D6EBFF;
+            color: black;
+        }
+    """)
+    
     window = MainWindow()
     window.show()
     

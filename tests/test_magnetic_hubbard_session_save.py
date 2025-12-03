@@ -62,7 +62,7 @@ class TestMagneticHubbardSessionSave:
         page.refresh()
         
         # Verify magnetic checkbox is checked
-        assert page.magnetic_group.isChecked() == True, "Magnetic group should be checked after loading session"
+        assert page.magnetic_group.isChecked(), "Magnetic group should be checked after loading session"
         
         # Verify magnetic value is restored
         assert 'Fe' in page.magnetic_edits
@@ -123,7 +123,7 @@ class TestMagneticHubbardSessionSave:
         page.refresh()
         
         # Verify Hubbard checkbox is checked
-        assert page.hubbard_group.isChecked() == True, "Hubbard group should be checked after loading session"
+        assert page.hubbard_group.isChecked(), "Hubbard group should be checked after loading session"
         
         # Verify Hubbard value is restored
         assert 'Fe' in page.hubbard_edits
@@ -185,8 +185,8 @@ class TestMagneticHubbardSessionSave:
         page = CalculationSetupPage(session_state)
         page.refresh()
         
-        assert page.magnetic_group.isChecked() == True
-        assert page.hubbard_group.isChecked() == True
+        assert page.magnetic_group.isChecked()
+        assert page.hubbard_group.isChecked()
         
         # Test 2: Only magnetic enabled
         config2 = {
@@ -202,8 +202,8 @@ class TestMagneticHubbardSessionSave:
         page2 = CalculationSetupPage(session_state)
         page2.refresh()
         
-        assert page2.magnetic_group.isChecked() == True
-        assert page2.hubbard_group.isChecked() == False
+        assert page2.magnetic_group.isChecked()
+        assert not page2.hubbard_group.isChecked()
         
         # Test 3: Only Hubbard enabled
         config3 = {
@@ -219,8 +219,8 @@ class TestMagneticHubbardSessionSave:
         page3 = CalculationSetupPage(session_state)
         page3.refresh()
         
-        assert page3.magnetic_group.isChecked() == False
-        assert page3.hubbard_group.isChecked() == True
+        assert not page3.magnetic_group.isChecked()
+        assert page3.hubbard_group.isChecked()
         
         # Test 4: Both disabled
         config4 = {
@@ -236,8 +236,8 @@ class TestMagneticHubbardSessionSave:
         page4 = CalculationSetupPage(session_state)
         page4.refresh()
         
-        assert page4.magnetic_group.isChecked() == False
-        assert page4.hubbard_group.isChecked() == False
+        assert not page4.magnetic_group.isChecked()
+        assert not page4.hubbard_group.isChecked()
     
     def test_merge_configs_preserves_pseudopotentials(self, qt_app):
         """Test that _merge_configs properly preserves pseudopotentials."""

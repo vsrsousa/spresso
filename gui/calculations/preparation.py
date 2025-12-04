@@ -61,6 +61,9 @@ class CalculationPreparation(BaseCalculationPreparation):
         enable_magnetism = config.get('enable_magnetism', False)
         enable_hubbard = config.get('enable_hubbard', False)
         
+        # Initialize mag_result to None
+        mag_result = None
+        
         # Prepare pseudopotentials and atoms with magnetic/Hubbard config if needed
         if enable_magnetism or enable_hubbard:
             # Build magnetic_config dict for setup_magnetic_config()
@@ -188,15 +191,14 @@ class CalculationPreparation(BaseCalculationPreparation):
         if input_ntyp:
             input_data['input_ntyp'] = input_ntyp
         
-        # Add Hubbard parameters if using new format
-        if enable_hubbard and enable_magnetism:
-            # Check if new format was used
-            if 'hubbard' in mag_result:
-                input_data['hubbard'] = mag_result['hubbard']
-                if 'hubbard_format' in mag_result:
-                    input_data['hubbard_format'] = mag_result['hubbard_format']
-                if 'qe_version' in mag_result:
-                    input_data['qe_version'] = mag_result['qe_version']
+        # Add Hubbard parameters from setup_magnetic_config result if present
+        # This should be added regardless of magnetism since Hubbard can be used alone
+        if mag_result and 'hubbard' in mag_result:
+            input_data['hubbard'] = mag_result['hubbard']
+            if 'hubbard_format' in mag_result:
+                input_data['hubbard_format'] = mag_result['hubbard_format']
+            if 'qe_version' in mag_result:
+                input_data['qe_version'] = mag_result['qe_version']
         
         # Add lda_plus_u flag if Hubbard is enabled
         if enable_hubbard:

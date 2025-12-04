@@ -88,6 +88,11 @@ class WorkflowBuilderPage(QWidget):
         self.structure_status.setWordWrap(True)
         scroll_layout.addWidget(self.structure_status)
         
+        # Mode Status (shows if calculation setup is active)
+        self.mode_status = QLabel("")
+        self.mode_status.setWordWrap(True)
+        scroll_layout.addWidget(self.mode_status)
+        
         # Execution Environment
         env_group = QGroupBox("🖥️ Execution Environment")
         env_layout = QFormLayout(env_group)
@@ -693,6 +698,21 @@ class WorkflowBuilderPage(QWidget):
             )
             return
         
+        # Check if calculation setup mode is active
+        workflow_mode = self.session_state.get('workflow_mode')
+        if workflow_mode == 'single':
+            reply = QMessageBox.question(
+                self,
+                "Switch to Multi-Step Workflow Mode?",
+                "You previously prepared a single calculation.\n\n"
+                "Using Workflow Builder will switch to multi-step workflow mode and replace the calculation configuration.\n\n"
+                "Do you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        
         # Check if GUIWorkflow is available
         if not WORKFLOW_AVAILABLE:
             QMessageBox.critical(
@@ -750,6 +770,8 @@ class WorkflowBuilderPage(QWidget):
             # Store workflow object in session state
             self.session_state['gui_workflow'] = workflow
             self.session_state['workflow_config'] = config
+            # Mark that we're using multi-step workflow mode
+            self.session_state['workflow_mode'] = 'multi'
             
             # Update summary display
             self.summary_text.setText(f"""
@@ -824,6 +846,8 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
             self._update_structure_status()
             # Restore UI state from saved configuration
             self._restore_config_to_ui()
+            # Update mode indicator
+            self._update_mode_indicator()
         finally:
             self._loading = False
     
@@ -882,7 +906,16 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
         
         This is called before the session is saved to disk to ensure
         all current UI values are captured in the session state.
+        
+        Only save if we're in multi-step workflow mode or if mode isn't set yet.
         """
+        workflow_mode = self.session_state.get('workflow_mode')
+        
+        # Only save if we're in multi mode, or mode is not set (for backward compatibility)
+        if workflow_mode == 'single':
+            # Don't overwrite calculation setup's config
+            return
+        
         config = self._get_config()
         existing_config = self.session_state.get('workflow_config')
         
@@ -891,6 +924,9 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
         merged_config = self._merge_configs(config, existing_config)
         if merged_config is not None:
             self.session_state['workflow_config'] = merged_config
+            # If mode isn't set, set it to multi since we're saving from here
+            if workflow_mode is None:
+                self.session_state['workflow_mode'] = 'multi'
     
     def _merge_configs(self, config, existing_config):
         """Merge current config with existing config to avoid overwriting other pages' settings.
@@ -929,3 +965,24 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
             merged['hubbard_format'] = existing_config.get('hubbard_format', 'new')
         
         return merged
+    
+    def _update_mode_indicator(self):
+        """Update the mode status indicator to show which workflow mode is active."""
+        workflow_mode = self.session_state.get('workflow_mode')
+        
+        if workflow_mode == 'single':
+            self.mode_status.setText(
+                "ℹ️ <b>Single Calculation Mode Active</b> - "
+                "Currently using Calculation Setup. To use this page, click 'Build Workflow' and confirm the mode switch."
+            )
+            self.mode_status.setStyleSheet("color: #ff9800; font-weight: bold; background-color: #fff3e0; padding: 10px; border-radius: 5px;")
+            self.mode_status.setTextFormat(Qt.RichText)
+        elif workflow_mode == 'multi':
+            self.mode_status.setText("✅ <b>Multi-Step Workflow Mode Active</b>")
+            self.mode_status.setStyleSheet("color: green; font-weight: bold;")
+            self.mode_status.setTextFormat(Qt.RichText)
+        else:
+            # No mode set yet
+            self.mode_status.setText("")
+            self.mode_status.setStyleSheet("")
+

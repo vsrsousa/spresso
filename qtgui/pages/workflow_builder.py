@@ -822,8 +822,60 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
         try:
             self._load_machines()
             self._update_structure_status()
+            # Restore UI state from saved configuration
+            self._restore_config_to_ui()
         finally:
             self._loading = False
+    
+    def _restore_config_to_ui(self):
+        """Restore UI state from saved workflow_config in session state.
+        
+        This ensures that when a session is loaded, the magnetic and hubbard
+        checkboxes and other UI elements reflect the saved configuration,
+        allowing continued editing after session save/reload.
+        """
+        config = self.session_state.get('workflow_config')
+        if not config:
+            return
+        
+        # Restore magnetic configuration checkbox state
+        if config.get('enable_magnetism'):
+            self.magnetic_group.setChecked(True)
+            # Restore magnetic values if elements exist
+            if config.get('magnetic_config'):
+                for element, mag_value in config['magnetic_config'].items():
+                    if element in self.magnetic_edits:
+                        # mag_value might be a list from setup_magnetic_config
+                        value = mag_value[0] if isinstance(mag_value, list) else mag_value
+                        self.magnetic_edits[element].setValue(value)
+        else:
+            # Explicitly uncheck if the config says magnetism is disabled
+            self.magnetic_group.setChecked(False)
+        
+        # Restore Hubbard configuration checkbox state
+        if config.get('enable_hubbard'):
+            self.hubbard_group.setChecked(True)
+            # Restore Hubbard U values if elements exist
+            if config.get('hubbard_u'):
+                for element, u_value in config['hubbard_u'].items():
+                    if element in self.hubbard_u_edits:
+                        self.hubbard_u_edits[element].setValue(u_value)
+            # Restore orbital selections
+            if config.get('hubbard_orbitals'):
+                for element, orbital in config['hubbard_orbitals'].items():
+                    if element in self.hubbard_orbital_edits:
+                        idx = self.hubbard_orbital_edits[element].findText(orbital)
+                        if idx >= 0:
+                            self.hubbard_orbital_edits[element].setCurrentIndex(idx)
+            # Restore Hubbard format
+            if config.get('hubbard_format'):
+                format_str = "New (QE 7.x)" if config['hubbard_format'] == 'new' else "Old (QE 6.x)"
+                idx = self.hubbard_format_combo.findText(format_str)
+                if idx >= 0:
+                    self.hubbard_format_combo.setCurrentIndex(idx)
+        else:
+            # Explicitly uncheck if the config says Hubbard is disabled
+            self.hubbard_group.setChecked(False)
     
     def save_state(self):
         """Save current page state to session state.

@@ -904,8 +904,13 @@ This is normal for local calculations.
 """)
             QApplication.processEvents()  # Update UI
             
+            # Ensure calculator is attached to atoms (following xespresso pattern)
+            # This is required for atoms.get_potential_energy() to work
+            # Defensive check for robustness (e.g., restored from old session state)
+            if prepared_atoms.calc is None or prepared_atoms.calc != calc:
+                prepared_atoms.calc = calc
+            
             # Run the calculation using ASE/xespresso pattern
-            # The calculator is already attached to prepared_atoms
             # xespresso's get_potential_energy() will:
             # 1. Check for previous results
             # 2. Generate input files if needed using write_input()

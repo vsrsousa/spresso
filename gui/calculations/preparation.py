@@ -251,6 +251,10 @@ class CalculationPreparation(BaseCalculationPreparation):
         # Update the atoms object we're returning
         self.atoms = atoms
         
+        # Attach calculator to atoms following xespresso pattern
+        # This is required for atoms.get_potential_energy() to work
+        self.atoms.calc = self.calculator
+        
         logger.info(f"Successfully prepared {calc_type} calculation")
         
         return self.atoms, self.calculator

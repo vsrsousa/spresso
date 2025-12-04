@@ -632,19 +632,19 @@ class WorkflowBuilderPage(QWidget):
         if config['enable_magnetism']:
             config['magnetic_config'] = {}
             for element, edit in getattr(self, 'magnetic_edits', {}).items():
-                config['magnetic_config'][element] = edit.value()
+                config['magnetic_config'][element] = [edit.value()]
         
         # Hubbard (DFT+U) configuration (optional)
         config['enable_hubbard'] = self.hubbard_group.isChecked()
         if config['enable_hubbard']:
             config['hubbard_format'] = 'new' if 'New' in self.hubbard_format_combo.currentText() else 'old'
             config['hubbard_u'] = {}
-            config['hubbard_orbital'] = {}
+            config['hubbard_orbitals'] = {}
             for element in getattr(self, 'hubbard_u_edits', {}):
                 u_value = self.hubbard_u_edits[element].value()
                 if u_value > 0:
                     config['hubbard_u'][element] = u_value
-                    config['hubbard_orbital'][element] = self.hubbard_orbital_edits[element].currentText()
+                    config['hubbard_orbitals'][element] = self.hubbard_orbital_edits[element].currentText()
         
         # Machine and Queue configuration
         config['machine_name'] = self.machine_combo.currentText()

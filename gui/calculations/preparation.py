@@ -96,7 +96,9 @@ class CalculationPreparation(BaseCalculationPreparation):
                         hubbard_format = config.get('hubbard_format', 'old')
                         if hubbard_format == 'new':
                             # New format requires orbital specification
-                            orbital = config.get(f'hubbard_orbital_{element}', '3d')
+                            # Get orbital from hubbard_orbitals dict if available
+                            hubbard_orbitals = config.get('hubbard_orbitals', {})
+                            orbital = hubbard_orbitals.get(element, '3d')
                             element_config['U'] = {orbital: u_value}
                         else:
                             # Old format - just the value

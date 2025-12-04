@@ -884,4 +884,48 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
         all current UI values are captured in the session state.
         """
         config = self._get_config()
-        self.session_state['workflow_config'] = config
+        existing_config = self.session_state.get('workflow_config')
+        
+        # Merge with existing config to preserve settings from other pages
+        # (e.g., Calculation Setup page might have set magnetic/Hubbard settings)
+        merged_config = self._merge_configs(config, existing_config)
+        if merged_config is not None:
+            self.session_state['workflow_config'] = merged_config
+    
+    def _merge_configs(self, config, existing_config):
+        """Merge current config with existing config to avoid overwriting other pages' settings.
+        
+        Args:
+            config (dict): New configuration from current UI state
+            existing_config (dict or None): Existing workflow configuration in session state
+            
+        Returns:
+            dict: Merged configuration to save
+            
+        Decision logic:
+            - If no existing config: Save current config
+            - If existing config exists: Merge current config with existing, preferring
+              existing values for magnetic/hubbard if they were set there
+        """
+        # If no existing config, save current one
+        if not existing_config:
+            return config
+        
+        # Start with a copy of the current config
+        merged = config.copy()
+        
+        # If existing config has magnetic/hubbard settings that are enabled,
+        # preserve them unless current config also has them enabled
+        if existing_config.get('enable_magnetism') and not config.get('enable_magnetism'):
+            # Preserve existing magnetic config if current page doesn't have it enabled
+            merged['enable_magnetism'] = existing_config['enable_magnetism']
+            merged['magnetic_config'] = existing_config.get('magnetic_config', {})
+        
+        if existing_config.get('enable_hubbard') and not config.get('enable_hubbard'):
+            # Preserve existing Hubbard config if current page doesn't have it enabled
+            merged['enable_hubbard'] = existing_config['enable_hubbard']
+            merged['hubbard_u'] = existing_config.get('hubbard_u', {})
+            merged['hubbard_orbitals'] = existing_config.get('hubbard_orbitals', {})
+            merged['hubbard_format'] = existing_config.get('hubbard_format', 'new')
+        
+        return merged

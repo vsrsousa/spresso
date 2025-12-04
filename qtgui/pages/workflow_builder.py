@@ -845,7 +845,7 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
             if config.get('magnetic_config'):
                 for element, mag_value in config['magnetic_config'].items():
                     if element in self.magnetic_edits:
-                        # mag_value might be a list from setup_magnetic_config
+                        # mag_value is stored as a list in the config
                         value = mag_value[0] if isinstance(mag_value, list) else mag_value
                         self.magnetic_edits[element].setValue(value)
         else:

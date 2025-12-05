@@ -129,6 +129,11 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         self.structure_status.setWordWrap(True)
         scroll_layout.addWidget(self.structure_status)
         
+        # Mode Status (shows if workflow builder is active)
+        self.mode_status = QLabel("")
+        self.mode_status.setWordWrap(True)
+        scroll_layout.addWidget(self.mode_status)
+        
         if not XESPRESSO_AVAILABLE:
             error_label = QLabel("❌ xespresso modules not available.")
             error_label.setStyleSheet("color: red; font-weight: bold;")
@@ -893,6 +898,21 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             QMessageBox.warning(self, "Warning", "No structure loaded. Please load a structure first.")
             return
         
+        # Check if workflow builder mode is active
+        workflow_mode = self.session_state.get('workflow_mode')
+        if workflow_mode == 'multi':
+            reply = QMessageBox.question(
+                self,
+                "Switch to Single Calculation Mode?",
+                "You previously built a multi-step workflow.\n\n"
+                "Using Calculation Setup will switch to single calculation mode and replace the workflow configuration.\n\n"
+                "Do you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        
         config = self._get_config()
         
         # Validate pseudopotentials
@@ -925,6 +945,8 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         # Store config in session state
         self.session_state['workflow_config'] = config
+        # Mark that we're using single calculation mode
+        self.session_state['workflow_mode'] = 'single'
         
         try:
             # Create a default label for preparation (can be changed in job submission)
@@ -990,6 +1012,8 @@ Go to <b>Job Submission</b> page to use these objects.
             self._update_structure_status()
             # Restore UI state from saved configuration if exists
             self._restore_config_to_ui()
+            # Update mode indicator
+            self._update_mode_indicator()
         finally:
             self._loading = False
     
@@ -1166,10 +1190,15 @@ Go to <b>Job Submission</b> page to use these objects.
         This is called before the session is saved to disk to ensure
         all current UI values are captured in the session state.
         
-        Only save if there's a valid configuration with pseudopotentials,
-        otherwise keep the existing workflow_config to avoid overwriting
-        a valid configuration with an incomplete one.
+        Only save if we're in single calculation mode or if mode isn't set yet.
         """
+        workflow_mode = self.session_state.get('workflow_mode')
+        
+        # Only save if we're in single mode, or mode is not set (for backward compatibility)
+        if workflow_mode == 'multi':
+            # Don't overwrite workflow builder's config
+            return
+        
         config = self._get_config()
         existing_config = self.session_state.get('workflow_config')
         
@@ -1177,3 +1206,27 @@ Go to <b>Job Submission</b> page to use these objects.
         merged_config = self._merge_configs(config, existing_config)
         if merged_config is not None:
             self.session_state['workflow_config'] = merged_config
+            # If mode isn't set, set it to single since we're saving from here
+            if workflow_mode is None:
+                self.session_state['workflow_mode'] = 'single'
+    
+    def _update_mode_indicator(self):
+        """Update the mode status indicator to show which workflow mode is active."""
+        workflow_mode = self.session_state.get('workflow_mode')
+        
+        if workflow_mode == 'multi':
+            self.mode_status.setText(
+                "ℹ️ <b>Multi-Step Workflow Mode Active</b> - "
+                "Currently using Workflow Builder. To use this page, click 'Prepare Calculation' and confirm the mode switch."
+            )
+            self.mode_status.setStyleSheet("color: #ff9800; font-weight: bold; background-color: #fff3e0; padding: 10px; border-radius: 5px;")
+            self.mode_status.setTextFormat(Qt.RichText)
+        elif workflow_mode == 'single':
+            self.mode_status.setText("✅ <b>Single Calculation Mode Active</b>")
+            self.mode_status.setStyleSheet("color: green; font-weight: bold;")
+            self.mode_status.setTextFormat(Qt.RichText)
+        else:
+            # No mode set yet
+            self.mode_status.setText("")
+            self.mode_status.setStyleSheet("")
+

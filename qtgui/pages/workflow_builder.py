@@ -88,6 +88,11 @@ class WorkflowBuilderPage(QWidget):
         self.structure_status.setWordWrap(True)
         scroll_layout.addWidget(self.structure_status)
         
+        # Mode Status (shows if calculation setup is active)
+        self.mode_status = QLabel("")
+        self.mode_status.setWordWrap(True)
+        scroll_layout.addWidget(self.mode_status)
+        
         # Execution Environment
         env_group = QGroupBox("🖥️ Execution Environment")
         env_layout = QFormLayout(env_group)
@@ -632,19 +637,19 @@ class WorkflowBuilderPage(QWidget):
         if config['enable_magnetism']:
             config['magnetic_config'] = {}
             for element, edit in getattr(self, 'magnetic_edits', {}).items():
-                config['magnetic_config'][element] = edit.value()
+                config['magnetic_config'][element] = [edit.value()]
         
         # Hubbard (DFT+U) configuration (optional)
         config['enable_hubbard'] = self.hubbard_group.isChecked()
         if config['enable_hubbard']:
             config['hubbard_format'] = 'new' if 'New' in self.hubbard_format_combo.currentText() else 'old'
             config['hubbard_u'] = {}
-            config['hubbard_orbital'] = {}
+            config['hubbard_orbitals'] = {}
             for element in getattr(self, 'hubbard_u_edits', {}):
                 u_value = self.hubbard_u_edits[element].value()
                 if u_value > 0:
                     config['hubbard_u'][element] = u_value
-                    config['hubbard_orbital'][element] = self.hubbard_orbital_edits[element].currentText()
+                    config['hubbard_orbitals'][element] = self.hubbard_orbital_edits[element].currentText()
         
         # Machine and Queue configuration
         config['machine_name'] = self.machine_combo.currentText()
@@ -692,6 +697,21 @@ class WorkflowBuilderPage(QWidget):
                 "Go to Machine Configuration page to create or select a machine."
             )
             return
+        
+        # Check if calculation setup mode is active
+        workflow_mode = self.session_state.get('workflow_mode')
+        if workflow_mode == 'single':
+            reply = QMessageBox.question(
+                self,
+                "Switch to Multi-Step Workflow Mode?",
+                "You previously prepared a single calculation.\n\n"
+                "Using Workflow Builder will switch to multi-step workflow mode and replace the calculation configuration.\n\n"
+                "Do you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
         
         # Check if GUIWorkflow is available
         if not WORKFLOW_AVAILABLE:
@@ -750,6 +770,8 @@ class WorkflowBuilderPage(QWidget):
             # Store workflow object in session state
             self.session_state['gui_workflow'] = workflow
             self.session_state['workflow_config'] = config
+            # Mark that we're using multi-step workflow mode
+            self.session_state['workflow_mode'] = 'multi'
             
             # Update summary display
             self.summary_text.setText(f"""
@@ -822,14 +844,145 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
         try:
             self._load_machines()
             self._update_structure_status()
+            # Restore UI state from saved configuration
+            self._restore_config_to_ui()
+            # Update mode indicator
+            self._update_mode_indicator()
         finally:
             self._loading = False
+    
+    def _restore_config_to_ui(self):
+        """Restore UI state from saved workflow_config in session state.
+        
+        This ensures that when a session is loaded, the magnetic and hubbard
+        checkboxes and other UI elements reflect the saved configuration,
+        allowing continued editing after session save/reload.
+        """
+        config = self.session_state.get('workflow_config')
+        if not config:
+            return
+        
+        # Restore magnetic configuration checkbox state
+        if config.get('enable_magnetism'):
+            self.magnetic_group.setChecked(True)
+            # Restore magnetic values if elements exist
+            if config.get('magnetic_config'):
+                for element, mag_value in config['magnetic_config'].items():
+                    if element in self.magnetic_edits:
+                        # mag_value is stored as a list in the config
+                        value = mag_value[0] if isinstance(mag_value, list) else mag_value
+                        self.magnetic_edits[element].setValue(value)
+        else:
+            # Explicitly uncheck if the config says magnetism is disabled
+            self.magnetic_group.setChecked(False)
+        
+        # Restore Hubbard configuration checkbox state
+        if config.get('enable_hubbard'):
+            self.hubbard_group.setChecked(True)
+            # Restore Hubbard U values if elements exist
+            if config.get('hubbard_u'):
+                for element, u_value in config['hubbard_u'].items():
+                    if element in self.hubbard_u_edits:
+                        self.hubbard_u_edits[element].setValue(u_value)
+            # Restore orbital selections
+            if config.get('hubbard_orbitals'):
+                for element, orbital in config['hubbard_orbitals'].items():
+                    if element in self.hubbard_orbital_edits:
+                        idx = self.hubbard_orbital_edits[element].findText(orbital)
+                        if idx >= 0:
+                            self.hubbard_orbital_edits[element].setCurrentIndex(idx)
+            # Restore Hubbard format
+            if config.get('hubbard_format'):
+                format_str = "New (QE 7.x)" if config['hubbard_format'] == 'new' else "Old (QE 6.x)"
+                idx = self.hubbard_format_combo.findText(format_str)
+                if idx >= 0:
+                    self.hubbard_format_combo.setCurrentIndex(idx)
+        else:
+            # Explicitly uncheck if the config says Hubbard is disabled
+            self.hubbard_group.setChecked(False)
     
     def save_state(self):
         """Save current page state to session state.
         
         This is called before the session is saved to disk to ensure
         all current UI values are captured in the session state.
+        
+        Only save if we're in multi-step workflow mode or if mode isn't set yet.
         """
+        workflow_mode = self.session_state.get('workflow_mode')
+        
+        # Only save if we're in multi mode, or mode is not set (for backward compatibility)
+        if workflow_mode == 'single':
+            # Don't overwrite calculation setup's config
+            return
+        
         config = self._get_config()
-        self.session_state['workflow_config'] = config
+        existing_config = self.session_state.get('workflow_config')
+        
+        # Merge with existing config to preserve settings from other pages
+        # (e.g., Calculation Setup page might have set magnetic/Hubbard settings)
+        merged_config = self._merge_configs(config, existing_config)
+        if merged_config is not None:
+            self.session_state['workflow_config'] = merged_config
+            # If mode isn't set, set it to multi since we're saving from here
+            if workflow_mode is None:
+                self.session_state['workflow_mode'] = 'multi'
+    
+    def _merge_configs(self, config, existing_config):
+        """Merge current config with existing config to avoid overwriting other pages' settings.
+        
+        Args:
+            config (dict): New configuration from current UI state
+            existing_config (dict or None): Existing workflow configuration in session state
+            
+        Returns:
+            dict: Merged configuration to save
+            
+        Decision logic:
+            - If no existing config: Save current config
+            - If existing config exists: Merge current config with existing, preferring
+              existing values for magnetic/hubbard if they were set there
+        """
+        # If no existing config, save current one
+        if not existing_config:
+            return config
+        
+        # Start with a copy of the current config
+        merged = config.copy()
+        
+        # If existing config has magnetic/hubbard settings that are enabled,
+        # preserve them unless current config also has them enabled
+        if existing_config.get('enable_magnetism') and not config.get('enable_magnetism'):
+            # Preserve existing magnetic config if current page doesn't have it enabled
+            merged['enable_magnetism'] = existing_config['enable_magnetism']
+            merged['magnetic_config'] = existing_config.get('magnetic_config', {})
+        
+        if existing_config.get('enable_hubbard') and not config.get('enable_hubbard'):
+            # Preserve existing Hubbard config if current page doesn't have it enabled
+            merged['enable_hubbard'] = existing_config['enable_hubbard']
+            merged['hubbard_u'] = existing_config.get('hubbard_u', {})
+            merged['hubbard_orbitals'] = existing_config.get('hubbard_orbitals', {})
+            merged['hubbard_format'] = existing_config.get('hubbard_format', 'new')
+        
+        return merged
+    
+    def _update_mode_indicator(self):
+        """Update the mode status indicator to show which workflow mode is active."""
+        workflow_mode = self.session_state.get('workflow_mode')
+        
+        if workflow_mode == 'single':
+            self.mode_status.setText(
+                "ℹ️ <b>Single Calculation Mode Active</b> - "
+                "Currently using Calculation Setup. To use this page, click 'Build Workflow' and confirm the mode switch."
+            )
+            self.mode_status.setStyleSheet("color: #ff9800; font-weight: bold; background-color: #fff3e0; padding: 10px; border-radius: 5px;")
+            self.mode_status.setTextFormat(Qt.RichText)
+        elif workflow_mode == 'multi':
+            self.mode_status.setText("✅ <b>Multi-Step Workflow Mode Active</b>")
+            self.mode_status.setStyleSheet("color: green; font-weight: bold;")
+            self.mode_status.setTextFormat(Qt.RichText)
+        else:
+            # No mode set yet
+            self.mode_status.setText("")
+            self.mode_status.setStyleSheet("")
+

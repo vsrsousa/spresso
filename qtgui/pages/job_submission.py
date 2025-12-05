@@ -344,6 +344,9 @@ class JobSubmissionPage(QWidget):
         self.workdir_label.setText(workdir)
         
         self.file_tree.clear()
+        # Clear the file content viewer when refreshing
+        self.file_content.clear()
+        self.file_info_label.setText("")
         
         if not os.path.exists(workdir):
             return
@@ -711,8 +714,6 @@ Files created in: <code>{full_path}</code>
         
         # Add Hubbard U configuration if enabled
         if config.get('enable_hubbard') and config.get('hubbard_u'):
-            input_data['SYSTEM']['lda_plus_u'] = True
-            
             # Determine Hubbard format
             hubbard_format = config.get('hubbard_format', 'old')
             qe_version = config.get('qe_version', '')
@@ -733,6 +734,7 @@ Files created in: <code>{full_path}</code>
             
             if use_new_format:
                 # NEW FORMAT (QE >= 7.0): Use 'hubbard' dictionary with HUBBARD card
+                # NOTE: lda_plus_u should NOT be set when using HUBBARD card (new format)
                 hubbard_dict = {
                     'projector': config.get('hubbard_projector', 'atomic'),
                     'u': {},
@@ -755,6 +757,8 @@ Files created in: <code>{full_path}</code>
                     input_data['qe_version'] = qe_version
             else:
                 # OLD FORMAT (QE < 7.0): Use 'input_ntyp' with Hubbard_U
+                # Only set lda_plus_u for old format
+                input_data['SYSTEM']['lda_plus_u'] = True
                 ensure_input_ntyp(input_data)
                 input_data['input_ntyp']['Hubbard_U'] = {}
                 for element, u_value in config.get('hubbard_u', {}).items():

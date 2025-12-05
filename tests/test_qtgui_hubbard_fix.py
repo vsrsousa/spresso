@@ -115,7 +115,8 @@ class TestQtGuiHubbardFix:
         
         # Verify new format structure
         assert 'SYSTEM' in input_data
-        assert input_data['SYSTEM']['lda_plus_u'] == True
+        # lda_plus_u should NOT be set when using new HUBBARD card format
+        assert 'lda_plus_u' not in input_data['SYSTEM'] or not input_data['SYSTEM'].get('lda_plus_u')
         assert 'hubbard' in input_data
         assert input_data['hubbard']['projector'] == 'atomic'
         assert 'u' in input_data['hubbard']

@@ -344,6 +344,9 @@ class JobSubmissionPage(QWidget):
         self.workdir_label.setText(workdir)
         
         self.file_tree.clear()
+        # Clear the file content viewer when refreshing
+        self.file_content.clear()
+        self.file_info_label.setText("")
         
         if not os.path.exists(workdir):
             return

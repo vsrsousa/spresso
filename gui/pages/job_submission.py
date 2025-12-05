@@ -377,14 +377,7 @@ def render_file_browser_tab():
 
     # Use base working directory from session state
     base_workdir = st.session_state.get("working_directory", os.path.expanduser("~"))
-    
-    # Add refresh button
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.info(f"📍 Browsing in: `{base_workdir}`")
-    with col2:
-        if st.button("🔄 Refresh", key="refresh_file_browser", help="Reload folder contents"):
-            st.rerun()
+    st.info(f"📍 Browsing in: `{base_workdir}`")
 
     if not os.path.exists(base_workdir) or not os.path.isdir(base_workdir):
         st.error(f"❌ Invalid working directory: {base_workdir}")

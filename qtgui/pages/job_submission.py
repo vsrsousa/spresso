@@ -17,6 +17,10 @@ from PySide6.QtCore import Qt
 
 from qtgui.utils import validate_path_under_base, safe_makedirs
 
+# ASE_ESPRESSO_COMMAND template for Quantum ESPRESSO execution
+# LAUNCHER, PACKAGE, PARALLEL, and PREFIX are placeholders replaced by xespresso
+ASE_ESPRESSO_COMMAND_TEMPLATE = "LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo"
+
 try:
     from ase import Atoms
     from ase import io as ase_io
@@ -595,6 +599,10 @@ class JobSubmissionPage(QWidget):
             return
         
         try:
+            # Set ASE_ESPRESSO_COMMAND environment variable for xespresso
+            # This tells xespresso how to execute QE commands
+            os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
+            
             # Create output directory using safe utility
             safe_makedirs(full_path)
             
@@ -609,18 +617,19 @@ class JobSubmissionPage(QWidget):
             prefix = self._get_prefix_from_label(label)
             input_filename = f"{prefix}.pwi"
             
-            # Update calculator label to match the user's input
-            # Espresso.set_label() handles path resolution
-            calc.set_label(label, prefix)
+            # Set the directory and prefix for the calculation
+            # This tells xespresso where to write the files
+            calc.directory = full_path
+            calc.prefix = prefix
             
             # Call write_input to generate input file AND job_file via scheduler
             # xespresso's write_input method:
-            # 1. Writes the input file (.pwi)
+            # 1. Writes the input file (.pwi) to calc.directory
             # 2. Calls set_queue() to set up the scheduler
-            # 3. Scheduler writes job_file
+            # 3. Scheduler writes job_file to calc.directory
             calc.write_input(prepared_atoms)
             
-            input_path = f"{calc.label}.pwi"
+            input_path = os.path.join(full_path, input_filename)
             
             # Read the generated input file for preview
             with open(input_path, 'r') as f:
@@ -929,13 +938,18 @@ Files created in: <code>{full_path}</code>
             return
         
         try:
+            # Set ASE_ESPRESSO_COMMAND environment variable for xespresso
+            # This tells xespresso how to execute QE commands
+            os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
+            
             # Create output directory
             safe_makedirs(full_path)
             
-            # Update calculator label to match the user's input
-            # Espresso.set_label() handles path resolution
+            # Set the directory and prefix for the calculation
+            # This tells xespresso where to write and read files
             prefix = self._get_prefix_from_label(label)
-            calc.set_label(label, prefix)
+            calc.directory = full_path
+            calc.prefix = prefix
             
             # Update status
             self.run_status.setText("⏳ Running calculation... (this may take a while)")

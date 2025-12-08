@@ -245,8 +245,11 @@ class CalculationPreparation(BaseCalculationPreparation):
         # The Espresso calculator doesn't recognize kspacing directly
         if "kspacing" in config:
             from ase.io.espresso import kspacing_to_grid
+            import numpy as np
 
-            kpts = kspacing_to_grid(atoms, config["kspacing"])
+            # Note: kspacing_to_grid expects spacing in units of 2*pi/Angstrom
+            # config["kspacing"] is in Angstrom^-1, so we need to divide by 2*pi
+            kpts = kspacing_to_grid(atoms, config["kspacing"] / (2 * np.pi))
             calc_params["kpts"] = kpts
         elif "kpts" in config:
             calc_params["kpts"] = config["kpts"]

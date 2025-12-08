@@ -145,25 +145,17 @@ class Espresso(FileIOCalculator):
 
         # self.discard_results_on_any_change = False
 
-    def calculate(self, atoms=None, properties=['energy'], system_changes=all_changes):
+    def execute(self):
         """
-        Override ASE's FileIOCalculator.calculate() to support remote execution.
+        Override ASE's FileIOCalculator.execute() to support remote execution.
         
-        This override is necessary because ASE 3.22.1's FileIOCalculator.calculate()
-        directly calls subprocess.Popen(command) locally, which fails for remote execution.
-        
-        Instead, we delegate execution to the scheduler's run() method, which:
+        This method is called by ASE 3.26.0+ after write_input().
+        It delegates execution to the scheduler's run() method, which:
         - For remote execution: handles SSH connection, file transfer, and remote job submission
         - For local execution: runs the command locally using subprocess
         
         The scheduler automatically determines the execution mode from queue['execution'].
         """
-        # Call parent's calculate for caching/setup logic
-        Calculator.calculate(self, atoms, properties, system_changes)
-        
-        # Write input files (this also calls set_queue which sets up self.scheduler)
-        self.write_input(self.atoms, properties, system_changes)
-        
         # Use scheduler to execute the job (handles both local and remote)
         if hasattr(self, 'scheduler'):
             logger.info(f"Executing job via scheduler ({self.queue.get('execution', 'local')} mode)...")
@@ -195,6 +187,27 @@ class Espresso(FileIOCalculator):
                        '{} with error code {}'.format(self.name, command,
                                                       path, errorcode))
                 raise CalculationFailed(msg)
+
+    def calculate(self, atoms=None, properties=['energy'], system_changes=all_changes):
+        """
+        Override ASE's FileIOCalculator.calculate() to support remote execution.
+        
+        This override is necessary for ASE 3.22.1 where FileIOCalculator.calculate()
+        directly calls subprocess.Popen(command) locally, which fails for remote execution.
+        
+        For ASE 3.26.0+, calculate() calls execute() so this override just ensures
+        compatibility by calling execute() ourselves.
+        
+        The scheduler automatically determines the execution mode from queue['execution'].
+        """
+        # Call parent's calculate for caching/setup logic
+        Calculator.calculate(self, atoms, properties, system_changes)
+        
+        # Write input files (this also calls set_queue which sets up self.scheduler)
+        self.write_input(self.atoms, properties, system_changes)
+        
+        # Execute the job (works for both ASE 3.22.1 and 3.26.0+)
+        self.execute()
         
         # Read results (works for both remote and local)
         self.read_results()

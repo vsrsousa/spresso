@@ -244,9 +244,12 @@ class CalculationPreparation(BaseCalculationPreparation):
         # Convert kspacing to kpts if kspacing is provided
         # The Espresso calculator doesn't recognize kspacing directly
         if "kspacing" in config:
-            from ase.io.espresso import kspacing_to_grid
+            from xespresso import kpts_from_spacing
 
-            kpts = kspacing_to_grid(atoms, config["kspacing"])
+            # Use xespresso's kpts_from_spacing utility function
+            # It handles the 2π normalization internally
+            # config["kspacing"] is in Angstrom^-1 (physical units)
+            kpts = kpts_from_spacing(atoms, config["kspacing"])
             calc_params["kpts"] = kpts
         elif "kpts" in config:
             calc_params["kpts"] = config["kpts"]

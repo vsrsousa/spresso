@@ -1168,8 +1168,12 @@ This is normal for local calculations.
             # 4. Check convergence and handle restarts if needed
             calc.run(atoms=prepared_atoms)
             
-            # Get the energy from the completed calculation
-            energy = prepared_atoms.get_potential_energy()
+            # Get the energy from the calculator results
+            # calc.run() internally calls get_potential_energy() and stores results
+            energy = calc.results.get("energy", None)
+            
+            if energy is None:
+                raise RuntimeError("Energy not found in calculation results")
 
             # Success! Display results
             self.run_status.setText("✅ Calculation completed successfully!")

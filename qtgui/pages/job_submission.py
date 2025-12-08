@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from qtgui.utils import validate_path_under_base, safe_makedirs
+from qtgui.utils import validate_path_under_base, safe_makedirs, ASE_ESPRESSO_COMMAND_TEMPLATE
 
 try:
     from ase import Atoms
@@ -59,6 +59,46 @@ def _get_default_orbital(element):
         str: Default orbital (e.g., '3d', '4f', '2p')
     """
     return DEFAULT_HUBBARD_ORBITALS.get(element, '3d')
+
+
+def _get_input_extension(code):
+    """Get input file extension for the given QE code.
+    
+    Following ASE_ESPRESSO_COMMAND pattern: PREFIX.PACKAGEi
+    
+    Args:
+        code: QE code name (e.g., 'pw', 'dos', 'projwfc', 'bands', 'pp', 'ph')
+    
+    Returns:
+        str: File extension including dot (e.g., '.pwi', '.dosi', '.projwfci')
+    """
+    # Following xespresso's naming convention: {prefix}.{package}i
+    # This matches the .PACKAGEi pattern in ASE_ESPRESSO_COMMAND
+    if not code:
+        return '.pwi'  # Default to pw.x
+    
+    # For most codes, it's just .{code}i
+    return f'.{code}i'
+
+
+def _get_output_extension(code):
+    """Get output file extension for the given QE code.
+    
+    Following ASE_ESPRESSO_COMMAND pattern: PREFIX.PACKAGEo
+    
+    Args:
+        code: QE code name (e.g., 'pw', 'dos', 'projwfc', 'bands', 'pp', 'ph')
+    
+    Returns:
+        str: File extension including dot (e.g., '.pwo', '.doso', '.projwfco')
+    """
+    # Following xespresso's naming convention: {prefix}.{package}o
+    # This matches the .PACKAGEo pattern in ASE_ESPRESSO_COMMAND
+    if not code:
+        return '.pwo'  # Default to pw.x
+    
+    # For most codes, it's just .{code}o
+    return f'.{code}o'
 
 
 class JobSubmissionPage(QWidget):
@@ -336,9 +376,11 @@ class JobSubmissionPage(QWidget):
     def _refresh_browser(self):
         """Refresh the file browser.
         
-        This method scans the working directory for calculation folders.
-        To prevent blocking the main thread during large directory scans,
-        we limit the depth and number of folders found.
+        This method scans the working directory and displays its contents.
+        Strategy:
+        1. Show all first-level directories and files
+        2. For directories, recursively scan for calculation files
+        3. Display calculation files as children of their parent directories
         """
         workdir = self.session_state.get('working_directory', os.path.expanduser("~"))
         self.workdir_label.setText(workdir)
@@ -351,54 +393,99 @@ class JobSubmissionPage(QWidget):
         if not os.path.exists(workdir):
             return
         
-        # Find calculation folders with limits to prevent blocking
-        input_extensions = (".in", ".pwi", ".phi", ".ppi", ".bandi")
-        output_extensions = (".sh", ".slurm", ".out", ".pwo")
-        max_folders_found = 100  # Limit number of calculation folders to display
-        folders_found = 0
+        # QE input/output file extensions
+        # Pattern: PREFIX.PACKAGEi for input, PREFIX.PACKAGEo for output
+        # Common extensions: .pwi/.pwo, .phi/.pho, .dosi/.doso, .bandi/.bando, etc.
+        input_extensions = (".in", ".pwi", ".phi", ".ppi", ".bandi", ".dosi", ".projwfci", 
+                           ".nebi", ".hpi", ".tddfpti", ".cpi")
+        output_extensions = (".out", ".pwo", ".pho", ".ppo", ".bando", ".doso", ".projwfco",
+                            ".nebo", ".hpo", ".tddfpto", ".cpo", ".sh", ".slurm")
+        max_items_per_dir = 100  # Limit items per directory to prevent UI slowdown
         
         try:
-            for root, dirs, files in os.walk(workdir, topdown=True):
-                depth = root[len(workdir):].count(os.sep)
+            # Get all items in the working directory
+            try:
+                items = sorted(os.listdir(workdir))
+            except (OSError, IOError) as e:
+                self.file_info_label.setText(f"Error reading directory: {e}")
+                return
+            
+            # Process each top-level item
+            for item_name in items:
+                item_path = os.path.join(workdir, item_name)
                 
-                # Limit search depth
-                if depth >= 4:
-                    dirs[:] = []  # Don't descend further
+                # Skip hidden items
+                if item_name.startswith('.'):
                     continue
                 
-                # Prune hidden directories and common large directories to speed up walk
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.git', 'venv', 'env')]
+                # Skip common large directories
+                if item_name in ('node_modules', '__pycache__', '.git', 'venv', 'env'):
+                    continue
                 
-                has_input = any(
-                    f.endswith(input_extensions) or 
-                    f == "job_file" or 
-                    f.endswith((".sh", ".slurm"))
-                    for f in files
-                )
-                
-                if has_input:
-                    folders_found += 1
-                    if folders_found > max_folders_found:
-                        self.file_info_label.setText(
-                            f"⚠️ Found {max_folders_found}+ calculation folders. "
-                            "Navigate to a specific folder for better results."
-                        )
-                        break
+                if os.path.isdir(item_path):
+                    # Add directory to tree
+                    dir_item = QTreeWidgetItem([item_name + "/"])
+                    dir_item.setData(0, Qt.UserRole, item_path)
                     
-                    rel_path = os.path.relpath(root, workdir)
-                    item = QTreeWidgetItem([rel_path])
-                    item.setData(0, Qt.UserRole, root)
+                    # Scan directory recursively for calculation files
+                    calc_folders = []
+                    try:
+                        for root, dirs, files in os.walk(item_path, topdown=True):
+                            # Limit depth to 3 levels below each top-level directory
+                            depth = root[len(item_path):].count(os.sep)
+                            if depth >= 3:
+                                dirs[:] = []
+                                continue
+                            
+                            # Prune hidden and large directories
+                            dirs[:] = [d for d in dirs if not d.startswith('.') and 
+                                      d not in ('node_modules', '__pycache__', '.git', 'venv', 'env')]
+                            
+                            # Check if this directory has calculation files
+                            calc_files = [f for f in files if (
+                                f.endswith(input_extensions) or 
+                                f == "job_file" or 
+                                f.endswith(output_extensions)
+                            )]
+                            
+                            if calc_files:
+                                rel_path = os.path.relpath(root, item_path)
+                                calc_folders.append((rel_path, root, calc_files))
+                                
+                                # Limit items to prevent slowdown
+                                if len(calc_folders) >= max_items_per_dir:
+                                    break
+                    except (OSError, IOError):
+                        pass  # Skip directories we can't read
                     
-                    # Add files as children
-                    for f in files:
-                        if (f.endswith(input_extensions) or 
-                            f == "job_file" or 
-                            f.endswith(output_extensions)):
-                            child = QTreeWidgetItem([f])
-                            child.setData(0, Qt.UserRole, os.path.join(root, f))
-                            item.addChild(child)
+                    # Add calculation folders as children
+                    if calc_folders:
+                        for rel_path, abs_path, calc_files in calc_folders:
+                            if rel_path == ".":
+                                # Files are directly in this directory
+                                subfolder_item = dir_item
+                            else:
+                                # Files are in a subdirectory
+                                subfolder_item = QTreeWidgetItem([rel_path])
+                                subfolder_item.setData(0, Qt.UserRole, abs_path)
+                                dir_item.addChild(subfolder_item)
+                            
+                            # Add files as children
+                            for f in calc_files[:max_items_per_dir]:
+                                file_item = QTreeWidgetItem([f])
+                                file_item.setData(0, Qt.UserRole, os.path.join(abs_path, f))
+                                subfolder_item.addChild(file_item)
                     
-                    self.file_tree.addTopLevelItem(item)
+                    self.file_tree.addTopLevelItem(dir_item)
+                    
+                elif os.path.isfile(item_path):
+                    # Add files at the root level if they're relevant
+                    if (item_name.endswith(input_extensions) or 
+                        item_name == "job_file" or 
+                        item_name.endswith(output_extensions)):
+                        file_item = QTreeWidgetItem([item_name])
+                        file_item.setData(0, Qt.UserRole, item_path)
+                        self.file_tree.addTopLevelItem(file_item)
                     
         except (OSError, IOError) as e:
             self.file_info_label.setText(f"Error scanning: {e}")
@@ -512,6 +599,15 @@ class JobSubmissionPage(QWidget):
         """
         return label.split('/')[-1] if '/' in label else label
     
+    def _setup_xespresso_environment(self):
+        """Set up environment variables required by xespresso.
+        
+        This sets ASE_ESPRESSO_COMMAND which tells xespresso how to execute
+        Quantum ESPRESSO commands following the pattern:
+        LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo
+        """
+        os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
+    
     def _generate_files(self):
         """Generate calculation files (dry run).
         
@@ -553,6 +649,9 @@ class JobSubmissionPage(QWidget):
             return
         
         try:
+            # Set up environment for xespresso
+            self._setup_xespresso_environment()
+            
             # Create output directory using safe utility
             safe_makedirs(full_path)
             
@@ -563,22 +662,30 @@ class JobSubmissionPage(QWidget):
                 structure_path = os.path.join(full_path, structure_filename)
                 ase_io.write(structure_path, prepared_atoms)
             
+            # Get configuration to determine the QE code being used
+            config = self.session_state.get('workflow_config', {})
+            selected_code = config.get('selected_code', 'pw')
+            
             # Prepare input parameters for xespresso
             prefix = self._get_prefix_from_label(label)
-            input_filename = f"{prefix}.pwi"
             
-            # Update calculator label to match the user's input
-            # Espresso.set_label() handles path resolution
-            calc.set_label(label, prefix)
+            # Get correct input file extension based on the QE code
+            input_extension = _get_input_extension(selected_code)
+            input_filename = f"{prefix}{input_extension}"
+            
+            # Set the directory and prefix for the calculation
+            # This tells xespresso where to write the files
+            calc.directory = full_path
+            calc.prefix = prefix
             
             # Call write_input to generate input file AND job_file via scheduler
             # xespresso's write_input method:
-            # 1. Writes the input file (.pwi)
+            # 1. Writes the input file (e.g., .pwi, .dosi) to calc.directory
             # 2. Calls set_queue() to set up the scheduler
-            # 3. Scheduler writes job_file
+            # 3. Scheduler writes job_file to calc.directory
             calc.write_input(prepared_atoms)
             
-            input_path = f"{calc.label}.pwi"
+            input_path = os.path.join(full_path, input_filename)
             
             # Read the generated input file for preview
             with open(input_path, 'r') as f:
@@ -887,13 +994,17 @@ Files created in: <code>{full_path}</code>
             return
         
         try:
+            # Set up environment for xespresso
+            self._setup_xespresso_environment()
+            
             # Create output directory
             safe_makedirs(full_path)
             
-            # Update calculator label to match the user's input
-            # Espresso.set_label() handles path resolution
+            # Set the directory and prefix for the calculation
+            # This tells xespresso where to write and read files
             prefix = self._get_prefix_from_label(label)
-            calc.set_label(label, prefix)
+            calc.directory = full_path
+            calc.prefix = prefix
             
             # Update status
             self.run_status.setText("⏳ Running calculation... (this may take a while)")

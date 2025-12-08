@@ -147,70 +147,12 @@ class Espresso(FileIOCalculator):
 
     def execute(self):
         """
-        Override ASE's FileIOCalculator.execute() to support remote execution.
-        
-        This method is called by ASE 3.26.0+ after write_input().
-        It delegates execution to the scheduler's run() method, which:
-        - For remote execution: handles SSH connection, file transfer, and remote job submission
-        - For local execution: runs the command locally using subprocess
-        
-        The scheduler automatically determines the execution mode from queue['execution'].
+        Executes the job using the scheduler.
+        This overrides ASE's default profile-based execution.
+        It preserves ASE's caching logic and supports remote execution.
         """
-        # Use scheduler to execute the job (handles both local and remote)
-        if hasattr(self, 'scheduler'):
-            logger.info(f"Executing job via scheduler ({self.queue.get('execution', 'local')} mode)...")
-            self.scheduler.run()
-        else:
-            # Fallback to ASE's default behavior if no scheduler configured
-            logger.warning("No scheduler configured, falling back to direct command execution")
-            if self.command is None:
-                raise CalculatorSetupError(
-                    'Please set ${} environment variable '
-                    .format('ASE_' + self.name.upper() + '_COMMAND') +
-                    'or supply the command keyword')
-            
-            command = self.command
-            if 'PREFIX' in command:
-                command = command.replace('PREFIX', self.prefix)
-            
-            try:
-                proc = subprocess.Popen(command, shell=True, cwd=self.directory)
-            except OSError as err:
-                msg = 'Failed to execute "{}"'.format(command)
-                raise EnvironmentError(msg) from err
-            
-            errorcode = proc.wait()
-            
-            if errorcode:
-                path = os.path.abspath(self.directory)
-                msg = ('Calculator "{}" failed with command "{}" failed in '
-                       '{} with error code {}'.format(self.name, command,
-                                                      path, errorcode))
-                raise CalculationFailed(msg)
-
-    def calculate(self, atoms=None, properties=['energy'], system_changes=all_changes):
-        """
-        Override ASE's FileIOCalculator.calculate() to support remote execution.
-        
-        This override is necessary for ASE 3.22.1 where FileIOCalculator.calculate()
-        directly calls subprocess.Popen(command) locally, which fails for remote execution.
-        
-        For ASE 3.26.0+, calculate() calls execute() so this override just ensures
-        compatibility by calling execute() ourselves.
-        
-        The scheduler automatically determines the execution mode from queue['execution'].
-        """
-        # Call parent's calculate for caching/setup logic
-        Calculator.calculate(self, atoms, properties, system_changes)
-        
-        # Write input files (this also calls set_queue which sets up self.scheduler)
-        self.write_input(self.atoms, properties, system_changes)
-        
-        # Execute the job (works for both ASE 3.22.1 and 3.26.0+)
-        self.execute()
-        
-        # Read results (works for both remote and local)
-        self.read_results()
+        logger.info("Executing job via scheduler...")
+        self.scheduler.run()
 
     def find_pseudopotentials(self, pseudo_group="SSSP_1.1.2_PBE_efficiency"):
         """Get pseudo potential by family name.

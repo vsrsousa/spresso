@@ -603,6 +603,15 @@ class JobSubmissionPage(QWidget):
         """
         return label.split('/')[-1] if '/' in label else label
     
+    def _setup_xespresso_environment(self):
+        """Set up environment variables required by xespresso.
+        
+        This sets ASE_ESPRESSO_COMMAND which tells xespresso how to execute
+        Quantum ESPRESSO commands following the pattern:
+        LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo
+        """
+        os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
+    
     def _generate_files(self):
         """Generate calculation files (dry run).
         
@@ -644,9 +653,8 @@ class JobSubmissionPage(QWidget):
             return
         
         try:
-            # Set ASE_ESPRESSO_COMMAND environment variable for xespresso
-            # This tells xespresso how to execute QE commands
-            os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
+            # Set up environment for xespresso
+            self._setup_xespresso_environment()
             
             # Create output directory using safe utility
             safe_makedirs(full_path)
@@ -990,9 +998,8 @@ Files created in: <code>{full_path}</code>
             return
         
         try:
-            # Set ASE_ESPRESSO_COMMAND environment variable for xespresso
-            # This tells xespresso how to execute QE commands
-            os.environ['ASE_ESPRESSO_COMMAND'] = ASE_ESPRESSO_COMMAND_TEMPLATE
+            # Set up environment for xespresso
+            self._setup_xespresso_environment()
             
             # Create output directory
             safe_makedirs(full_path)

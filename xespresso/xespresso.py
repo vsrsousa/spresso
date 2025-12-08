@@ -11,12 +11,9 @@ from ase import io
 from ase.calculators.calculator import (
     FileIOCalculator,
     CalculationFailed,
-    Calculator,
-    CalculatorSetupError,
     equal,
     compare_atoms,
     PropertyNotPresent,
-    all_changes,
 )
 from xespresso.xio import (
     write_espresso_in,

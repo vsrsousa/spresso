@@ -78,18 +78,13 @@ def set_queue(calc, package=None, parallel=None, queue=None, command=None):
         msg = f"Failed to initialize scheduler '{queue.get('scheduler')}': {e}"
         raise ValueError(msg) if VERBOSE_ERRORS else ValueError(msg) from None
 
-    # Write job script only — defer execution to scheduler
+    # Write job script only — defer execution to ASE
     scheduler.write_script()
 
-    # Store scheduler for later use
+    # Store scheduler and command for later use
     calc.scheduler = scheduler
-    
-    # Store the command - it will be used by scheduler.run() for both local and remote
-    # For remote execution: used in the remote job script
-    # For local execution: used by subprocess in base Scheduler.run()
     calc.command = scheduler.submit_command()
-    
     if hasattr(calc, "profile"):
         calc.profile.command = calc.command
-    
-    logger.debug(f"Scheduler configured for {queue.get('execution', 'local')} execution with command: {calc.command}")
+
+    logger.debug(f"Scheduler executed with command: {calc.command}")

@@ -159,12 +159,9 @@ class CalculationPreparation(BaseCalculationPreparation):
         # Build input_data dictionary following xespresso patterns
         input_data = {}
         
-        # Add pseudo_dir from environment variable ESPRESSO_PSEUDO if set
-        import os
-        if 'ESPRESSO_PSEUDO' in os.environ:
-            input_data['pseudo_dir'] = os.environ['ESPRESSO_PSEUDO']
-        elif 'pseudo_dir' in config:
-            input_data['pseudo_dir'] = config['pseudo_dir']
+        # NOTE: Do NOT set pseudo_dir here - xespresso handles it via ESPRESSO_PSEUDO
+        # environment variable or uses full paths in pseudopotentials dict.
+        # Setting pseudo_dir here would override xespresso's behavior.
         
         # Add basic parameters
         if 'ecutwfc' in config:
@@ -200,9 +197,30 @@ class CalculationPreparation(BaseCalculationPreparation):
             if 'qe_version' in mag_result:
                 input_data['qe_version'] = mag_result['qe_version']
         
-        # Add lda_plus_u flag if Hubbard is enabled
+        # Add lda_plus_u flag ONLY if Hubbard is enabled AND using old format
+        # For new format (QE >= 7.0), lda_plus_u should NOT be set
         if enable_hubbard:
-            input_data['lda_plus_u'] = True
+            hubbard_format = config.get('hubbard_format', 'old')
+            qe_version = config.get('qe_version', '')
+            
+            # Determine if using new format
+            use_new_format = False
+            if hubbard_format == 'new':
+                use_new_format = True
+            elif hubbard_format == 'old':
+                use_new_format = False
+            elif qe_version:
+                # Parse version and determine format
+                try:
+                    major = int(qe_version.split('.')[0])
+                    use_new_format = (major >= 7)
+                except (ValueError, IndexError):
+                    pass
+            
+            # Only set lda_plus_u for old format
+            if not use_new_format:
+                input_data['lda_plus_u'] = True
+
         
         # Add calculation type
         calc_type = config.get('calc_type', 'scf')
@@ -217,12 +235,16 @@ class CalculationPreparation(BaseCalculationPreparation):
         calc_params['input_data'] = input_data
         
         # Add k-points from config
-        # Note: kspacing is converted to kpts in the GUI, so we only handle kpts here
-        if 'kpts' in config:
+        # Pass kspacing directly to xespresso if available, otherwise use kpts
+        # xespresso will handle kspacing conversion internally
+        if 'kspacing' in config:
+            calc_params['kspacing'] = config['kspacing']
+        elif 'kpts' in config:
             calc_params['kpts'] = config['kpts']
         else:
             # Default to gamma point
             calc_params['kpts'] = (1, 1, 1)
+
         
         # Add queue configuration if present (for job submission)
         if 'queue' in config and config['queue']:

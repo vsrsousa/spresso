@@ -159,9 +159,8 @@ class CalculationPreparation(BaseCalculationPreparation):
         # Build input_data dictionary following xespresso patterns
         input_data = {}
         
-        # NOTE: Do NOT set pseudo_dir here - xespresso handles it via ESPRESSO_PSEUDO
-        # environment variable or uses full paths in pseudopotentials dict.
-        # Setting pseudo_dir here would override xespresso's behavior.
+        # Set pseudo_dir to "./pseudo" - this is handled by the remote mixin
+        input_data['pseudo_dir'] = './pseudo'
         
         # Add basic parameters
         if 'ecutwfc' in config:
@@ -235,10 +234,12 @@ class CalculationPreparation(BaseCalculationPreparation):
         calc_params['input_data'] = input_data
         
         # Add k-points from config
-        # Pass kspacing directly to xespresso if available, otherwise use kpts
-        # xespresso will handle kspacing conversion internally
+        # Convert kspacing to kpts if kspacing is provided
+        # The Espresso calculator doesn't recognize kspacing directly
         if 'kspacing' in config:
-            calc_params['kspacing'] = config['kspacing']
+            from ase.io.espresso import kspacing_to_grid
+            kpts = kspacing_to_grid(atoms, config['kspacing'])
+            calc_params['kpts'] = tuple(kpts)
         elif 'kpts' in config:
             calc_params['kpts'] = config['kpts']
         else:

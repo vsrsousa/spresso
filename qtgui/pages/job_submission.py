@@ -65,6 +65,46 @@ def _get_default_orbital(element):
     return DEFAULT_HUBBARD_ORBITALS.get(element, '3d')
 
 
+def _get_input_extension(code):
+    """Get input file extension for the given QE code.
+    
+    Following ASE_ESPRESSO_COMMAND pattern: PREFIX.PACKAGEi
+    
+    Args:
+        code: QE code name (e.g., 'pw', 'dos', 'projwfc', 'bands', 'pp', 'ph')
+    
+    Returns:
+        str: File extension including dot (e.g., '.pwi', '.dosi', '.projwfci')
+    """
+    # Following xespresso's naming convention: {prefix}.{package}i
+    # This matches the .PACKAGEi pattern in ASE_ESPRESSO_COMMAND
+    if not code:
+        return '.pwi'  # Default to pw.x
+    
+    # For most codes, it's just .{code}i
+    return f'.{code}i'
+
+
+def _get_output_extension(code):
+    """Get output file extension for the given QE code.
+    
+    Following ASE_ESPRESSO_COMMAND pattern: PREFIX.PACKAGEo
+    
+    Args:
+        code: QE code name (e.g., 'pw', 'dos', 'projwfc', 'bands', 'pp', 'ph')
+    
+    Returns:
+        str: File extension including dot (e.g., '.pwo', '.doso', '.projwfco')
+    """
+    # Following xespresso's naming convention: {prefix}.{package}o
+    # This matches the .PACKAGEo pattern in ASE_ESPRESSO_COMMAND
+    if not code:
+        return '.pwo'  # Default to pw.x
+    
+    # For most codes, it's just .{code}o
+    return f'.{code}o'
+
+
 class JobSubmissionPage(QWidget):
     """Job submission page widget."""
     
@@ -357,8 +397,13 @@ class JobSubmissionPage(QWidget):
         if not os.path.exists(workdir):
             return
         
-        input_extensions = (".in", ".pwi", ".phi", ".ppi", ".bandi")
-        output_extensions = (".sh", ".slurm", ".out", ".pwo")
+        # QE input/output file extensions
+        # Pattern: PREFIX.PACKAGEi for input, PREFIX.PACKAGEo for output
+        # Common extensions: .pwi/.pwo, .phi/.pho, .dosi/.doso, .bandi/.bando, etc.
+        input_extensions = (".in", ".pwi", ".phi", ".ppi", ".bandi", ".dosi", ".projwfci", 
+                           ".nebi", ".hpi", ".tddfpti", ".cpi")
+        output_extensions = (".out", ".pwo", ".pho", ".ppo", ".bando", ".doso", ".projwfco",
+                            ".nebo", ".hpo", ".tddfpto", ".cpo", ".sh", ".slurm")
         max_items_per_dir = 100  # Limit items per directory to prevent UI slowdown
         
         try:
@@ -613,9 +658,16 @@ class JobSubmissionPage(QWidget):
                 structure_path = os.path.join(full_path, structure_filename)
                 ase_io.write(structure_path, prepared_atoms)
             
+            # Get configuration to determine the QE code being used
+            config = self.session_state.get('workflow_config', {})
+            selected_code = config.get('selected_code', 'pw')
+            
             # Prepare input parameters for xespresso
             prefix = self._get_prefix_from_label(label)
-            input_filename = f"{prefix}.pwi"
+            
+            # Get correct input file extension based on the QE code
+            input_extension = _get_input_extension(selected_code)
+            input_filename = f"{prefix}{input_extension}"
             
             # Set the directory and prefix for the calculation
             # This tells xespresso where to write the files
@@ -624,7 +676,7 @@ class JobSubmissionPage(QWidget):
             
             # Call write_input to generate input file AND job_file via scheduler
             # xespresso's write_input method:
-            # 1. Writes the input file (.pwi) to calc.directory
+            # 1. Writes the input file (e.g., .pwi, .dosi) to calc.directory
             # 2. Calls set_queue() to set up the scheduler
             # 3. Scheduler writes job_file to calc.directory
             calc.write_input(prepared_atoms)

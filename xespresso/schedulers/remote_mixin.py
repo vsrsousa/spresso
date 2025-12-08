@@ -152,10 +152,20 @@ class RemoteExecutionMixin:
                 - Sets up SSH connection and remote working directory
                 - Transfers input and job script files
                 - Submits job using the scheduler's submit_command()
-                - If scheduler is SLURM, waits for job completion via squeue polling
-                - Retrieves output file only after job finishes
+                - If scheduler is SLURM:
+                    - Extracts job ID from submission output
+                    - If wait_for_completion=True (default): polls job status until completion
+                    - If wait_for_completion=False: returns immediately (non-blocking)
+                - Retrieves output file only after job finishes (blocking mode) or skips retrieval (non-blocking mode)
             - For direct/local execution:
                 - Falls back to the base Scheduler.run() method
+
+        Queue Parameters:
+            - wait_for_completion (bool): If True (default), blocks until job completes.
+                                         If False, submits job and returns immediately.
+                                         Useful for GUI applications to avoid freezing.
+            - job_timeout (int): Maximum time in seconds to wait for job completion (default: 3600).
+                                Only used when wait_for_completion=True.
 
         Returns:
             tuple: (stdout, stderr) from the job submission command
@@ -187,7 +197,7 @@ class RemoteExecutionMixin:
 
         stdout, stderr = self.remote.run_command(command)
 
-        # If SLURM, extract job ID and wait for completion
+        # If SLURM, extract job ID and optionally wait for completion
         if self.queue.get("scheduler") == "slurm":
             import re
 
@@ -195,12 +205,26 @@ class RemoteExecutionMixin:
             job_id = match.group(1) if match else None
 
             if job_id:
-                self._wait_for_slurm_completion(job_id)
+                if hasattr(self, "logger"):
+                    self.logger.info(f"Job submitted with ID: {job_id}")
+                
+                # Only wait for completion if explicitly requested
+                # Setting wait_for_completion=False allows non-blocking submission
+                if self.queue.get("wait_for_completion", True):
+                    self._wait_for_slurm_completion(job_id)
+                else:
+                    if hasattr(self, "logger"):
+                        self.logger.info(f"Job {job_id} submitted. Skipping wait (non-blocking mode).")
+                    # Store job ID for later retrieval if needed
+                    self.calc.last_job_id = job_id
+                    # In non-blocking mode, return without retrieving output
+                    return stdout, stderr
             else:
                 if hasattr(self, "logger"):
                     self.logger.warning("Could not extract job ID from sbatch output")
 
         # Verify output file exists before attempting retrieval
+        # This will be skipped in non-blocking mode
         self._verify_and_retrieve_output_file(output_file, local_output)
 
         return stdout, stderr

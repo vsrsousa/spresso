@@ -1154,17 +1154,21 @@ This is normal for local calculations.
             QApplication.processEvents()  # Update UI
 
             # Ensure calculator is attached to atoms (following xespresso pattern)
-            # This is required for atoms.get_potential_energy() to work
+            # This is required for calc.run() to work
             # Defensive check for robustness (e.g., restored from old session state)
             if prepared_atoms.calc is None or prepared_atoms.calc != calc:
                 prepared_atoms.calc = calc
 
-            # Run the calculation using ASE/xespresso pattern
-            # xespresso's get_potential_energy() will:
-            # 1. Check for previous results
-            # 2. Generate input files if needed using write_input()
-            # 3. Submit the job via the configured scheduler
-            # 4. Wait for completion and parse output
+            # Run the calculation using xespresso's calc.run() method
+            # This is the proper way to execute calculations with remote schedulers
+            # calc.run() will:
+            # 1. Generate input files using write_input()
+            # 2. Submit the job via the configured scheduler (local or remote)
+            # 3. Wait for completion and parse output
+            # 4. Check convergence and handle restarts if needed
+            calc.run(atoms=prepared_atoms)
+            
+            # Get the energy from the completed calculation
             energy = prepared_atoms.get_potential_energy()
 
             # Success! Display results

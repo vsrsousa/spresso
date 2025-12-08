@@ -247,7 +247,7 @@ class CalculationPreparation(BaseCalculationPreparation):
             from ase.io.espresso import kspacing_to_grid
 
             kpts = kspacing_to_grid(atoms, config["kspacing"])
-            calc_params["kpts"] = tuple(kpts)
+            calc_params["kpts"] = kpts
         elif "kpts" in config:
             calc_params["kpts"] = config["kpts"]
         else:

@@ -862,7 +862,6 @@ Files created in: <code>{full_path}</code>
         lines.append("&CONTROL")
         lines.append(f"  calculation = '{config.get('calc_type', 'scf')}'")
         lines.append(f"  prefix = '{label.split('/')[-1] if '/' in label else label}'")
-        lines.append("  pseudo_dir = './pseudo'")
         lines.append("  outdir = './tmp'")
         lines.append("/")
         lines.append("")
@@ -913,7 +912,6 @@ Files created in: <code>{full_path}</code>
             "CONTROL": {
                 "calculation": config.get("calc_type", "scf"),
                 "prefix": prefix,
-                "pseudo_dir": "./pseudo",
                 "outdir": "./tmp",
                 "verbosity": "high",
             },

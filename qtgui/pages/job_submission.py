@@ -620,6 +620,9 @@ Files created in: <code>{full_path}</code>
             self.dry_run_results.setTextFormat(Qt.RichText)
             self.dry_run_results.setStyleSheet("color: green;")
             
+            # Process pending events to ensure filesystem changes are reflected
+            QApplication.processEvents()
+            
             # Refresh browser
             self._refresh_browser()
             
@@ -972,6 +975,9 @@ This is normal for local calculations.
                     logging.warning(f"Unexpected error getting forces: {e}")
             
             self.run_results.setHtml(results_text)
+            
+            # Process pending events to ensure filesystem changes are reflected
+            QApplication.processEvents()
             
             # Refresh browser to show new files
             self._refresh_browser()

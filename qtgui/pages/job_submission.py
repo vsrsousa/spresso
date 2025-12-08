@@ -336,9 +336,11 @@ class JobSubmissionPage(QWidget):
     def _refresh_browser(self):
         """Refresh the file browser.
         
-        This method scans the working directory for calculation folders.
-        To prevent blocking the main thread during large directory scans,
-        we limit the depth and number of folders found.
+        This method scans the working directory and displays its contents.
+        Strategy:
+        1. Show all first-level directories and files
+        2. For directories, recursively scan for calculation files
+        3. Display calculation files as children of their parent directories
         """
         workdir = self.session_state.get('working_directory', os.path.expanduser("~"))
         self.workdir_label.setText(workdir)
@@ -351,54 +353,94 @@ class JobSubmissionPage(QWidget):
         if not os.path.exists(workdir):
             return
         
-        # Find calculation folders with limits to prevent blocking
         input_extensions = (".in", ".pwi", ".phi", ".ppi", ".bandi")
         output_extensions = (".sh", ".slurm", ".out", ".pwo")
-        max_folders_found = 100  # Limit number of calculation folders to display
-        folders_found = 0
+        max_items_per_dir = 100  # Limit items per directory to prevent UI slowdown
         
         try:
-            for root, dirs, files in os.walk(workdir, topdown=True):
-                depth = root[len(workdir):].count(os.sep)
+            # Get all items in the working directory
+            try:
+                items = sorted(os.listdir(workdir))
+            except (OSError, IOError) as e:
+                self.file_info_label.setText(f"Error reading directory: {e}")
+                return
+            
+            # Process each top-level item
+            for item_name in items:
+                item_path = os.path.join(workdir, item_name)
                 
-                # Limit search depth
-                if depth >= 4:
-                    dirs[:] = []  # Don't descend further
+                # Skip hidden items
+                if item_name.startswith('.'):
                     continue
                 
-                # Prune hidden directories and common large directories to speed up walk
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('node_modules', '__pycache__', '.git', 'venv', 'env')]
+                # Skip common large directories
+                if item_name in ('node_modules', '__pycache__', '.git', 'venv', 'env'):
+                    continue
                 
-                has_input = any(
-                    f.endswith(input_extensions) or 
-                    f == "job_file" or 
-                    f.endswith((".sh", ".slurm"))
-                    for f in files
-                )
-                
-                if has_input:
-                    folders_found += 1
-                    if folders_found > max_folders_found:
-                        self.file_info_label.setText(
-                            f"⚠️ Found {max_folders_found}+ calculation folders. "
-                            "Navigate to a specific folder for better results."
-                        )
-                        break
+                if os.path.isdir(item_path):
+                    # Add directory to tree
+                    dir_item = QTreeWidgetItem([item_name + "/"])
+                    dir_item.setData(0, Qt.UserRole, item_path)
                     
-                    rel_path = os.path.relpath(root, workdir)
-                    item = QTreeWidgetItem([rel_path])
-                    item.setData(0, Qt.UserRole, root)
+                    # Scan directory recursively for calculation files
+                    calc_folders = []
+                    try:
+                        for root, dirs, files in os.walk(item_path, topdown=True):
+                            # Limit depth to 3 levels below each top-level directory
+                            depth = root[len(item_path):].count(os.sep)
+                            if depth >= 3:
+                                dirs[:] = []
+                                continue
+                            
+                            # Prune hidden and large directories
+                            dirs[:] = [d for d in dirs if not d.startswith('.') and 
+                                      d not in ('node_modules', '__pycache__', '.git', 'venv', 'env')]
+                            
+                            # Check if this directory has calculation files
+                            calc_files = [f for f in files if (
+                                f.endswith(input_extensions) or 
+                                f == "job_file" or 
+                                f.endswith(output_extensions)
+                            )]
+                            
+                            if calc_files:
+                                rel_path = os.path.relpath(root, item_path)
+                                calc_folders.append((rel_path, root, calc_files))
+                                
+                                # Limit items to prevent slowdown
+                                if len(calc_folders) >= max_items_per_dir:
+                                    break
+                    except (OSError, IOError):
+                        pass  # Skip directories we can't read
                     
-                    # Add files as children
-                    for f in files:
-                        if (f.endswith(input_extensions) or 
-                            f == "job_file" or 
-                            f.endswith(output_extensions)):
-                            child = QTreeWidgetItem([f])
-                            child.setData(0, Qt.UserRole, os.path.join(root, f))
-                            item.addChild(child)
+                    # Add calculation folders as children
+                    if calc_folders:
+                        for rel_path, abs_path, calc_files in calc_folders:
+                            if rel_path == ".":
+                                # Files are directly in this directory
+                                subfolder_item = dir_item
+                            else:
+                                # Files are in a subdirectory
+                                subfolder_item = QTreeWidgetItem([rel_path])
+                                subfolder_item.setData(0, Qt.UserRole, abs_path)
+                                dir_item.addChild(subfolder_item)
+                            
+                            # Add files as children
+                            for f in calc_files[:max_items_per_dir]:
+                                file_item = QTreeWidgetItem([f])
+                                file_item.setData(0, Qt.UserRole, os.path.join(abs_path, f))
+                                subfolder_item.addChild(file_item)
                     
-                    self.file_tree.addTopLevelItem(item)
+                    self.file_tree.addTopLevelItem(dir_item)
+                    
+                elif os.path.isfile(item_path):
+                    # Add files at the root level if they're relevant
+                    if (item_name.endswith(input_extensions) or 
+                        item_name == "job_file" or 
+                        item_name.endswith(output_extensions)):
+                        file_item = QTreeWidgetItem([item_name])
+                        file_item.setData(0, Qt.UserRole, item_path)
+                        self.file_tree.addTopLevelItem(file_item)
                     
         except (OSError, IOError) as e:
             self.file_info_label.setText(f"Error scanning: {e}")

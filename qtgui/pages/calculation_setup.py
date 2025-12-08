@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette, QColor
 
+from qtgui.utils import ASE_ESPRESSO_COMMAND_TEMPLATE
+
 try:
     from xespresso.machines.config.loader import (
         list_machines, load_machine,
@@ -24,10 +26,6 @@ try:
     XESPRESSO_AVAILABLE = True
 except ImportError:
     XESPRESSO_AVAILABLE = False
-
-# ASE_ESPRESSO_COMMAND template for Quantum ESPRESSO execution
-# LAUNCHER, PACKAGE, PARALLEL, and PREFIX are placeholders replaced by xespresso
-ASE_ESPRESSO_COMMAND_TEMPLATE = "LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo"
 
 try:
     from ase import Atoms

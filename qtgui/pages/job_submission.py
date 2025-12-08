@@ -15,11 +15,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from qtgui.utils import validate_path_under_base, safe_makedirs
-
-# ASE_ESPRESSO_COMMAND template for Quantum ESPRESSO execution
-# LAUNCHER, PACKAGE, PARALLEL, and PREFIX are placeholders replaced by xespresso
-ASE_ESPRESSO_COMMAND_TEMPLATE = "LAUNCHER PACKAGE.x PARALLEL -in PREFIX.PACKAGEi > PREFIX.PACKAGEo"
+from qtgui.utils import validate_path_under_base, safe_makedirs, ASE_ESPRESSO_COMMAND_TEMPLATE
 
 try:
     from ase import Atoms

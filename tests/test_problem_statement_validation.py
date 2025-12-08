@@ -9,6 +9,7 @@ This test validates that the fixes address all issues mentioned in the problem s
 
 import pytest
 import json
+import numpy as np
 
 
 def test_config_from_problem_statement():
@@ -117,7 +118,4 @@ def test_kpoints_format_automatic():
 
 
 if __name__ == "__main__":
-    # Allow numpy import for the test
-    import numpy as np
-
     pytest.main([__file__, "-v", "-s"])

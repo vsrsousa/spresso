@@ -78,22 +78,18 @@ def set_queue(calc, package=None, parallel=None, queue=None, command=None):
         msg = f"Failed to initialize scheduler '{queue.get('scheduler')}': {e}"
         raise ValueError(msg) if VERBOSE_ERRORS else ValueError(msg) from None
 
-    # Write job script only — defer execution to ASE
+    # Write job script only — defer execution to scheduler
     scheduler.write_script()
 
-    # Store scheduler and command for later use
+    # Store scheduler for later use
     calc.scheduler = scheduler
     
-    # For remote execution, we don't set calc.command because the scheduler's
-    # run() method will handle everything (SSH, file transfer, job submission).
-    # The _legacy_execute override in Espresso class will call scheduler.run().
-    # For local execution, set the command so ASE can execute it.
-    if queue.get("execution") == "remote":
-        # Set a placeholder command for ASE - it won't be used
-        calc.command = "echo 'Remote execution handled by scheduler'"
-        logger.debug("Remote execution configured - scheduler will handle job submission")
-    else:
-        calc.command = scheduler.submit_command()
-        if hasattr(calc, "profile"):
-            calc.profile.command = calc.command
-        logger.debug(f"Local execution configured with command: {calc.command}")
+    # Store the command - it will be used by scheduler.run() for both local and remote
+    # For remote execution: used in the remote job script
+    # For local execution: used by subprocess in base Scheduler.run()
+    calc.command = scheduler.submit_command()
+    
+    if hasattr(calc, "profile"):
+        calc.profile.command = calc.command
+    
+    logger.debug(f"Scheduler configured for {queue.get('execution', 'local')} execution with command: {calc.command}")

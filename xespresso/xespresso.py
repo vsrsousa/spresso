@@ -11,9 +11,12 @@ from ase import io
 from ase.calculators.calculator import (
     FileIOCalculator,
     CalculationFailed,
+    Calculator,
+    CalculatorSetupError,
     equal,
     compare_atoms,
     PropertyNotPresent,
+    all_changes,
 )
 from xespresso.xio import (
     write_espresso_in,
@@ -142,32 +145,59 @@ class Espresso(FileIOCalculator):
 
         # self.discard_results_on_any_change = False
 
-    def _legacy_execute(self):
+    def calculate(self, atoms=None, properties=['energy'], system_changes=all_changes):
         """
-        Override ASE's FileIOCalculator execution method.
+        Override ASE's FileIOCalculator.calculate() to support remote execution.
         
-        This method is called by ASE's FileIOCalculator after writing input files.
-        For remote execution, it uses the scheduler's run() method which handles
-        SSH connection, file transfer, and remote job submission.
-        For local execution, it falls back to ASE's default behavior.
+        This override is necessary because ASE 3.22.1's FileIOCalculator.calculate()
+        directly calls subprocess.Popen(command) locally, which fails for remote execution.
+        
+        Instead, we delegate execution to the scheduler's run() method, which:
+        - For remote execution: handles SSH connection, file transfer, and remote job submission
+        - For local execution: runs the command locally using subprocess
+        
+        The scheduler automatically determines the execution mode from queue['execution'].
         """
-        # Check if we have a scheduler configured for remote execution
-        if hasattr(self, 'scheduler') and self.queue and self.queue.get('execution') == 'remote':
-            logger.info("Executing job via remote scheduler...")
+        # Call parent's calculate for caching/setup logic
+        Calculator.calculate(self, atoms, properties, system_changes)
+        
+        # Write input files (this also calls set_queue which sets up self.scheduler)
+        self.write_input(self.atoms, properties, system_changes)
+        
+        # Use scheduler to execute the job (handles both local and remote)
+        if hasattr(self, 'scheduler'):
+            logger.info(f"Executing job via scheduler ({self.queue.get('execution', 'local')} mode)...")
             self.scheduler.run()
         else:
-            # Fall back to ASE's default local execution
-            logger.info("Executing job locally via ASE...")
-            FileIOCalculator._legacy_execute(self)
-
-    def execute(self):
-        """
-        Executes the job using the scheduler.
-        This method can be called directly for manual job execution.
-        It preserves ASE's caching logic and supports remote execution.
-        """
-        logger.info("Executing job via scheduler...")
-        self.scheduler.run()
+            # Fallback to ASE's default behavior if no scheduler configured
+            logger.warning("No scheduler configured, falling back to direct command execution")
+            if self.command is None:
+                raise CalculatorSetupError(
+                    'Please set ${} environment variable '
+                    .format('ASE_' + self.name.upper() + '_COMMAND') +
+                    'or supply the command keyword')
+            
+            command = self.command
+            if 'PREFIX' in command:
+                command = command.replace('PREFIX', self.prefix)
+            
+            try:
+                proc = subprocess.Popen(command, shell=True, cwd=self.directory)
+            except OSError as err:
+                msg = 'Failed to execute "{}"'.format(command)
+                raise EnvironmentError(msg) from err
+            
+            errorcode = proc.wait()
+            
+            if errorcode:
+                path = os.path.abspath(self.directory)
+                msg = ('Calculator "{}" failed with command "{}" failed in '
+                       '{} with error code {}'.format(self.name, command,
+                                                      path, errorcode))
+                raise CalculationFailed(msg)
+        
+        # Read results (works for both remote and local)
+        self.read_results()
 
     def find_pseudopotentials(self, pseudo_group="SSSP_1.1.2_PBE_efficiency"):
         """Get pseudo potential by family name.

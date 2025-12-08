@@ -142,10 +142,28 @@ class Espresso(FileIOCalculator):
 
         # self.discard_results_on_any_change = False
 
+    def _legacy_execute(self):
+        """
+        Override ASE's FileIOCalculator execution method.
+        
+        This method is called by ASE's FileIOCalculator after writing input files.
+        For remote execution, it uses the scheduler's run() method which handles
+        SSH connection, file transfer, and remote job submission.
+        For local execution, it falls back to ASE's default behavior.
+        """
+        # Check if we have a scheduler configured for remote execution
+        if hasattr(self, 'scheduler') and self.queue and self.queue.get('execution') == 'remote':
+            logger.info("Executing job via remote scheduler...")
+            self.scheduler.run()
+        else:
+            # Fall back to ASE's default local execution
+            logger.info("Executing job locally via ASE...")
+            FileIOCalculator._legacy_execute(self)
+
     def execute(self):
         """
         Executes the job using the scheduler.
-        This overrides ASE's default profile-based execution.
+        This method can be called directly for manual job execution.
         It preserves ASE's caching logic and supports remote execution.
         """
         logger.info("Executing job via scheduler...")

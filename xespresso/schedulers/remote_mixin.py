@@ -155,17 +155,22 @@ class RemoteExecutionMixin:
                 - If scheduler is SLURM:
                     - Extracts job ID from submission output
                     - If wait_for_completion=True (default): polls job status until completion
-                    - If wait_for_completion=False: returns immediately (non-blocking)
-                - Retrieves output file only after job finishes (blocking mode) or skips retrieval (non-blocking mode)
+                    - If wait_for_completion=False: returns immediately with job ID
+                - If scheduler is direct:
+                    - If wait_for_completion=True (default): runs job in foreground, blocks until completion
+                    - If wait_for_completion=False: runs job in background, captures PID, returns immediately
+                - Retrieves output file only in blocking mode after job finishes
             - For direct/local execution:
                 - Falls back to the base Scheduler.run() method
 
         Queue Parameters:
             - wait_for_completion (bool): If True (default), blocks until job completes.
                                          If False, submits job and returns immediately.
+                                         - For SLURM: job ID stored in calc.last_job_id
+                                         - For direct: PID stored in calc.last_job_id as "PID:{pid}"
                                          Useful for GUI applications to avoid freezing.
             - job_timeout (int): Maximum time in seconds to wait for job completion (default: 3600).
-                                Only used when wait_for_completion=True.
+                                Only used when wait_for_completion=True with SLURM scheduler.
 
         Returns:
             tuple: (stdout, stderr) from the job submission command
@@ -193,39 +198,69 @@ class RemoteExecutionMixin:
 
         # Use env_setup from queue if available, otherwise default to sourcing /etc/profile
         env_setup = self.queue.get("env_setup", "source /etc/profile")
-        command = f"cd {self.remote_path} && {env_setup} && {self.submit_command()}"
-
-        stdout, stderr = self.remote.run_command(command)
-
-        # If SLURM, extract job ID and optionally wait for completion
-        if self.queue.get("scheduler") == "slurm":
-            import re
-
-            match = re.search(r"Submitted batch job (\d+)", stdout)
-            job_id = match.group(1) if match else None
-
-            if job_id:
-                if hasattr(self, "logger"):
-                    self.logger.info(f"Job submitted with ID: {job_id}")
+        
+        # Check if non-blocking mode is requested
+        wait_for_completion = self.queue.get("wait_for_completion", True)
+        
+        # Handle non-blocking execution for both SLURM and direct schedulers
+        if not wait_for_completion:
+            # For non-blocking mode, run job in background
+            if self.queue.get("scheduler") == "slurm":
+                # SLURM: submit job and get job ID
+                command = f"cd {self.remote_path} && {env_setup} && {self.submit_command()}"
+                stdout, stderr = self.remote.run_command(command)
                 
-                # Only wait for completion if explicitly requested
-                # Setting wait_for_completion=False allows non-blocking submission
-                if self.queue.get("wait_for_completion", True):
+                import re
+                match = re.search(r"Submitted batch job (\d+)", stdout)
+                job_id = match.group(1) if match else None
+                
+                if job_id:
+                    if hasattr(self, "logger"):
+                        self.logger.info(f"SLURM job {job_id} submitted (non-blocking mode).")
+                    self.calc.last_job_id = job_id
+                    return stdout, stderr
+                else:
+                    if hasattr(self, "logger"):
+                        self.logger.warning("Could not extract SLURM job ID from sbatch output")
+            else:
+                # Direct scheduler: run in background and capture PID
+                # Redirect output to log files and run in background
+                bg_command = f"cd {self.remote_path} && {env_setup} && {self.submit_command()} > {output_file} 2>&1 & echo $!"
+                stdout, stderr = self.remote.run_command(bg_command)
+                
+                # Extract PID from stdout
+                pid = stdout.strip()
+                if pid and pid.isdigit():
+                    if hasattr(self, "logger"):
+                        self.logger.info(f"Direct job started with PID: {pid} (non-blocking mode).")
+                    self.calc.last_job_id = f"PID:{pid}"
+                    return stdout, stderr
+                else:
+                    if hasattr(self, "logger"):
+                        self.logger.warning(f"Could not extract PID from background job. Output: {stdout}")
+        else:
+            # Blocking mode: wait for completion
+            command = f"cd {self.remote_path} && {env_setup} && {self.submit_command()}"
+            stdout, stderr = self.remote.run_command(command)
+            
+            # If SLURM, extract job ID and wait for completion
+            if self.queue.get("scheduler") == "slurm":
+                import re
+                
+                match = re.search(r"Submitted batch job (\d+)", stdout)
+                job_id = match.group(1) if match else None
+                
+                if job_id:
+                    if hasattr(self, "logger"):
+                        self.logger.info(f"Job submitted with ID: {job_id}")
                     self._wait_for_slurm_completion(job_id)
                 else:
                     if hasattr(self, "logger"):
-                        self.logger.info(f"Job {job_id} submitted. Skipping wait (non-blocking mode).")
-                    # Store job ID for later retrieval if needed
-                    self.calc.last_job_id = job_id
-                    # In non-blocking mode, return without retrieving output
-                    return stdout, stderr
-            else:
-                if hasattr(self, "logger"):
-                    self.logger.warning("Could not extract job ID from sbatch output")
-
-        # Verify output file exists before attempting retrieval
-        # This will be skipped in non-blocking mode
-        self._verify_and_retrieve_output_file(output_file, local_output)
+                        self.logger.warning("Could not extract job ID from sbatch output")
+            
+            # For both SLURM (after completion) and direct (already completed),
+            # verify and retrieve output file
+            self._verify_and_retrieve_output_file(output_file, local_output)
 
         return stdout, stderr
 

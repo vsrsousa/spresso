@@ -1,19 +1,23 @@
 """
 Example: Non-blocking Remote Job Submission
 
-This example demonstrates how to submit remote SLURM jobs without blocking
-the GUI or main thread. This is useful for interactive applications where
-you want the user to maintain control while jobs run on remote clusters.
+This example demonstrates how to submit remote jobs (both SLURM and direct execution)
+without blocking the GUI or main thread. This is useful for interactive applications
+where you want the user to maintain control while jobs run on remote clusters.
 
 Key feature: wait_for_completion=False in queue configuration
+
+Supported Schedulers:
+- SLURM: Submits to job queue, returns job ID
+- Direct: Runs in background, returns PID
 """
 
 from ase.build import bulk
 from xespresso import Espresso
 
-# Example 1: Blocking mode (default behavior)
-# =============================================
-print("Example 1: Blocking Remote Execution (default)")
+# Example 1: Blocking mode with SLURM (default behavior)
+# =======================================================
+print("Example 1: Blocking Remote Execution with SLURM (default)")
 print("=" * 60)
 
 atoms = bulk("Si", cubic=True)
@@ -176,16 +180,85 @@ Benefits:
 - Better user experience
 """)
 
+# ==================================================================
+# Example 4: Non-blocking mode with Direct Scheduler
+# ==================================================================
+print("\n" + "=" * 60)
+print("Example 4: Non-blocking Remote Execution with Direct Scheduler")
+print("=" * 60)
+
+atoms = bulk("Al", cubic=True)
+pseudopotentials = {"Al": "Al.pbe.UPF"}
+
+# Non-blocking direct execution - runs job in background
+direct_non_blocking_queue = {
+    "execution": "remote",
+    "scheduler": "direct",  # Direct execution (no job queue)
+    "remote_host": "cluster.university.edu",
+    "remote_user": "username",
+    "remote_dir": "/home/username/calculations",
+    "remote_auth": {
+        "method": "key",
+        "ssh_key": "~/.ssh/id_rsa"
+    },
+    # Enable non-blocking mode
+    "wait_for_completion": False,
+}
+
+"""
+calc = Espresso(
+    label='al_direct_non_blocking',
+    pseudopotentials=pseudopotentials,
+    queue=direct_non_blocking_queue,
+    input_data={'ecutwfc': 30}
+)
+atoms.calc = calc
+
+# This will start the job in background on remote host and return immediately
+try:
+    atoms.get_potential_energy()
+except Exception as e:
+    print(f"Expected: {e}")
+    
+# Access the process ID (stored as "PID:12345")
+pid = calc.last_job_id  # e.g., "PID:12345"
+print(f"Job started with {pid}")
+print("GUI remains responsive!")
+
+# Later, check if process is still running:
+# ssh to remote and run: ps -p {pid_number}
+# Or kill the process: kill {pid_number}
+"""
+
+print("Direct scheduler with non-blocking mode:")
+print("- Runs bash script in background on remote host")
+print("- Returns PID immediately (stored as 'PID:12345' in calc.last_job_id)")
+print("- Output redirected to .pwo file")
+print("- Check status: ps -p {pid}")
+print("- Terminate: kill {pid}")
+
 print("\n" + "=" * 60)
 print("Summary")
 print("=" * 60)
 print("""
+Scheduler Support:
+==================
+- SLURM (blocking):    Submits to queue, polls until complete
+- SLURM (non-blocking): Submits to queue, returns job ID immediately
+- Direct (blocking):    Runs in foreground, blocks until complete  
+- Direct (non-blocking): Runs in background, returns PID immediately
+
+General:
+========
 - Blocking mode (default): wait_for_completion=True
   Good for: Scripts, batch processing
   
 - Non-blocking mode: wait_for_completion=False
   Good for: GUI applications, interactive use
   
-- Job ID is stored in calc.last_job_id
+- Job/Process ID is stored in calc.last_job_id
+  - SLURM: Job ID as string (e.g., "12345")
+  - Direct: PID prefixed with "PID:" (e.g., "PID:67890")
+  
 - Output files must be retrieved manually in non-blocking mode
 """)

@@ -1158,22 +1158,111 @@ This is normal for local calculations.
             if prepared_atoms.calc is None or prepared_atoms.calc != calc:
                 prepared_atoms.calc = calc
 
-            # Run the calculation using ASE/xespresso pattern
-            # This will generate input files, submit the job, and wait for completion
-            # The calculator's queue configuration handles remote execution
-            energy = prepared_atoms.get_potential_energy()
+            # Check if this is a non-blocking remote execution
+            is_remote_non_blocking = (
+                hasattr(calc, 'queue') and 
+                calc.queue and
+                calc.queue.get("execution") == "remote" and 
+                calc.queue.get("wait_for_completion") == False
+            )
 
-            # Success! Display results
-            self.run_status.setText("✅ Calculation completed successfully!")
-            self.run_status.setStyleSheet("color: green;")
+            if is_remote_non_blocking:
+                # Non-blocking mode: Submit job and return immediately
+                try:
+                    # This will submit the job but not wait for completion
+                    prepared_atoms.get_potential_energy()
+                except Exception:
+                    # In non-blocking mode, we expect this to fail when trying to read results
+                    # This is normal behavior - the job was submitted successfully
+                    pass
+                
+                # Get the job/process ID that was stored
+                job_id = getattr(calc, 'last_job_id', 'Unknown')
+                
+                # Determine scheduler type for display
+                scheduler = calc.queue.get("scheduler", "unknown")
+                if scheduler == "slurm":
+                    job_type = "SLURM job"
+                    check_command = f"squeue -j {job_id}"
+                elif job_id.startswith("PID:"):
+                    job_type = "background process"
+                    pid = job_id.split(":", 1)[1] if ":" in job_id else job_id
+                    check_command = f"ps -p {pid}"
+                else:
+                    job_type = "job"
+                    check_command = "(check via SSH)"
+                
+                # Display success message for non-blocking submission
+                self.run_status.setText(f"✅ Job submitted successfully!")
+                self.run_status.setStyleSheet("color: green;")
+                
+                self.energy_label.setText(f"Job ID: {job_id}")
+                
+                results_text = f"""
+<b>✅ Job Submitted Successfully!</b>
 
-            self.energy_label.setText(f"Energy: {energy:.6f} eV")
+<b>Job ID:</b> <code>{job_id}</code>
+<b>Type:</b> {job_type}
+<b>Working Directory:</b> <code>{full_path}</code>
 
-            # Get prefix for output files
-            prefix = self._get_prefix_from_label(label)
+<b>Non-blocking Mode Active</b>
+The job has been submitted and is running on the remote server.
+The GUI remains responsive and you can continue working.
 
-            # Get additional results if available
-            results_text = f"""
+<b>Checking Job Status:</b>
+<ol>
+<li>SSH to the remote server</li>
+<li>Run: <code>{check_command}</code></li>
+<li>Check output file: <code>{prefix}.pwo</code></li>
+</ol>
+
+<b>Retrieving Results:</b>
+When the job completes, you'll need to manually retrieve the results:
+<ol>
+<li>SSH to remote: <code>{calc.queue.get('remote_host', 'remote_host')}</code></li>
+<li>Navigate to: <code>{calc.queue.get('remote_dir', 'remote_dir')}/{label}</code></li>
+<li>Download output: <code>{prefix}.pwo</code></li>
+<li>Parse results using ASE or xespresso tools</li>
+</ol>
+
+<b>Next Steps:</b>
+<ul>
+<li>Continue using the GUI for other tasks</li>
+<li>Submit additional calculations if needed</li>
+<li>Check job status periodically</li>
+<li>Retrieve and analyze results when ready</li>
+</ul>
+"""
+                
+                self.run_results.setHtml(results_text)
+                
+                QMessageBox.information(
+                    self,
+                    "Job Submitted",
+                    f"Job submitted successfully in non-blocking mode!\n\n"
+                    f"Job ID: {job_id}\n\n"
+                    f"The job is running on the remote server. "
+                    f"You can continue using the GUI while it runs.",
+                )
+                
+            else:
+                # Blocking mode: Run the calculation and wait for completion (original behavior)
+                # Run the calculation using ASE/xespresso pattern
+                # This will generate input files, submit the job, and wait for completion
+                # The calculator's queue configuration handles remote execution
+                energy = prepared_atoms.get_potential_energy()
+
+                # Success! Display results
+                self.run_status.setText("✅ Calculation completed successfully!")
+                self.run_status.setStyleSheet("color: green;")
+
+                self.energy_label.setText(f"Energy: {energy:.6f} eV")
+
+                # Get prefix for output files
+                prefix = self._get_prefix_from_label(label)
+
+                # Get additional results if available
+                results_text = f"""
 <b>✅ Calculation Completed Successfully!</b>
 
 <b>Energy:</b> {energy:.6f} eV
@@ -1195,38 +1284,38 @@ This is normal for local calculations.
 </ul>
 """
 
-            # Add forces if available
-            # Some calculation types may not have forces available
-            if hasattr(prepared_atoms, "get_forces"):
-                try:
-                    forces = prepared_atoms.get_forces()
-                    max_force = float((forces**2).sum(axis=1).max() ** 0.5)
-                    results_text += f"\n<b>Max Force:</b> {max_force:.6f} eV/Å\n"
-                except (RuntimeError, KeyError) as e:
-                    # Forces not available for this calculation type (e.g., SCF)
-                    # This is expected and not an error
-                    import logging
+                # Add forces if available
+                # Some calculation types may not have forces available
+                if hasattr(prepared_atoms, "get_forces"):
+                    try:
+                        forces = prepared_atoms.get_forces()
+                        max_force = float((forces**2).sum(axis=1).max() ** 0.5)
+                        results_text += f"\n<b>Max Force:</b> {max_force:.6f} eV/Å\n"
+                    except (RuntimeError, KeyError) as e:
+                        # Forces not available for this calculation type (e.g., SCF)
+                        # This is expected and not an error
+                        import logging
 
-                    logging.debug(f"Forces not available: {e}")
-                except Exception as e:
-                    # Unexpected error getting forces
-                    import logging
+                        logging.debug(f"Forces not available: {e}")
+                    except Exception as e:
+                        # Unexpected error getting forces
+                        import logging
 
-                    logging.warning(f"Unexpected error getting forces: {e}")
+                        logging.warning(f"Unexpected error getting forces: {e}")
 
-            self.run_results.setHtml(results_text)
+                self.run_results.setHtml(results_text)
 
-            # Process pending events to ensure filesystem changes are reflected
-            QApplication.processEvents()
+                # Process pending events to ensure filesystem changes are reflected
+                QApplication.processEvents()
 
-            # Refresh browser to show new files
-            self._refresh_browser()
+                # Refresh browser to show new files
+                self._refresh_browser()
 
-            QMessageBox.information(
-                self,
-                "Calculation Complete",
-                f"Calculation completed successfully!\n\nEnergy: {energy:.6f} eV",
-            )
+                QMessageBox.information(
+                    self,
+                    "Calculation Complete",
+                    f"Calculation completed successfully!\n\nEnergy: {energy:.6f} eV",
+                )
 
         except Exception as e:
             import traceback

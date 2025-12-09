@@ -154,21 +154,21 @@ class RemoteExecutionMixin:
                 - Submits job using the scheduler's submit_command()
                 - If scheduler is SLURM:
                     - Extracts job ID from submission output
-                    - If wait_for_completion=True (default): polls job status until completion
-                    - If wait_for_completion=False: returns immediately with job ID
+                    - If wait_for_completion=False (default): returns immediately with job ID
+                    - If wait_for_completion=True: polls job status until completion
                 - If scheduler is direct:
-                    - If wait_for_completion=True (default): runs job in foreground, blocks until completion
-                    - If wait_for_completion=False: runs job in background, captures PID, returns immediately
+                    - If wait_for_completion=False (default): runs job in background, captures PID, returns immediately
+                    - If wait_for_completion=True: runs job in foreground, blocks until completion
                 - Retrieves output file only in blocking mode after job finishes
             - For direct/local execution:
                 - Falls back to the base Scheduler.run() method
 
         Queue Parameters:
-            - wait_for_completion (bool): If True (default), blocks until job completes.
-                                         If False, submits job and returns immediately.
+            - wait_for_completion (bool): If False (default), submits job and returns immediately.
+                                         If True, blocks until job completes.
                                          - For SLURM: job ID stored in calc.last_job_id
                                          - For direct: PID stored in calc.last_job_id as "PID:{pid}"
-                                         Useful for GUI applications to avoid freezing.
+                                         Default is False to prevent GUI freezing.
             - job_timeout (int): Maximum time in seconds to wait for job completion (default: 3600).
                                 Only used when wait_for_completion=True with SLURM scheduler.
 
@@ -199,8 +199,8 @@ class RemoteExecutionMixin:
         # Use env_setup from queue if available, otherwise default to sourcing /etc/profile
         env_setup = self.queue.get("env_setup", "source /etc/profile")
         
-        # Check if non-blocking mode is requested
-        wait_for_completion = self.queue.get("wait_for_completion", True)
+        # Check if non-blocking mode is requested (default is False for non-blocking)
+        wait_for_completion = self.queue.get("wait_for_completion", False)
         
         # Handle non-blocking execution for both SLURM and direct schedulers
         if not wait_for_completion:

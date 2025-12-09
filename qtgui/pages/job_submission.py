@@ -1171,11 +1171,13 @@ This is normal for local calculations.
                 prepared_atoms.calc = calc
 
             # Check if this is a non-blocking remote execution
+            # Default is non-blocking (wait_for_completion defaults to False)
+            # Only blocking if explicitly set to True
             is_remote_non_blocking = (
                 hasattr(calc, 'queue') and 
                 calc.queue and
                 calc.queue.get("execution") == "remote" and 
-                calc.queue.get("wait_for_completion") == False
+                calc.queue.get("wait_for_completion", False) != True  # Default is False (non-blocking)
             )
 
             if is_remote_non_blocking:

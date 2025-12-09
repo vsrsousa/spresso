@@ -158,16 +158,28 @@ class JobSubmissionPage(QWidget):
         super().__init__()
         self.session_state = session_state
         self._loading = False  # Guard to prevent recursive updates
+        self.job_monitor = None  # Job Monitor dialog (created on demand)
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup the user interface."""
         main_layout = QVBoxLayout(self)
 
-        # Header
+        # Header with Job Monitor button
+        header_layout = QHBoxLayout()
         header_label = QLabel("<h2>🚀 Job Submission & File Management</h2>")
         header_label.setTextFormat(Qt.RichText)
-        main_layout.addWidget(header_label)
+        header_layout.addWidget(header_label)
+        
+        header_layout.addStretch()
+        
+        # Job Monitor button
+        job_monitor_btn = QPushButton("🔍 Job Monitor")
+        job_monitor_btn.setToolTip("Open Job Monitor to track remote job submissions")
+        job_monitor_btn.clicked.connect(self._open_job_monitor)
+        header_layout.addWidget(job_monitor_btn)
+        
+        main_layout.addLayout(header_layout)
 
         description = QLabel(
             """
@@ -1181,16 +1193,20 @@ This is normal for local calculations.
                 
                 # Determine scheduler type for display
                 scheduler = calc.queue.get("scheduler", "unknown")
-                if scheduler == "slurm":
-                    job_type = "SLURM job"
-                    check_command = f"squeue -j {job_id}"
-                elif job_id.startswith("PID:"):
-                    job_type = "background process"
-                    pid = job_id.split(":", 1)[1] if ":" in job_id else job_id
-                    check_command = f"ps -p {pid}"
-                else:
-                    job_type = "job"
-                    check_command = "(check via SSH)"
+                
+                # Add job to monitor
+                job_info = {
+                    'label': label,
+                    'job_id': job_id,
+                    'scheduler': scheduler,
+                    'remote_host': calc.queue.get('remote_host', 'N/A'),
+                    'remote_user': calc.queue.get('remote_user', 'N/A'),
+                    'remote_dir': calc.queue.get('remote_dir', ''),
+                    'local_dir': full_path.rsplit('/' + label, 1)[0] if label in full_path else full_path,
+                    'queue': calc.queue,
+                    'status': 'submitted'
+                }
+                self._add_job_to_monitor(job_info)
                 
                 # Display success message for non-blocking submission
                 self.run_status.setText(f"✅ Job submitted successfully!")
@@ -1202,36 +1218,25 @@ This is normal for local calculations.
 <b>✅ Job Submitted Successfully!</b>
 
 <b>Job ID:</b> <code>{job_id}</code>
-<b>Type:</b> {job_type}
+<b>Scheduler:</b> {scheduler}
 <b>Working Directory:</b> <code>{full_path}</code>
 
 <b>Non-blocking Mode Active</b>
 The job has been submitted and is running on the remote server.
 The GUI remains responsive and you can continue working.
 
-<b>Checking Job Status:</b>
-<ol>
-<li>SSH to the remote server</li>
-<li>Run: <code>{check_command}</code></li>
-<li>Check output file: <code>{prefix}.pwo</code></li>
-</ol>
-
-<b>Retrieving Results:</b>
-When the job completes, you'll need to manually retrieve the results:
-<ol>
-<li>SSH to remote: <code>{calc.queue.get('remote_host', 'remote_host')}</code></li>
-<li>Navigate to: <code>{calc.queue.get('remote_dir', 'remote_dir')}/{label}</code></li>
-<li>Download output: <code>{prefix}.pwo</code></li>
-<li>Parse results using ASE or xespresso tools</li>
-</ol>
-
-<b>Next Steps:</b>
+<b>Job Monitor</b>
+The job has been added to the Job Monitor. Click the "🔍 Job Monitor" button
+at the top of this page to:
 <ul>
-<li>Continue using the GUI for other tasks</li>
-<li>Submit additional calculations if needed</li>
-<li>Check job status periodically</li>
-<li>Retrieve and analyze results when ready</li>
+<li>Check job status</li>
+<li>Retrieve results when complete</li>
+<li>View job details</li>
+<li>Track all submitted jobs</li>
 </ul>
+
+<b>Note:</b> Job information persists across sessions - you can close the GUI
+and check on your jobs later.
 """
                 
                 self.run_results.setHtml(results_text)
@@ -1368,3 +1373,27 @@ When the job completes, you'll need to manually retrieve the results:
         self._refresh_browser()
         self._update_dry_run_config()
         self._update_run_config()
+    
+    def _open_job_monitor(self):
+        """Open or show the Job Monitor dialog."""
+        if self.job_monitor is None:
+            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
+            # Get working directory from session state
+            working_dir = self.session_state.working_directory
+            self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
+        
+        # Show and raise the dialog
+        self.job_monitor.show()
+        self.job_monitor.raise_()
+        self.job_monitor.activateWindow()
+    
+    def _add_job_to_monitor(self, job_info):
+        """Add a job to the Job Monitor."""
+        # Ensure job monitor is created
+        if self.job_monitor is None:
+            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
+            working_dir = self.session_state.working_directory
+            self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
+        
+        # Add the job
+        self.job_monitor.add_job(job_info)

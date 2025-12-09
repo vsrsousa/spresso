@@ -5,7 +5,9 @@ This module contains non-blocking dialog windows for configuration tasks.
 """
 
 from .configuration_dialog import ConfigurationDialog
+from .job_monitor_dialog import JobMonitorDialog
 
 __all__ = [
     'ConfigurationDialog',
+    'JobMonitorDialog',
 ]

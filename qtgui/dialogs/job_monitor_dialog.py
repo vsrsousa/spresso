@@ -16,8 +16,89 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QLabel, QMessageBox, QHeaderView, QWidget,
     QTextEdit
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtGui import QColor
+
+
+class JobStatusWorker(QThread):
+    """
+    Worker thread for checking job status without blocking the UI.
+    
+    Signals:
+        status_updated: Emitted when status check completes (row, new_status, error_msg)
+    """
+    status_updated = Signal(int, str, str)  # row, status, error_message
+    
+    def __init__(self, row, job, parent=None):
+        super().__init__(parent)
+        self.row = row
+        self.job = job
+    
+    def run(self):
+        """Check job status in background thread."""
+        job_id = self.job.get('job_id')
+        scheduler = self.job.get('scheduler')
+        queue = self.job.get('queue', {})
+        
+        # Skip if job_id is unknown or None
+        if not job_id or job_id == 'Unknown':
+            self.status_updated.emit(self.row, 'unknown', 'Job ID is unknown')
+            return
+        
+        try:
+            # Import here to avoid circular dependencies
+            from xespresso.schedulers.remote_connection import RemoteConnection
+            
+            # Create remote connection
+            remote = RemoteConnection(queue)
+            
+            # Check status based on scheduler type
+            if scheduler == 'slurm':
+                # Check SLURM job status
+                cmd = f"squeue -j {job_id} -h -o '%T' 2>/dev/null || echo 'NOT_FOUND'"
+                result = remote.run_command(cmd)
+                status_output = result.strip()
+                
+                if status_output == 'NOT_FOUND' or not status_output:
+                    # Job not in queue, check if completed
+                    cmd_history = f"sacct -j {job_id} -n -o State -X 2>/dev/null | head -1"
+                    result_history = remote.run_command(cmd_history)
+                    history_status = result_history.strip()
+                    
+                    if 'COMPLETED' in history_status:
+                        new_status = 'completed'
+                    elif 'FAILED' in history_status or 'CANCELLED' in history_status:
+                        new_status = 'failed'
+                    else:
+                        new_status = 'unknown'
+                elif 'RUNNING' in status_output:
+                    new_status = 'running'
+                elif 'PENDING' in status_output:
+                    new_status = 'pending'
+                elif 'COMPLETED' in status_output:
+                    new_status = 'completed'
+                else:
+                    new_status = 'unknown'
+                    
+            elif scheduler == 'direct':
+                # Check process status using PID
+                pid = job_id.replace('PID:', '') if 'PID:' in str(job_id) else job_id
+                cmd = f"ps -p {pid} -o state= 2>/dev/null || echo 'NOT_FOUND'"
+                result = remote.run_command(cmd)
+                
+                if 'NOT_FOUND' in result or not result.strip():
+                    # Process not found, assume completed
+                    new_status = 'completed'
+                else:
+                    new_status = 'running'
+            else:
+                new_status = 'unknown'
+            
+            remote.disconnect()
+            self.status_updated.emit(self.row, new_status, '')
+            
+        except Exception as e:
+            self.status_updated.emit(self.row, '', str(e))
 
 
 class JobMonitorDialog(QDialog):

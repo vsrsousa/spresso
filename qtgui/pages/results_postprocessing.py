@@ -215,11 +215,23 @@ class ResultsPostprocessingPage(QWidget):
         output_path = os.path.join(output_dir, output_files[0])
         
         try:
-            with open(output_path, 'r') as f:
-                content = f.read()
+            # First, try to use ASE to read the output (preferred method)
+            results = self._parse_with_ase(output_path)
             
-            # Parse results
-            results = self._parse_output(content)
+            # If ASE parsing fails or doesn't get all info, supplement with manual parsing
+            if not results or results.get('energy') is None:
+                with open(output_path, 'r') as f:
+                    content = f.read()
+                results = self._parse_output(content)
+            else:
+                # Supplement ASE results with manual parsing for additional fields
+                with open(output_path, 'r') as f:
+                    content = f.read()
+                manual_results = self._parse_output(content)
+                # Merge results, preferring ASE values when available
+                for key in ['scf_history', 'is_magnetic', 'pressure', 'stress_tensor']:
+                    if key in manual_results and manual_results[key]:
+                        results[key] = manual_results[key]
             
             # Update display
             if results.get('energy'):
@@ -242,19 +254,37 @@ class ResultsPostprocessingPage(QWidget):
             if results.get('fermi_energy') is not None:
                 results_text.append(f"Fermi Energy: {results['fermi_energy']:.4f} eV")
             
-            if results.get('total_magnetization') is not None:
-                results_text.append(f"Total Magnetization: {results['total_magnetization']:.4f} Bohr mag/cell")
-            
-            if results.get('absolute_magnetization') is not None:
-                results_text.append(f"Absolute Magnetization: {results['absolute_magnetization']:.4f} Bohr mag/cell")
+            # Only show magnetic properties if calculation is magnetic
+            if results.get('is_magnetic'):
+                if results.get('total_magnetization') is not None:
+                    results_text.append(f"Total Magnetization: {results['total_magnetization']:.4f} Bohr mag/cell")
+                
+                if results.get('absolute_magnetization') is not None:
+                    results_text.append(f"Absolute Magnetization: {results['absolute_magnetization']:.4f} Bohr mag/cell")
             
             if results.get('total_force'):
                 results_text.append(f"Total Force: {results['total_force']} Ry/au")
             
-            if results.get('magnetic_moments'):
+            if results.get('pressure') is not None:
+                results_text.append(f"Pressure: {results['pressure']:.2f} kbar")
+            
+            # Only show magnetic moments if calculation is magnetic
+            if results.get('is_magnetic') and results.get('magnetic_moments'):
                 results_text.append("\nMagnetic Moments per Atom:")
                 for atom_info in results['magnetic_moments']:
                     results_text.append(f"  Atom {atom_info['atom']}: charge={atom_info['charge']:.4f}, magn={atom_info['magn']:.4f}")
+            
+            # Show forces per atom if available
+            if results.get('forces'):
+                results_text.append("\nForces per Atom (Ry/au):")
+                for force_info in results['forces']:
+                    results_text.append(f"  Atom {force_info['atom']}: fx={force_info['fx']:10.6f}, fy={force_info['fy']:10.6f}, fz={force_info['fz']:10.6f}")
+            
+            # Show stress tensor if available
+            if results.get('stress_tensor'):
+                results_text.append("\nStress Tensor (kbar):")
+                for i, row in enumerate(results['stress_tensor']):
+                    results_text.append(f"  [{row[0]:10.2f}  {row[1]:10.2f}  {row[2]:10.2f}]")
             
             self.results_text.setText("\n".join(results_text))
             
@@ -274,6 +304,108 @@ class ResultsPostprocessingPage(QWidget):
             self.status_text.setText(f"❌ Error loading results: {e}")
             self.status_text.setStyleSheet("color: red;")
     
+    def _parse_with_ase(self, output_path):
+        """Parse QE output using ASE (preferred method).
+        
+        This leverages ASE's built-in parsers which are more robust.
+        Returns a results dictionary compatible with _parse_output.
+        """
+        try:
+            # Try to import ASE
+            from ase import io
+            
+            # Read the output file with ASE
+            atoms = io.read(output_path, format='espresso-out')
+            
+            if atoms.calc is None:
+                return None
+            
+            calc_results = atoms.calc.results
+            
+            results = {
+                'energy': None,
+                'converged': True,  # If ASE read it, it likely converged
+                'iterations': 0,
+                'scf_history': [],
+                'total_force': None,
+                'fermi_energy': None,
+                'total_magnetization': None,
+                'absolute_magnetization': None,
+                'magnetic_moments': [],
+                'forces': [],
+                'pressure': None,
+                'stress_tensor': None,
+                'is_magnetic': False
+            }
+            
+            # Extract energy (in eV, convert to Ry)
+            if 'energy' in calc_results:
+                results['energy'] = calc_results['energy'] / 13.605693122994  # eV to Ry
+            
+            # Extract forces
+            if 'forces' in calc_results and calc_results['forces'] is not None:
+                forces_array = calc_results['forces']
+                # Convert from eV/Angstrom to Ry/au
+                # 1 Ry/au = 25.71104309541616 eV/Angstrom
+                conversion = 25.71104309541616
+                for i, force in enumerate(forces_array):
+                    results['forces'].append({
+                        'atom': i + 1,
+                        'fx': force[0] / conversion,
+                        'fy': force[1] / conversion,
+                        'fz': force[2] / conversion
+                    })
+                # Calculate total force magnitude
+                total_f = sum([f[0]**2 + f[1]**2 + f[2]**2 for f in forces_array])**0.5
+                results['total_force'] = total_f / conversion
+            
+            # Extract stress
+            if 'stress' in calc_results and calc_results['stress'] is not None:
+                stress_array = calc_results['stress']
+                # Convert from eV/Angstrom^3 to kbar
+                # 1 eV/Angstrom^3 = 160.21766208 GPa = 1602.1766208 kbar
+                conversion = 1602.1766208
+                # Stress is in Voigt notation: [xx, yy, zz, yz, xz, xy]
+                results['stress_tensor'] = [
+                    [stress_array[0] * conversion, stress_array[5] * conversion, stress_array[4] * conversion],
+                    [stress_array[5] * conversion, stress_array[1] * conversion, stress_array[3] * conversion],
+                    [stress_array[4] * conversion, stress_array[3] * conversion, stress_array[2] * conversion]
+                ]
+                # Calculate pressure (negative trace / 3)
+                results['pressure'] = -(stress_array[0] + stress_array[1] + stress_array[2]) * conversion / 3.0
+            
+            # Extract magnetic moments
+            if 'magmoms' in calc_results and calc_results['magmoms'] is not None:
+                magmoms_array = calc_results['magmoms']
+                if any(abs(m) > 1e-6 for m in magmoms_array):
+                    results['is_magnetic'] = True
+                    for i, magmom in enumerate(magmoms_array):
+                        if abs(magmom) > 1e-6:
+                            results['magnetic_moments'].append({
+                                'atom': i + 1,
+                                'charge': 0.0,  # Not available from ASE
+                                'magn': magmom
+                            })
+                    # Calculate total magnetization
+                    results['total_magnetization'] = sum(magmoms_array)
+                    results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
+            
+            # Extract Fermi energy
+            try:
+                if hasattr(atoms.calc, 'get_fermi_level'):
+                    results['fermi_energy'] = atoms.calc.get_fermi_level()
+            except:
+                pass
+            
+            return results
+            
+        except ImportError:
+            # ASE not available
+            return None
+        except Exception as e:
+            # ASE parsing failed, will fall back to manual parsing
+            return None
+    
     def _parse_output(self, content):
         """Parse QE output file content.
         
@@ -289,11 +421,17 @@ class ResultsPostprocessingPage(QWidget):
             'fermi_energy': None,
             'total_magnetization': None,
             'absolute_magnetization': None,
-            'magnetic_moments': []
+            'magnetic_moments': [],
+            'forces': [],
+            'pressure': None,
+            'stress_tensor': None,
+            'is_magnetic': False
         }
         
         lines = content.split('\n')
         prev_energy = None
+        in_forces_section = False
+        in_stress_section = False
         
         for i, line in enumerate(lines):
             # Total energy with '!' indicates CONVERGED calculation
@@ -348,8 +486,9 @@ class ResultsPostprocessingPage(QWidget):
                 except (ValueError, IndexError):
                     pass
             
-            # Total magnetization
+            # Total magnetization - marks calculation as magnetic
             if 'total magnetization' in line.lower() and '=' in line:
+                results['is_magnetic'] = True
                 try:
                     parts = line.split('=')
                     if len(parts) > 1:
@@ -360,6 +499,7 @@ class ResultsPostprocessingPage(QWidget):
             
             # Absolute magnetization
             if 'absolute magnetization' in line.lower() and '=' in line:
+                results['is_magnetic'] = True
                 try:
                     parts = line.split('=')
                     if len(parts) > 1:
@@ -370,6 +510,7 @@ class ResultsPostprocessingPage(QWidget):
             
             # Magnetic moment per site
             if 'atom:' in line.lower() and 'charge:' in line.lower() and 'magn:' in line.lower():
+                results['is_magnetic'] = True
                 try:
                     # Parse line like: "     atom:    1    charge:   14.5678    magn:    1.9876    constr:    0.0000"
                     parts = line.split()
@@ -393,6 +534,77 @@ class ResultsPostprocessingPage(QWidget):
                         })
                 except (ValueError, IndexError):
                     pass
+            
+            # Forces section
+            if 'Forces acting on atoms' in line:
+                in_forces_section = True
+                continue
+            
+            if in_forces_section:
+                # Parse force line: "     atom    1 type  1   force =     0.00012345    0.00023456   -0.00034567"
+                if 'atom' in line.lower() and 'force' in line.lower() and '=' in line:
+                    try:
+                        parts = line.split('=')
+                        if len(parts) > 1:
+                            force_parts = parts[1].split()
+                            if len(force_parts) >= 3:
+                                atom_line = parts[0].split()
+                                atom_idx = None
+                                for j, part in enumerate(atom_line):
+                                    if part.lower() == 'atom' and j + 1 < len(atom_line):
+                                        atom_idx = int(atom_line[j + 1])
+                                        break
+                                
+                                if atom_idx is not None:
+                                    results['forces'].append({
+                                        'atom': atom_idx,
+                                        'fx': float(force_parts[0]),
+                                        'fy': float(force_parts[1]),
+                                        'fz': float(force_parts[2])
+                                    })
+                    except (ValueError, IndexError):
+                        pass
+                
+                # End of forces section
+                if 'Total force' in line:
+                    in_forces_section = False
+            
+            # Stress/Pressure section
+            if 'entering subroutine stress' in line.lower():
+                in_stress_section = True
+                continue
+            
+            if in_stress_section:
+                # Parse pressure line: "          total   stress  (Ry/bohr**3)                   (kbar)     P=   12.34"
+                if 'P=' in line or 'P =' in line:
+                    try:
+                        # Extract pressure value
+                        if 'P=' in line:
+                            pressure_str = line.split('P=')[1].strip().split()[0]
+                        else:
+                            pressure_str = line.split('P =')[1].strip().split()[0]
+                        results['pressure'] = float(pressure_str)
+                    except (ValueError, IndexError):
+                        pass
+                
+                # Parse stress tensor (3 lines of 3 values each in kbar)
+                # We look for lines with numbers in the stress section
+                if line.strip() and not any(keyword in line.lower() for keyword in ['total', 'stress', 'kbar', 'ry/bohr']):
+                    try:
+                        parts = line.split()
+                        # Check if we have numeric values (at least 3 for the first half, or 3 for the kbar half)
+                        if len(parts) >= 6:
+                            # Extract kbar values (usually the last 3 columns)
+                            kbar_values = [float(parts[-3]), float(parts[-2]), float(parts[-1])]
+                            if results['stress_tensor'] is None:
+                                results['stress_tensor'] = []
+                            results['stress_tensor'].append(kbar_values)
+                            
+                            # After 3 rows, we're done
+                            if len(results['stress_tensor']) >= 3:
+                                in_stress_section = False
+                    except (ValueError, IndexError):
+                        pass
         
         return results
     

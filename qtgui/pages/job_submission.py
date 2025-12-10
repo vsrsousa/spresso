@@ -158,28 +158,17 @@ class JobSubmissionPage(QWidget):
         super().__init__()
         self.session_state = session_state
         self._loading = False  # Guard to prevent recursive updates
-        self.job_monitor = None  # Job Monitor dialog (created on demand)
+        self._job_monitor_ref = None  # Reference to main app's Job Monitor
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup the user interface."""
         main_layout = QVBoxLayout(self)
 
-        # Header with Job Monitor button
-        header_layout = QHBoxLayout()
+        # Header (Job Monitor button removed - now available in toolbar)
         header_label = QLabel("<h2>🚀 Job Submission & File Management</h2>")
         header_label.setTextFormat(Qt.RichText)
-        header_layout.addWidget(header_label)
-        
-        header_layout.addStretch()
-        
-        # Job Monitor button
-        job_monitor_btn = QPushButton("🔍 Job Monitor")
-        job_monitor_btn.setToolTip("Open Job Monitor to track remote job submissions")
-        job_monitor_btn.clicked.connect(self._open_job_monitor)
-        header_layout.addWidget(job_monitor_btn)
-        
-        main_layout.addLayout(header_layout)
+        main_layout.addWidget(header_label)
 
         description = QLabel(
             """
@@ -1232,7 +1221,7 @@ The GUI remains responsive and you can continue working.
 
 <b>Job Monitor</b>
 The job has been added to the Job Monitor. Click the "🔍 Job Monitor" button
-at the top of this page to:
+in the toolbar to:
 <ul>
 <li>Check job status</li>
 <li>Retrieve results when complete</li>
@@ -1379,27 +1368,23 @@ and check on your jobs later.
         self._update_dry_run_config()
         self._update_run_config()
     
-    def _open_job_monitor(self):
-        """Open or show the Job Monitor dialog."""
-        if self.job_monitor is None:
-            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
-            # Use ~/.xespresso for consistency with other configuration files
-            xespresso_dir = os.path.expanduser("~/.xespresso")
-            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
+    def set_job_monitor(self, job_monitor):
+        """
+        Set the reference to the main app's Job Monitor dialog.
         
-        # Show and raise the dialog
-        self.job_monitor.show()
-        self.job_monitor.raise_()
-        self.job_monitor.activateWindow()
+        Args:
+            job_monitor: Reference to the JobMonitorDialog instance from main app
+        """
+        self._job_monitor_ref = job_monitor
     
     def _add_job_to_monitor(self, job_info):
         """Add a job to the Job Monitor."""
-        # Ensure job monitor is created
-        if self.job_monitor is None:
+        # Use the main app's job monitor reference
+        if self._job_monitor_ref is not None:
+            self._job_monitor_ref.add_job(job_info)
+        else:
+            # Fallback: create local instance if reference not set (shouldn't happen)
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
-            # Use ~/.xespresso for consistency with other configuration files
             xespresso_dir = os.path.expanduser("~/.xespresso")
-            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
-        
-        # Add the job
-        self.job_monitor.add_job(job_info)
+            job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
+            job_monitor.add_job(job_info)

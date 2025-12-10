@@ -1393,18 +1393,36 @@ Version: 1.2.0<br>
 """
         )
     
-    def _open_job_monitor(self):
-        """Open or show the Job Monitor dialog."""
+    def _get_job_monitor(self):
+        """
+        Get or create the Job Monitor dialog instance.
+        
+        Returns:
+            JobMonitorDialog: The singleton Job Monitor instance
+        """
         if self._job_monitor is None:
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
             # Use ~/.xespresso as the base directory for jobs file
             xespresso_dir = os.path.expanduser("~/.xespresso")
             self._job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
+            
+            # Set the job monitor reference in the Job Submission page
+            # Find the JobSubmissionPage in the pages list
+            for page in self.pages:
+                if page.__class__.__name__ == 'JobSubmissionPage':
+                    page.set_job_monitor(self._job_monitor)
+                    break
+        
+        return self._job_monitor
+    
+    def _open_job_monitor(self):
+        """Open or show the Job Monitor dialog."""
+        job_monitor = self._get_job_monitor()
         
         # Show and raise the dialog
-        self._job_monitor.show()
-        self._job_monitor.raise_()
-        self._job_monitor.activateWindow()
+        job_monitor.show()
+        job_monitor.raise_()
+        job_monitor.activateWindow()
     
     def closeEvent(self, event):
         """Handle window close event."""

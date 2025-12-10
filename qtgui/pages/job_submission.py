@@ -1381,7 +1381,7 @@ and check on your jobs later.
         if self.job_monitor is None:
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
             # Get working directory from session state
-            working_dir = self.session_state.working_directory
+            working_dir = self.session_state.get("working_directory", os.path.expanduser("~"))
             self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
         
         # Show and raise the dialog
@@ -1394,7 +1394,7 @@ and check on your jobs later.
         # Ensure job monitor is created
         if self.job_monitor is None:
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
-            working_dir = self.session_state.working_directory
+            working_dir = self.session_state.get("working_directory", os.path.expanduser("~"))
             self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
         
         # Add the job

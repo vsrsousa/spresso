@@ -118,7 +118,7 @@ class ResultsPostprocessingPage(QWidget):
         
         self.convergence_table = QTableWidget()
         self.convergence_table.setColumnCount(3)
-        self.convergence_table.setHorizontalHeaderLabels(["Iteration", "Energy (Ry)", "Delta E"])
+        self.convergence_table.setHorizontalHeaderLabels(["Iteration", "Energy (eV)", "Delta E (eV)"])
         self.convergence_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         convergence_layout.addWidget(self.convergence_table)
         
@@ -255,7 +255,7 @@ class ResultsPostprocessingPage(QWidget):
             
             # Update display
             if results.get('energy'):
-                self.energy_label.setText(f"Total Energy: {results['energy']:.6f} Ry")
+                self.energy_label.setText(f"Total Energy: {results['energy']:.6f} eV")
             
             if results.get('converged'):
                 self.status_label.setText("Status: ✅ Converged")
@@ -267,7 +267,7 @@ class ResultsPostprocessingPage(QWidget):
             # Results text
             results_text = []
             results_text.append(f"Output File: {output_files[0]}")
-            results_text.append(f"Total Energy: {results.get('energy', 'N/A')} Ry")
+            results_text.append(f"Total Energy: {results.get('energy', 'N/A')} eV")
             results_text.append(f"Converged: {results.get('converged', 'Unknown')}")
             results_text.append(f"SCF Iterations: {results.get('iterations', 'N/A')}")
             
@@ -359,9 +359,9 @@ class ResultsPostprocessingPage(QWidget):
                 'is_magnetic': False
             }
             
-            # Extract energy (in eV, convert to Ry)
+            # Extract energy (ASE provides it in eV)
             if 'energy' in calc_results:
-                results['energy'] = calc_results['energy'] * EV_TO_RY
+                results['energy'] = calc_results['energy']
             
             # Extract forces
             if 'forces' in calc_results and calc_results['forces'] is not None:
@@ -459,7 +459,8 @@ class ResultsPostprocessingPage(QWidget):
                     parts = line.split('=')
                     if len(parts) > 1:
                         energy_str = parts[1].replace('Ry', '').strip()
-                        results['energy'] = float(energy_str)
+                        # Convert from Ry to eV
+                        results['energy'] = float(energy_str) * RY_TO_EV
                         # The presence of '!' in the total energy line means converged
                         results['converged'] = True
                 except (ValueError, IndexError):
@@ -471,7 +472,9 @@ class ResultsPostprocessingPage(QWidget):
                     parts = line.split('=')
                     if len(parts) > 1:
                         energy_str = parts[1].replace('Ry', '').strip()
-                        energy = float(energy_str)
+                        energy_ry = float(energy_str)
+                        # Convert from Ry to eV
+                        energy = energy_ry * RY_TO_EV
                         delta = energy - prev_energy if prev_energy else 0
                         results['scf_history'].append((energy, delta))
                         prev_energy = energy

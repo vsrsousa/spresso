@@ -5,6 +5,7 @@ This page handles file browsing, dry run, and job submission.
 """
 
 import os
+import logging
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -1385,7 +1386,7 @@ and check on your jobs later.
         else:
             # This shouldn't normally happen, but if it does, the job will still be
             # saved to the jobs file and will appear when Job Monitor is opened
-            print("Warning: Job Monitor reference not set. Job info saved but dialog not updated.")
+            logging.warning("Job Monitor reference not set. Job info saved but dialog not updated.")
             # The JobMonitorDialog reads from a shared JSON file, so the job will
             # still be tracked even without updating the dialog immediately
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog

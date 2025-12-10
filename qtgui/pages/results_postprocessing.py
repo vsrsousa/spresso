@@ -486,8 +486,8 @@ class ResultsPostprocessingPage(QWidget):
                 # Example: "convergence has been achieved in  10 iterations"
                 if 'in' in line.lower() and 'iteration' in line.lower():
                     try:
-                        # Find the number between "in" and "iteration"
-                        match = re.search(r'in\s+(\d+)\s+iteration', line.lower())
+                        # Find the number between "in" and "iteration(s)"
+                        match = re.search(r'in\s+(\d+)\s+iterations?', line.lower())
                         if match:
                             iterations = int(match.group(1))
                             # Only update if we haven't counted SCF iterations yet
@@ -556,11 +556,11 @@ class ResultsPostprocessingPage(QWidget):
                             atom_symbol = parts[1]
                             # Store atom symbol - index is (atom_number - 1)
                             atom_num = int(parts[0])
-                            # Extend list if needed
+                            # Extend list if needed to accommodate this atom
                             while len(results['atom_species']) < atom_num:
                                 results['atom_species'].append('X')
-                            if atom_num <= len(results['atom_species']):
-                                results['atom_species'][atom_num - 1] = atom_symbol
+                            # Set the symbol (atom_num is 1-indexed, list is 0-indexed)
+                            results['atom_species'][atom_num - 1] = atom_symbol
                     except (ValueError, IndexError):
                         pass
             

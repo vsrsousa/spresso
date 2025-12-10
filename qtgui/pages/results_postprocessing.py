@@ -341,6 +341,7 @@ class ResultsPostprocessingPage(QWidget):
             if atoms.calc is None:
                 return None
             
+            # Access calc.results directly to avoid triggering new calculations
             calc_results = atoms.calc.results
             
             results = {
@@ -359,11 +360,11 @@ class ResultsPostprocessingPage(QWidget):
                 'is_magnetic': False
             }
             
-            # Extract energy (ASE provides it in eV)
+            # Extract energy from calc.results (in eV) - avoids triggering calculation
             if 'energy' in calc_results:
                 results['energy'] = calc_results['energy']
             
-            # Extract forces
+            # Extract forces from calc.results - avoids triggering calculation
             if 'forces' in calc_results and calc_results['forces'] is not None:
                 forces_array = calc_results['forces']
                 # Convert from eV/Angstrom to Ry/Bohr
@@ -378,7 +379,7 @@ class ResultsPostprocessingPage(QWidget):
                 total_f = sum([f[0]**2 + f[1]**2 + f[2]**2 for f in forces_array])**0.5
                 results['total_force'] = total_f * EVANG_TO_RYBOHR
             
-            # Extract stress
+            # Extract stress from calc.results - avoids triggering calculation
             if 'stress' in calc_results and calc_results['stress'] is not None:
                 stress_array = calc_results['stress']
                 # Convert from eV/Angstrom^3 to kbar
@@ -391,7 +392,7 @@ class ResultsPostprocessingPage(QWidget):
                 # Calculate pressure (negative trace / 3)
                 results['pressure'] = -(stress_array[0] + stress_array[1] + stress_array[2]) * EVANG3_TO_KBAR / 3.0
             
-            # Extract magnetic moments
+            # Extract magnetic moments from calc.results - avoids triggering calculation
             if 'magmoms' in calc_results and calc_results['magmoms'] is not None:
                 magmoms_array = calc_results['magmoms']
                 # Check if this is a magnetic calculation (any non-zero moment)
@@ -411,12 +412,12 @@ class ResultsPostprocessingPage(QWidget):
                 results['total_magnetization'] = sum(magmoms_array)
                 results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
             
-            # Extract Fermi energy
-            try:
-                if hasattr(atoms.calc, 'get_fermi_level'):
+            # Extract Fermi energy from calc if available
+            if hasattr(atoms.calc, 'get_fermi_level'):
+                try:
                     results['fermi_energy'] = atoms.calc.get_fermi_level()
-            except Exception:
-                pass
+                except Exception:
+                    pass
             
             return results
             

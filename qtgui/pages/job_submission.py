@@ -1144,21 +1144,36 @@ Files created in: <code>{full_path}</code>
             if prepared_atoms.calc is None or prepared_atoms.calc != calc:
                 prepared_atoms.calc = calc
             
-            # Check if calculation is required using xespresso/ASE's built-in verification
-            # This checks if parameters changed or if results already exist
-            if hasattr(calc, 'calculation_required') and not calc.calculation_required(prepared_atoms, ['energy']):
-                # Calculation not required - results already exist and parameters unchanged
-                self.run_status.setText("✅ Using existing calculation results")
-                self.run_status.setStyleSheet("color: green;")
-                
-                # Try to load existing energy
-                try:
-                    if 'energy' in calc.results:
-                        energy = calc.results['energy']
-                        self.energy_label.setText(f"Energy: {energy:.6f} eV")
-                        
-                        self.run_results.setHtml(
-                            f"""
+            # Try to load existing results from output file if they exist
+            # This allows ASE's built-in caching to work properly
+            # In newer ASE (3.23+), execute() is called by calculate(), but ASE checks
+            # if results are already present before calling execute()
+            try:
+                if hasattr(calc, 'read_results'):
+                    # Try to read existing results without raising error if file doesn't exist
+                    import os
+                    output_file = os.path.join(full_path, f"{prefix}.pwo")
+                    if os.path.exists(output_file):
+                        calc.read_results()
+            except Exception:
+                pass  # No existing results, will run calculation
+            
+            # Check if calculation is required
+            # ASE's get_property() checks if 'energy' in calc.results before calling calculate()
+            # If results exist and atoms haven't changed, it returns cached result
+            if 'energy' in calc.results:
+                # Results already loaded - check if atoms changed
+                system_changes = calc.check_state(prepared_atoms)
+                if not system_changes:
+                    # No changes - use existing results
+                    energy = calc.results['energy']
+                    
+                    self.run_status.setText("✅ Using existing calculation results")
+                    self.run_status.setStyleSheet("color: green;")
+                    self.energy_label.setText(f"Energy: {energy:.6f} eV")
+                    
+                    self.run_results.setHtml(
+                        f"""
 <b>✅ Calculation Already Completed</b>
 
 <b>Energy:</b> {energy:.6f} eV
@@ -1176,19 +1191,17 @@ with the same parameters. To force a new calculation, either:
 <li>Change the calculation label</li>
 </ul>
 """
-                        )
-                        
-                        QMessageBox.information(
-                            self,
-                            "Calculation Already Complete",
-                            f"This calculation has already been completed.\n\n"
-                            f"Energy: {energy:.6f} eV\n\n"
-                            f"xespresso's built-in verification detected that the calculation "
-                            f"with these parameters already exists. No resubmission needed."
-                        )
-                        return
-                except Exception:
-                    pass  # Fall through to run calculation if we can't read results
+                    )
+                    
+                    QMessageBox.information(
+                        self,
+                        "Calculation Already Complete",
+                        f"This calculation has already been completed.\n\n"
+                        f"Energy: {energy:.6f} eV\n\n"
+                        f"xespresso's built-in verification detected that the calculation "
+                        f"with these parameters already exists. No resubmission needed."
+                    )
+                    return
 
             # Update status for new calculation
             self.run_status.setText("⏳ Running calculation... (this may take a while)")

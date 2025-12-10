@@ -15,6 +15,18 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
+# Unit conversion constants
+# Energy: 1 Rydberg = 13.605693122994 eV (CODATA 2018)
+RY_TO_EV = 13.605693122994
+EV_TO_RY = 1.0 / RY_TO_EV
+
+# Force: 1 Ry/Bohr = 25.71104309541616 eV/Angstrom
+RYBOHR_TO_EVANG = 25.71104309541616
+EVANG_TO_RYBOHR = 1.0 / RYBOHR_TO_EVANG
+
+# Stress/Pressure: 1 eV/Angstrom^3 = 160.21766208 GPa = 1602.1766208 kbar
+EVANG3_TO_KBAR = 1602.1766208
+
 
 class ResultsPostprocessingPage(QWidget):
     """Results and post-processing page widget."""
@@ -340,39 +352,35 @@ class ResultsPostprocessingPage(QWidget):
             
             # Extract energy (in eV, convert to Ry)
             if 'energy' in calc_results:
-                results['energy'] = calc_results['energy'] / 13.605693122994  # eV to Ry
+                results['energy'] = calc_results['energy'] * EV_TO_RY
             
             # Extract forces
             if 'forces' in calc_results and calc_results['forces'] is not None:
                 forces_array = calc_results['forces']
-                # Convert from eV/Angstrom to Ry/au
-                # 1 Ry/au = 25.71104309541616 eV/Angstrom
-                conversion = 25.71104309541616
+                # Convert from eV/Angstrom to Ry/Bohr
                 for i, force in enumerate(forces_array):
                     results['forces'].append({
                         'atom': i + 1,
-                        'fx': force[0] / conversion,
-                        'fy': force[1] / conversion,
-                        'fz': force[2] / conversion
+                        'fx': force[0] * EVANG_TO_RYBOHR,
+                        'fy': force[1] * EVANG_TO_RYBOHR,
+                        'fz': force[2] * EVANG_TO_RYBOHR
                     })
                 # Calculate total force magnitude
                 total_f = sum([f[0]**2 + f[1]**2 + f[2]**2 for f in forces_array])**0.5
-                results['total_force'] = total_f / conversion
+                results['total_force'] = total_f * EVANG_TO_RYBOHR
             
             # Extract stress
             if 'stress' in calc_results and calc_results['stress'] is not None:
                 stress_array = calc_results['stress']
                 # Convert from eV/Angstrom^3 to kbar
-                # 1 eV/Angstrom^3 = 160.21766208 GPa = 1602.1766208 kbar
-                conversion = 1602.1766208
                 # Stress is in Voigt notation: [xx, yy, zz, yz, xz, xy]
                 results['stress_tensor'] = [
-                    [stress_array[0] * conversion, stress_array[5] * conversion, stress_array[4] * conversion],
-                    [stress_array[5] * conversion, stress_array[1] * conversion, stress_array[3] * conversion],
-                    [stress_array[4] * conversion, stress_array[3] * conversion, stress_array[2] * conversion]
+                    [stress_array[0] * EVANG3_TO_KBAR, stress_array[5] * EVANG3_TO_KBAR, stress_array[4] * EVANG3_TO_KBAR],
+                    [stress_array[5] * EVANG3_TO_KBAR, stress_array[1] * EVANG3_TO_KBAR, stress_array[3] * EVANG3_TO_KBAR],
+                    [stress_array[4] * EVANG3_TO_KBAR, stress_array[3] * EVANG3_TO_KBAR, stress_array[2] * EVANG3_TO_KBAR]
                 ]
                 # Calculate pressure (negative trace / 3)
-                results['pressure'] = -(stress_array[0] + stress_array[1] + stress_array[2]) * conversion / 3.0
+                results['pressure'] = -(stress_array[0] + stress_array[1] + stress_array[2]) * EVANG3_TO_KBAR / 3.0
             
             # Extract magnetic moments
             if 'magmoms' in calc_results and calc_results['magmoms'] is not None:
@@ -394,7 +402,7 @@ class ResultsPostprocessingPage(QWidget):
             try:
                 if hasattr(atoms.calc, 'get_fermi_level'):
                     results['fermi_energy'] = atoms.calc.get_fermi_level()
-            except:
+            except Exception:
                 pass
             
             return results

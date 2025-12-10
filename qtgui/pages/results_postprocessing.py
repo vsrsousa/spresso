@@ -285,7 +285,9 @@ class ResultsPostprocessingPage(QWidget):
             if results.get('is_magnetic') and results.get('magnetic_moments'):
                 results_text.append("\nMagnetic Moments per Atom:")
                 for atom_info in results['magnetic_moments']:
-                    results_text.append(f"  Atom {atom_info['atom']}: charge={atom_info['charge']:.4f}, magn={atom_info['magn']:.4f}")
+                    # Use atom symbol if available, otherwise just the number
+                    atom_label = f"{atom_info.get('symbol', 'X')}{atom_info['atom']}" if 'symbol' in atom_info else f"Atom {atom_info['atom']}"
+                    results_text.append(f"  {atom_label}: charge={atom_info['charge']:.4f}, magn={atom_info['magn']:.4f}")
             
             # Show forces per atom if available
             if results.get('forces'):
@@ -388,13 +390,16 @@ class ResultsPostprocessingPage(QWidget):
                 magmoms_array = calc_results['magmoms']
                 if any(abs(m) > 1e-6 for m in magmoms_array):
                     results['is_magnetic'] = True
+                    # Get atom symbols for labeling
+                    symbols = atoms.get_chemical_symbols()
+                    # Show all atoms' magnetic moments, regardless of magnitude
                     for i, magmom in enumerate(magmoms_array):
-                        if abs(magmom) > 1e-6:
-                            results['magnetic_moments'].append({
-                                'atom': i + 1,
-                                'charge': 0.0,  # Not available from ASE
-                                'magn': magmom
-                            })
+                        results['magnetic_moments'].append({
+                            'atom': i + 1,
+                            'symbol': symbols[i] if i < len(symbols) else 'X',
+                            'charge': 0.0,  # Not available from ASE
+                            'magn': magmom
+                        })
                     # Calculate total magnetization
                     results['total_magnetization'] = sum(magmoms_array)
                     results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
@@ -434,13 +439,15 @@ class ResultsPostprocessingPage(QWidget):
             'forces': [],
             'pressure': None,
             'stress_tensor': None,
-            'is_magnetic': False
+            'is_magnetic': False,
+            'atom_species': []  # List to store atom symbols in order
         }
         
         lines = content.split('\n')
         prev_energy = None
         in_forces_section = False
         in_stress_section = False
+        in_atomic_positions = False
         
         for i, line in enumerate(lines):
             # Total energy with '!' indicates CONVERGED calculation
@@ -531,7 +538,34 @@ class ResultsPostprocessingPage(QWidget):
                 except (ValueError, IndexError):
                     pass
             
+            # Parse atomic positions to get atom species (symbols)
+            # Look for "Cartesian axes" section or "site n.     atom" lines
+            if 'cartesian axes' in line.lower() or ('site n.' in line.lower() and 'atom' in line.lower()):
+                in_atomic_positions = True
+                continue
+            
+            if in_atomic_positions:
+                # Parse lines like: "     1           Fe  tau(   1) = (   0.0000000   0.0000000   0.0000000  )"
+                # or: "     1      Fe   0.000000000   0.000000000   0.000000000"
+                if line.strip() == '' or 'End' in line or 'Forces' in line:
+                    in_atomic_positions = False
+                else:
+                    try:
+                        parts = line.split()
+                        if len(parts) >= 2 and parts[0].isdigit():
+                            atom_symbol = parts[1]
+                            # Store atom symbol - index is (atom_number - 1)
+                            atom_num = int(parts[0])
+                            # Extend list if needed
+                            while len(results['atom_species']) < atom_num:
+                                results['atom_species'].append('X')
+                            if atom_num <= len(results['atom_species']):
+                                results['atom_species'][atom_num - 1] = atom_symbol
+                    except (ValueError, IndexError):
+                        pass
+            
             # Magnetic moment per site
+            # Show ALL magnetic moments regardless of value
             if 'atom:' in line.lower() and 'charge:' in line.lower() and 'magn:' in line.lower():
                 results['is_magnetic'] = True
                 try:
@@ -549,9 +583,13 @@ class ResultsPostprocessingPage(QWidget):
                         elif part.lower() == 'magn:' and j + 1 < len(parts):
                             magn = float(parts[j + 1])
                     
+                    # Include ALL atoms with magnetic moments, no filtering by magnitude
                     if atom_idx is not None and charge is not None and magn is not None:
+                        # Get atom symbol if available
+                        symbol = results['atom_species'][atom_idx - 1] if atom_idx <= len(results['atom_species']) else 'X'
                         results['magnetic_moments'].append({
                             'atom': atom_idx,
+                            'symbol': symbol,
                             'charge': charge,
                             'magn': magn
                         })

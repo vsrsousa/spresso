@@ -203,14 +203,9 @@ class JobMonitorDialog(QDialog):
         self.clear_completed_btn.clicked.connect(self._clear_completed_jobs)
         button_layout.addWidget(self.clear_completed_btn)
         
-        self.close_connections_btn = QPushButton("🔌 Close SSH Sessions")
-        self.close_connections_btn.setToolTip("Close all remote SSH connections")
-        self.close_connections_btn.clicked.connect(self._close_remote_sessions)
-        button_layout.addWidget(self.close_connections_btn)
-        
         button_layout.addStretch()
         
-        self.close_btn = QPushButton("Close Window")
+        self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.close)
         button_layout.addWidget(self.close_btn)
         
@@ -582,24 +577,4 @@ class JobMonitorDialog(QDialog):
                 self,
                 "Jobs Cleared",
                 f"Removed {removed_count} completed/failed job(s)"
-            )
-    
-    def _close_remote_sessions(self):
-        """Close all remote SSH connections."""
-        try:
-            from xespresso.schedulers.remote_mixin import RemoteExecutionMixin
-            
-            # Close all cached remote connections
-            RemoteExecutionMixin.close_all_connections()
-            
-            QMessageBox.information(
-                self,
-                "Sessions Closed",
-                "All remote SSH connections have been closed."
-            )
-        except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Error",
-                f"Failed to close remote sessions:\n{str(e)}"
             )

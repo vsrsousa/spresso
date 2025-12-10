@@ -360,7 +360,8 @@ class ResultsPostprocessingPage(QWidget):
                 'is_magnetic': False
             }
             
-            # Extract energy from calc.results (in eV) - avoids triggering calculation
+            # Extract energy from calc.results - avoids triggering calculation
+            # Note: ASE stores energy in eV (no conversion needed)
             if 'energy' in calc_results:
                 results['energy'] = calc_results['energy']
             
@@ -412,8 +413,11 @@ class ResultsPostprocessingPage(QWidget):
                 results['total_magnetization'] = sum(magmoms_array)
                 results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
             
-            # Extract Fermi energy from calc if available
-            if hasattr(atoms.calc, 'get_fermi_level'):
+            # Extract Fermi energy from calc.results - avoids triggering calculation
+            # Note: Fermi energy not always in calc.results, so fallback to method if needed
+            if 'fermi_level' in calc_results:
+                results['fermi_energy'] = calc_results['fermi_level']
+            elif hasattr(atoms.calc, 'get_fermi_level'):
                 try:
                     results['fermi_energy'] = atoms.calc.get_fermi_level()
                 except Exception:
@@ -473,9 +477,8 @@ class ResultsPostprocessingPage(QWidget):
                     parts = line.split('=')
                     if len(parts) > 1:
                         energy_str = parts[1].replace('Ry', '').strip()
-                        energy_ry = float(energy_str)
                         # Convert from Ry to eV
-                        energy = energy_ry * RY_TO_EV
+                        energy = float(energy_str) * RY_TO_EV
                         delta = energy - prev_energy if prev_energy else 0
                         results['scf_history'].append((energy, delta))
                         prev_energy = energy

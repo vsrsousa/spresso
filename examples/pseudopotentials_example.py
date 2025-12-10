@@ -205,16 +205,14 @@ print("Example 7: Using the GUI for configuration")
 print("=" * 70)
 
 print("""
-For a more user-friendly approach, use the GUI:
+For a more user-friendly approach, use the Qt GUI:
 
-1. Start the xespresso GUI:
-   $ streamlit run -m xespresso.gui
+1. Start the xespresso Qt GUI:
+   $ python -m qtgui
 
-2. Check "Show Configuration" in the sidebar
+2. Navigate to the Pseudopotentials Configuration page
 
-3. Navigate to "🧪 Pseudopotentials Configuration"
-
-4. Fill in the form:
+3. Fill in the form:
    - Configuration Name: e.g., "SSSP_efficiency"
    - Pseudopotentials Directory: path to .UPF files
    - Functional: e.g., "PBE"

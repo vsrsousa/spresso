@@ -439,15 +439,13 @@ class ResultsPostprocessingPage(QWidget):
             'forces': [],
             'pressure': None,
             'stress_tensor': None,
-            'is_magnetic': False,
-            'atom_species': []  # List to store atom symbols in order
+            'is_magnetic': False
         }
         
         lines = content.split('\n')
         prev_energy = None
         in_forces_section = False
         in_stress_section = False
-        in_atomic_positions = False
         
         for i, line in enumerate(lines):
             # Total energy with '!' indicates CONVERGED calculation
@@ -538,34 +536,9 @@ class ResultsPostprocessingPage(QWidget):
                 except (ValueError, IndexError):
                     pass
             
-            # Parse atomic positions to get atom species (symbols)
-            # Look for "Cartesian axes" section or "site n.     atom" lines
-            if 'cartesian axes' in line.lower() or ('site n.' in line.lower() and 'atom' in line.lower()):
-                in_atomic_positions = True
-                continue
-            
-            if in_atomic_positions:
-                # Parse lines like: "     1           Fe  tau(   1) = (   0.0000000   0.0000000   0.0000000  )"
-                # or: "     1      Fe   0.000000000   0.000000000   0.000000000"
-                if line.strip() == '' or 'End' in line or 'Forces' in line:
-                    in_atomic_positions = False
-                else:
-                    try:
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[0].isdigit():
-                            atom_symbol = parts[1]
-                            # Store atom symbol - index is (atom_number - 1)
-                            atom_num = int(parts[0])
-                            # Extend list if needed to accommodate this atom
-                            while len(results['atom_species']) < atom_num:
-                                results['atom_species'].append('X')
-                            # Set the symbol (atom_num is 1-indexed, list is 0-indexed)
-                            results['atom_species'][atom_num - 1] = atom_symbol
-                    except (ValueError, IndexError):
-                        pass
-            
             # Magnetic moment per site
             # Show ALL magnetic moments regardless of value
+            # Note: Atom symbols will be added by ASE parsing; manual parsing doesn't extract symbols
             if 'atom:' in line.lower() and 'charge:' in line.lower() and 'magn:' in line.lower():
                 results['is_magnetic'] = True
                 try:
@@ -585,13 +558,11 @@ class ResultsPostprocessingPage(QWidget):
                     
                     # Include ALL atoms with magnetic moments, no filtering by magnitude
                     if atom_idx is not None and charge is not None and magn is not None:
-                        # Get atom symbol if available
-                        symbol = results['atom_species'][atom_idx - 1] if atom_idx <= len(results['atom_species']) else 'X'
                         results['magnetic_moments'].append({
                             'atom': atom_idx,
-                            'symbol': symbol,
                             'charge': charge,
                             'magn': magn
+                            # 'symbol' will be added when merging with ASE results
                         })
                 except (ValueError, IndexError):
                     pass

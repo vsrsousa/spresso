@@ -1078,17 +1078,6 @@ Files created in: <code>{full_path}</code>
         Uses the pre-created Espresso calculator and prepared_atoms from Calculation Setup page.
         Simply updates the label and calls atoms.get_potential_energy().
         """
-        # Prevent concurrent submissions
-        if self._calculation_running:
-            QMessageBox.warning(
-                self,
-                "Calculation In Progress",
-                "A calculation is already running.\n\n"
-                "Please wait for the current calculation to complete before starting a new one.\n\n"
-                "For remote non-blocking calculations, check the Job Monitor to see running jobs."
-            )
-            return
-        
         atoms = self.session_state.get("current_structure")
 
         if atoms is None:
@@ -1133,6 +1122,17 @@ Files created in: <code>{full_path}</code>
         if not is_valid:
             QMessageBox.critical(
                 self, "Error", f"Invalid calculation label: {error_msg}"
+            )
+            return
+        
+        # Prevent concurrent submissions (check after all validation)
+        if self._calculation_running:
+            QMessageBox.warning(
+                self,
+                "Calculation In Progress",
+                "A calculation is already running.\n\n"
+                "Please wait for the current calculation to complete before starting a new one.\n\n"
+                "For remote non-blocking calculations, check the Job Monitor to see running jobs."
             )
             return
 

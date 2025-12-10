@@ -1383,9 +1383,9 @@ and check on your jobs later.
         """Open or show the Job Monitor dialog."""
         if self.job_monitor is None:
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
-            # Get working directory from session state
-            working_dir = self.session_state.get("working_directory", os.path.expanduser("~"))
-            self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
+            # Use ~/.xespresso for consistency with other configuration files
+            xespresso_dir = os.path.expanduser("~/.xespresso")
+            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
         
         # Show and raise the dialog
         self.job_monitor.show()
@@ -1397,8 +1397,9 @@ and check on your jobs later.
         # Ensure job monitor is created
         if self.job_monitor is None:
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
-            working_dir = self.session_state.get("working_directory", os.path.expanduser("~"))
-            self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
+            # Use ~/.xespresso for consistency with other configuration files
+            xespresso_dir = os.path.expanduser("~/.xespresso")
+            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
         
         # Add the job
         self.job_monitor.add_job(job_info)

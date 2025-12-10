@@ -262,7 +262,11 @@ class ResultsPostprocessingPage(QWidget):
             self.status_text.setStyleSheet("color: red;")
     
     def _parse_output(self, content):
-        """Parse QE output file content."""
+        """Parse QE output file content.
+        
+        The exclamation point in '!    total energy' is the definitive indicator
+        that an SCF calculation has converged in Quantum ESPRESSO.
+        """
         results = {
             'energy': None,
             'converged': False,
@@ -275,17 +279,20 @@ class ResultsPostprocessingPage(QWidget):
         prev_energy = None
         
         for line in lines:
-            # Total energy
+            # Total energy with '!' indicates CONVERGED calculation
+            # This is the definitive convergence indicator in QE output
             if '!' in line and 'total energy' in line.lower():
                 try:
                     parts = line.split('=')
                     if len(parts) > 1:
                         energy_str = parts[1].replace('Ry', '').strip()
                         results['energy'] = float(energy_str)
+                        # The presence of '!' in the total energy line means converged
+                        results['converged'] = True
                 except:
                     pass
             
-            # SCF iteration
+            # SCF iteration energies (without '!')
             if 'total energy' in line.lower() and '!' not in line:
                 try:
                     parts = line.split('=')
@@ -299,8 +306,9 @@ class ResultsPostprocessingPage(QWidget):
                 except:
                     pass
             
-            # Convergence
-            if 'convergence achieved' in line.lower():
+            # Additional convergence indicators (backup checks)
+            if 'convergence achieved' in line.lower() or \
+               'convergence has been achieved' in line.lower():
                 results['converged'] = True
             
             # Total force
@@ -375,5 +383,17 @@ class ResultsPostprocessingPage(QWidget):
         )
     
     def refresh(self):
-        """Refresh the page."""
-        pass
+        """Refresh the page and auto-load output directory from session."""
+        # Auto-load output directory from working directory and calculation label
+        working_dir = self.session_state.get('working_directory', os.path.expanduser("~"))
+        config = self.session_state.get('workflow_config', {})
+        label = config.get('label', '')
+        
+        if working_dir and label:
+            # Construct the expected output directory
+            output_dir = os.path.join(working_dir, label)
+            if os.path.exists(output_dir):
+                self.output_dir_edit.setText(output_dir)
+            else:
+                # If full path doesn't exist, just set working directory
+                self.output_dir_edit.setText(working_dir)

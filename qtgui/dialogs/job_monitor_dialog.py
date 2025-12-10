@@ -282,21 +282,25 @@ class JobMonitorDialog(QDialog):
             job_id = job.get('job_id', 'N/A')
             self.table.setItem(row, 1, QTableWidgetItem(str(job_id)))
             
-            # Status with color coding - using good contrast colors
+            # Status with color coding - simple scheme with good contrast
             status = job.get('status', 'unknown')
             status_item = QTableWidgetItem(status.upper())
             if status == 'completed':
-                status_item.setBackground(QColor(220, 255, 220))  # Light green
-                status_item.setForeground(QColor(0, 100, 0))  # Dark green text
+                # Dark green background with white text
+                status_item.setBackground(QColor(34, 139, 34))  # Forest green
+                status_item.setForeground(QColor(255, 255, 255))  # White
             elif status == 'failed':
-                status_item.setBackground(QColor(255, 220, 220))  # Light red
-                status_item.setForeground(QColor(150, 0, 0))  # Dark red text
+                # Dark red background with white text
+                status_item.setBackground(QColor(178, 34, 34))  # Firebrick red
+                status_item.setForeground(QColor(255, 255, 255))  # White
             elif status == 'running':
-                status_item.setBackground(QColor(220, 240, 255))  # Light blue
-                status_item.setForeground(QColor(0, 60, 120))  # Dark blue text
+                # Dark blue background with white text
+                status_item.setBackground(QColor(30, 144, 255))  # Dodger blue
+                status_item.setForeground(QColor(255, 255, 255))  # White
             elif status == 'pending':
-                status_item.setBackground(QColor(255, 255, 220))  # Light yellow
-                status_item.setForeground(QColor(120, 100, 0))  # Dark yellow/brown text
+                # Dark orange background with white text
+                status_item.setBackground(QColor(255, 140, 0))  # Dark orange
+                status_item.setForeground(QColor(255, 255, 255))  # White
             self.table.setItem(row, 2, status_item)
             
             # Scheduler

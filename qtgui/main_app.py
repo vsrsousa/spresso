@@ -1406,17 +1406,6 @@ Version: 1.2.0<br>
         self._job_monitor.raise_()
         self._job_monitor.activateWindow()
     
-</ul></p>
-<p><b>New in 1.2.0:</b>
-<ul>
-<li>Migrated from PyQt5 to PySide6 for faster startup</li>
-<li>Improved session management with save/load</li>
-<li>Multiple session support</li>
-</ul></p>
-<p><a href="https://github.com/vsrsousa/spresso">GitHub Repository</a></p>
-"""
-        )
-    
     def closeEvent(self, event):
         """Handle window close event."""
         # Save session before closing

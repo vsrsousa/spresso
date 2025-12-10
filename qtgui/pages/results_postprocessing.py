@@ -104,8 +104,8 @@ class ResultsPostprocessingPage(QWidget):
         convergence_layout = QVBoxLayout(convergence_group)
         
         self.convergence_table = QTableWidget()
-        self.convergence_table.setColumnCount(4)
-        self.convergence_table.setHorizontalHeaderLabels(["Iteration", "Energy (Ry)", "Delta E", "Convergence"])
+        self.convergence_table.setColumnCount(3)
+        self.convergence_table.setHorizontalHeaderLabels(["Iteration", "Energy (Ry)", "Delta E"])
         self.convergence_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         convergence_layout.addWidget(self.convergence_table)
         
@@ -239,8 +239,22 @@ class ResultsPostprocessingPage(QWidget):
             results_text.append(f"Converged: {results.get('converged', 'Unknown')}")
             results_text.append(f"SCF Iterations: {results.get('iterations', 'N/A')}")
             
+            if results.get('fermi_energy') is not None:
+                results_text.append(f"Fermi Energy: {results['fermi_energy']:.4f} eV")
+            
+            if results.get('total_magnetization') is not None:
+                results_text.append(f"Total Magnetization: {results['total_magnetization']:.4f} Bohr mag/cell")
+            
+            if results.get('absolute_magnetization') is not None:
+                results_text.append(f"Absolute Magnetization: {results['absolute_magnetization']:.4f} Bohr mag/cell")
+            
             if results.get('total_force'):
                 results_text.append(f"Total Force: {results['total_force']} Ry/au")
+            
+            if results.get('magnetic_moments'):
+                results_text.append("\nMagnetic Moments per Atom:")
+                for atom_info in results['magnetic_moments']:
+                    results_text.append(f"  Atom {atom_info['atom']}: charge={atom_info['charge']:.4f}, magn={atom_info['magn']:.4f}")
             
             self.results_text.setText("\n".join(results_text))
             
@@ -252,7 +266,6 @@ class ResultsPostprocessingPage(QWidget):
                     self.convergence_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
                     self.convergence_table.setItem(i, 1, QTableWidgetItem(f"{energy:.8f}"))
                     self.convergence_table.setItem(i, 2, QTableWidgetItem(f"{delta:.2e}"))
-                    self.convergence_table.setItem(i, 3, QTableWidgetItem("✓" if abs(delta) < 1e-6 else ""))
             
             self.status_text.setText(f"✅ Results loaded from: {output_path}")
             self.status_text.setStyleSheet("color: green;")
@@ -272,13 +285,17 @@ class ResultsPostprocessingPage(QWidget):
             'converged': False,
             'iterations': 0,
             'scf_history': [],
-            'total_force': None
+            'total_force': None,
+            'fermi_energy': None,
+            'total_magnetization': None,
+            'absolute_magnetization': None,
+            'magnetic_moments': []
         }
         
         lines = content.split('\n')
         prev_energy = None
         
-        for line in lines:
+        for i, line in enumerate(lines):
             # Total energy with '!' indicates CONVERGED calculation
             # This is the definitive convergence indicator in QE output
             if '!' in line and 'total energy' in line.lower():
@@ -318,6 +335,62 @@ class ResultsPostprocessingPage(QWidget):
                     if len(parts) > 1:
                         force_str = parts[1].strip()
                         results['total_force'] = float(force_str)
+                except:
+                    pass
+            
+            # Fermi energy
+            if 'the Fermi energy is' in line.lower():
+                try:
+                    parts = line.split('is')
+                    if len(parts) > 1:
+                        fermi_str = parts[1].replace('ev', '').replace('eV', '').strip()
+                        results['fermi_energy'] = float(fermi_str)
+                except:
+                    pass
+            
+            # Total magnetization
+            if 'total magnetization' in line.lower() and '=' in line:
+                try:
+                    parts = line.split('=')
+                    if len(parts) > 1:
+                        mag_str = parts[1].split('Bohr')[0].strip()
+                        results['total_magnetization'] = float(mag_str)
+                except:
+                    pass
+            
+            # Absolute magnetization
+            if 'absolute magnetization' in line.lower() and '=' in line:
+                try:
+                    parts = line.split('=')
+                    if len(parts) > 1:
+                        mag_str = parts[1].split('Bohr')[0].strip()
+                        results['absolute_magnetization'] = float(mag_str)
+                except:
+                    pass
+            
+            # Magnetic moment per site
+            if 'atom:' in line.lower() and 'charge:' in line.lower() and 'magn:' in line.lower():
+                try:
+                    # Parse line like: "     atom:    1    charge:   14.5678    magn:    1.9876    constr:    0.0000"
+                    parts = line.split()
+                    atom_idx = None
+                    charge = None
+                    magn = None
+                    
+                    for j, part in enumerate(parts):
+                        if part.lower() == 'atom:' and j + 1 < len(parts):
+                            atom_idx = int(parts[j + 1])
+                        elif part.lower() == 'charge:' and j + 1 < len(parts):
+                            charge = float(parts[j + 1])
+                        elif part.lower() == 'magn:' and j + 1 < len(parts):
+                            magn = float(parts[j + 1])
+                    
+                    if atom_idx is not None and charge is not None and magn is not None:
+                        results['magnetic_moments'].append({
+                            'atom': atom_idx,
+                            'charge': charge,
+                            'magn': magn
+                        })
                 except:
                     pass
         

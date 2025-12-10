@@ -124,11 +124,11 @@ class JobMonitorDialog(QDialog):
         Initialize the job monitor dialog.
         
         Args:
-            working_dir: Directory where jobs file is stored (defaults to ~/.xespresso)
+            working_dir: xespresso configuration directory where jobs file is stored (defaults to ~/.xespresso)
             parent: Parent widget (main window)
         """
         super().__init__(parent)
-        # Default to ~/.xespresso for consistency with other configuration files
+        # Default to ~/.xespresso - the xespresso configuration directory
         self.working_dir = working_dir or os.path.expanduser("~/.xespresso")
         # Ensure the directory exists
         os.makedirs(self.working_dir, exist_ok=True)

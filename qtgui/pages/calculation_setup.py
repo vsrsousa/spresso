@@ -350,6 +350,29 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         scroll_layout.addWidget(self.hubbard_group)
         
+        # Coordinate System Configuration
+        coords_group = QGroupBox("📐 Coordinate System")
+        coords_layout = QVBoxLayout(coords_group)
+        
+        coords_info = QLabel("""
+<p><b>Atomic Positions Coordinate System:</b></p>
+<p>• <b>Cartesian (angstrom):</b> Absolute positions in Ångström units</p>
+<p>• <b>Crystal:</b> Relative coordinates with respect to the primitive lattice vectors</p>
+""")
+        coords_info.setTextFormat(Qt.RichText)
+        coords_info.setWordWrap(True)
+        coords_layout.addWidget(coords_info)
+        
+        self.crystal_coords_check = QCheckBox("Use crystal coordinates for atomic positions")
+        self.crystal_coords_check.setToolTip(
+            "When checked, atomic positions are specified in crystal coordinates\n"
+            "(relative to primitive lattice vectors as defined in CELL_PARAMETERS\n"
+            "or via ibrav + celldm/a,b,c variables)"
+        )
+        coords_layout.addWidget(self.crystal_coords_check)
+        
+        scroll_layout.addWidget(coords_group)
+        
         # Resources Configuration
         resources_group = QGroupBox("⚙️ Resources Configuration")
         resources_layout = QVBoxLayout(resources_group)
@@ -886,6 +909,9 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             config['enable_hubbard'] = False
             config['hubbard_u'] = {}
         
+        # Coordinate system
+        config['crystal_coordinates'] = self.crystal_coords_check.isChecked()
+        
         return config
     
     def _prepare_calculation(self):
@@ -1126,6 +1152,10 @@ Go to <b>Job Submission</b> page to use these objects.
                 self.time_edit.setText(resources['time'])
             if 'partition' in resources:
                 self.partition_edit.setText(resources['partition'])
+        
+        # Restore coordinate system
+        if 'crystal_coordinates' in config:
+            self.crystal_coords_check.setChecked(config['crystal_coordinates'])
         
         # Restore pseudopotentials
         if config.get('pseudopotentials'):

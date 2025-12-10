@@ -142,6 +142,28 @@ class Espresso(FileIOCalculator):
 
         # self.discard_results_on_any_change = False
 
+    def calculate(self, atoms=None, properties=['energy'], system_changes=None):
+        """
+        Calculate properties for the given atoms.
+        
+        This method overrides FileIOCalculator.calculate() for compatibility
+        with both older (ASE 3.22.x) and newer (ASE 3.23+) versions.
+        
+        For older ASE versions, this ensures proper integration with xespresso's
+        scheduler-based execution flow via the execute() method.
+        
+        Args:
+            atoms: Atoms object to calculate
+            properties: List of properties to calculate
+            system_changes: List of what has changed since last calculation
+        """
+        # Call parent's calculate which handles:
+        # - Checking if calculation is needed
+        # - Calling write_input()
+        # - Calling execute() (which we override)
+        # - Calling read_results()
+        FileIOCalculator.calculate(self, atoms, properties, system_changes)
+
     def execute(self):
         """
         Executes the job using the scheduler.

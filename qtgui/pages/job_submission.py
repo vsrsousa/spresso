@@ -1193,6 +1193,9 @@ This is normal for local calculations.
                 # Get the job/process ID that was stored
                 job_id = getattr(calc, 'last_job_id', 'Unknown')
                 
+                # Get the actual remote path used (with hash suffix)
+                remote_path = getattr(calc, 'last_remote_path', calc.queue.get('remote_dir', ''))
+                
                 # Determine scheduler type for display
                 scheduler = calc.queue.get("scheduler", "unknown")
                 
@@ -1203,7 +1206,7 @@ This is normal for local calculations.
                     'scheduler': scheduler,
                     'remote_host': calc.queue.get('remote_host', 'N/A'),
                     'remote_user': calc.queue.get('remote_user', 'N/A'),
-                    'remote_dir': calc.queue.get('remote_dir', ''),
+                    'remote_dir': remote_path,
                     'local_dir': full_path.rsplit('/' + label, 1)[0] if label in full_path else full_path,
                     'queue': calc.queue,
                     'status': 'submitted'

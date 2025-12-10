@@ -136,6 +136,13 @@ class SessionState:
     def get(self, key, default=None):
         return self._state.get(key, default)
     
+    def clear_state(self):
+        """Clear all state and reinitialize defaults."""
+        self._state = {}
+        self._current_session_id = None
+        self._initialize_defaults()
+        self._notify_listeners()
+    
     def keys(self):
         """Return all keys in the state."""
         return self._state.keys()
@@ -832,6 +839,16 @@ class MainWindow(QMainWindow):
         
         session_layout.addLayout(session_btn_layout2)
         
+        # Session buttons - row 3: Close
+        session_btn_layout3 = QHBoxLayout()
+        
+        close_session_btn = QPushButton("Close")
+        close_session_btn.setToolTip("Close current session and start fresh")
+        close_session_btn.clicked.connect(self._close_session)
+        session_btn_layout3.addWidget(close_session_btn)
+        
+        session_layout.addLayout(session_btn_layout3)
+        
         layout.addWidget(session_group)
         
         # Session combo starts empty - don't populate until user creates/loads session
@@ -1198,6 +1215,35 @@ Version: 1.2.0<br>
             self.statusbar.showMessage("Session saved")
         finally:
             self._updating = False
+    
+    def _close_session(self):
+        """Close the current session and clear all data."""
+        reply = QMessageBox.question(
+            self,
+            "Close Session",
+            "Close the current session and clear all data?\n\n"
+            "Make sure to save your session first if you want to keep it.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            # Clear session state
+            self.session_state.clear_state()
+            
+            # Refresh all pages to show empty state
+            for page in self.pages:
+                if hasattr(page, 'refresh'):
+                    try:
+                        page.refresh()
+                    except Exception as e:
+                        print(f"Warning: Could not refresh page: {e}")
+            
+            # Update UI
+            self._update_session_name_label()
+            self.workdir_label.setText(self.session_state.get('working_directory', '~'))
+            
+            self.statusbar.showMessage("Session closed")
     
     def _load_session_dialog(self):
         """Open a dialog to load a saved session from the sessions directory.

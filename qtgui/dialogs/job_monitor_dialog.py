@@ -16,8 +16,89 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QLabel, QMessageBox, QHeaderView, QWidget,
     QTextEdit
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QThread
 from PySide6.QtGui import QColor
+
+
+class JobStatusWorker(QThread):
+    """
+    Worker thread for checking job status without blocking the UI.
+    
+    Signals:
+        status_updated: Emitted when status check completes (row, new_status, error_msg)
+    """
+    status_updated = Signal(int, str, str)  # row, status, error_message
+    
+    def __init__(self, row, job, parent=None):
+        super().__init__(parent)
+        self.row = row
+        self.job = job
+    
+    def run(self):
+        """Check job status in background thread."""
+        job_id = self.job.get('job_id')
+        scheduler = self.job.get('scheduler')
+        queue = self.job.get('queue', {})
+        
+        # Skip if job_id is unknown or None
+        if not job_id or job_id == 'Unknown':
+            self.status_updated.emit(self.row, 'unknown', 'Job ID is unknown')
+            return
+        
+        try:
+            # Import here to avoid circular dependencies
+            from xespresso.schedulers.remote_connection import RemoteConnection
+            
+            # Create remote connection
+            remote = RemoteConnection(queue)
+            
+            # Check status based on scheduler type
+            if scheduler == 'slurm':
+                # Check SLURM job status
+                cmd = f"squeue -j {job_id} -h -o '%T' 2>/dev/null || echo 'NOT_FOUND'"
+                result = remote.run_command(cmd)
+                status_output = result.strip()
+                
+                if status_output == 'NOT_FOUND' or not status_output:
+                    # Job not in queue, check if completed
+                    cmd_history = f"sacct -j {job_id} -n -o State -X 2>/dev/null | head -1"
+                    result_history = remote.run_command(cmd_history)
+                    history_status = result_history.strip()
+                    
+                    if 'COMPLETED' in history_status:
+                        new_status = 'completed'
+                    elif 'FAILED' in history_status or 'CANCELLED' in history_status:
+                        new_status = 'failed'
+                    else:
+                        new_status = 'unknown'
+                elif 'RUNNING' in status_output:
+                    new_status = 'running'
+                elif 'PENDING' in status_output:
+                    new_status = 'pending'
+                elif 'COMPLETED' in status_output:
+                    new_status = 'completed'
+                else:
+                    new_status = 'unknown'
+                    
+            elif scheduler == 'direct':
+                # Check process status using PID
+                pid = job_id.replace('PID:', '') if 'PID:' in str(job_id) else job_id
+                cmd = f"ps -p {pid} -o state= 2>/dev/null || echo 'NOT_FOUND'"
+                result = remote.run_command(cmd)
+                
+                if 'NOT_FOUND' in result or not result.strip():
+                    # Process not found, assume completed
+                    new_status = 'completed'
+                else:
+                    new_status = 'running'
+            else:
+                new_status = 'unknown'
+            
+            remote.disconnect()
+            self.status_updated.emit(self.row, new_status, '')
+            
+        except Exception as e:
+            self.status_updated.emit(self.row, '', str(e))
 
 
 class JobMonitorDialog(QDialog):
@@ -50,6 +131,9 @@ class JobMonitorDialog(QDialog):
         self.working_dir = working_dir or os.getcwd()
         self.jobs_file = os.path.join(self.working_dir, ".spresso_jobs.json")
         self.jobs = self._load_jobs()
+        
+        # Track active worker threads
+        self.active_workers = []
         
         self.setWindowTitle("🔍 Job Monitor")
         self.setMinimumSize(1000, 600)
@@ -268,102 +352,107 @@ class JobMonitorDialog(QDialog):
         return widget
     
     def _check_job_status(self, row):
-        """Check status of a specific job."""
+        """Check status of a specific job (non-blocking)."""
         if row >= len(self.jobs):
             return
         
         job = self.jobs[row]
         job_id = job.get('job_id')
-        scheduler = job.get('scheduler')
-        queue = job.get('queue', {})
         
-        try:
-            # Import here to avoid circular dependencies
-            from xespresso.schedulers.remote_connection import RemoteConnection
-            
-            # Create remote connection
-            remote = RemoteConnection(queue)
-            
-            # Check status based on scheduler type
-            if scheduler == 'slurm':
-                # Check SLURM job status
-                cmd = f"squeue -j {job_id} -h -o '%T' 2>/dev/null || echo 'NOT_FOUND'"
-                result = remote.run_command(cmd)
-                status_output = result.strip()
-                
-                if status_output == 'NOT_FOUND' or not status_output:
-                    # Job not in queue, check if completed
-                    cmd_history = f"sacct -j {job_id} -n -o State -X 2>/dev/null | head -1"
-                    result_history = remote.run_command(cmd_history)
-                    history_status = result_history.strip()
-                    
-                    if 'COMPLETED' in history_status:
-                        job['status'] = 'completed'
-                    elif 'FAILED' in history_status or 'CANCELLED' in history_status:
-                        job['status'] = 'failed'
-                    else:
-                        job['status'] = 'unknown'
-                elif 'RUNNING' in status_output:
-                    job['status'] = 'running'
-                elif 'PENDING' in status_output:
-                    job['status'] = 'pending'
-                elif 'COMPLETED' in status_output:
-                    job['status'] = 'completed'
-                else:
-                    job['status'] = 'unknown'
-                    
-            elif scheduler == 'direct':
-                # Check process status using PID
-                pid = job_id.replace('PID:', '') if 'PID:' in job_id else job_id
-                cmd = f"ps -p {pid} -o state= 2>/dev/null || echo 'NOT_FOUND'"
-                result = remote.run_command(cmd)
-                
-                if 'NOT_FOUND' in result or not result.strip():
-                    # Process not found, assume completed
-                    job['status'] = 'completed'
-                else:
-                    job['status'] = 'running'
-            
-            remote.disconnect()
-            
-            # Save updated status
-            self._save_jobs()
-            self._refresh_table()
-            
-            QMessageBox.information(
+        # Check if job_id is unknown or None
+        if not job_id or job_id == 'Unknown':
+            QMessageBox.warning(
                 self,
-                "Status Updated",
-                f"Job '{job.get('label')}' status: {job['status'].upper()}"
+                "Cannot Check Status",
+                f"Job '{job.get('label')}' has an unknown Job ID.\n\n"
+                "The job may have failed to submit, or the Job ID was not captured during submission."
             )
-            
-        except Exception as e:
+            return
+        
+        # Disable the check button while checking
+        self.refresh_all_btn.setEnabled(False)
+        self.refresh_all_btn.setText("Checking...")
+        
+        # Create and start worker thread
+        worker = JobStatusWorker(row, job, self)
+        worker.status_updated.connect(self._on_status_updated)
+        worker.finished.connect(lambda: self._on_worker_finished(worker))
+        self.active_workers.append(worker)
+        worker.start()
+    
+    def _on_status_updated(self, row, new_status, error_msg):
+        """Handle status update from worker thread."""
+        if error_msg:
             QMessageBox.warning(
                 self,
                 "Status Check Failed",
-                f"Failed to check job status:\n{str(e)}"
+                f"Failed to check job status:\n{error_msg}"
             )
+        elif new_status:
+            # Update job status
+            if row < len(self.jobs):
+                self.jobs[row]['status'] = new_status
+                self._save_jobs()
+                self._refresh_table()
+                
+                QMessageBox.information(
+                    self,
+                    "Status Updated",
+                    f"Job '{self.jobs[row].get('label')}' status: {new_status.upper()}"
+                )
+    
+    def _on_worker_finished(self, worker):
+        """Clean up when worker thread finishes."""
+        if worker in self.active_workers:
+            self.active_workers.remove(worker)
+        
+        # Re-enable buttons when all workers are done
+        if not self.active_workers:
+            self.refresh_all_btn.setEnabled(True)
+            self.refresh_all_btn.setText("🔄 Refresh All")
     
     def _refresh_all_status(self):
-        """Refresh status of all non-completed jobs."""
-        self.refresh_all_btn.setEnabled(False)
-        self.refresh_all_btn.setText("Refreshing...")
-        
-        updated_count = 0
+        """Refresh status of all non-completed jobs (non-blocking)."""
+        # Count jobs that need checking
+        jobs_to_check = []
         for row in range(len(self.jobs)):
             job = self.jobs[row]
             if job.get('status') not in ['completed', 'failed']:
-                self._check_job_status(row)
-                updated_count += 1
+                job_id = job.get('job_id')
+                # Only check if job has a valid ID
+                if job_id and job_id != 'Unknown':
+                    jobs_to_check.append(row)
         
-        self.refresh_all_btn.setEnabled(True)
-        self.refresh_all_btn.setText("🔄 Refresh All")
-        
-        if updated_count > 0:
+        if not jobs_to_check:
             QMessageBox.information(
                 self,
-                "Refresh Complete",
-                f"Checked status of {updated_count} job(s)"
+                "No Jobs to Check",
+                "All jobs are either completed or failed, or have unknown Job IDs."
             )
+            return
+        
+        # Disable button and start checking
+        self.refresh_all_btn.setEnabled(False)
+        self.refresh_all_btn.setText("Refreshing...")
+        
+        # Start checking all jobs
+        for row in jobs_to_check:
+            job = self.jobs[row]
+            
+            # Create and start worker thread
+            worker = JobStatusWorker(row, job, self)
+            worker.status_updated.connect(self._on_status_updated_silent)
+            worker.finished.connect(lambda: self._on_worker_finished(worker))
+            self.active_workers.append(worker)
+            worker.start()
+    
+    def _on_status_updated_silent(self, row, new_status, error_msg):
+        """Handle status update from worker thread (silent, no popup)."""
+        if new_status and row < len(self.jobs):
+            # Update job status
+            self.jobs[row]['status'] = new_status
+            self._save_jobs()
+            self._refresh_table()
     
     def _retrieve_results(self, row):
         """Retrieve results from a completed job."""
@@ -392,7 +481,8 @@ class JobMonitorDialog(QDialog):
             downloaded = []
             
             for filename in output_files:
-                remote_file = f"{remote_dir}/{label}/{filename}"
+                # remote_dir already contains the full unique path
+                remote_file = f"{remote_dir}/{filename}"
                 local_file = os.path.join(local_dir, label, filename)
                 
                 try:
@@ -442,7 +532,7 @@ class JobMonitorDialog(QDialog):
 <tr><td><b>Scheduler:</b></td><td>{job.get('scheduler', 'N/A')}</td></tr>
 <tr><td><b>Remote Host:</b></td><td>{job.get('remote_host', 'N/A')}</td></tr>
 <tr><td><b>Remote User:</b></td><td>{job.get('remote_user', 'N/A')}</td></tr>
-<tr><td><b>Remote Directory:</b></td><td>{job.get('remote_dir', 'N/A')}/{job.get('label', '')}</td></tr>
+<tr><td><b>Remote Directory:</b></td><td>{job.get('remote_dir', 'N/A')}</td></tr>
 <tr><td><b>Local Directory:</b></td><td>{job.get('local_dir', 'N/A')}/{job.get('label', '')}</td></tr>
 <tr><td><b>Submitted:</b></td><td>{job.get('submitted_time', 'N/A')}</td></tr>
 </table>

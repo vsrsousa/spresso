@@ -349,8 +349,8 @@ then view them in the "View Structure" tab.</p>
         load_layout.addWidget(self.db_status_label)
         
         self.db_structures_table = QTableWidget()
-        self.db_structures_table.setColumnCount(4)
-        self.db_structures_table.setHorizontalHeaderLabels(["ID", "Formula", "Atoms", "Tags"])
+        self.db_structures_table.setColumnCount(5)
+        self.db_structures_table.setHorizontalHeaderLabels(["ID", "Name", "Formula", "Atoms", "Tags"])
         self.db_structures_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.db_structures_table.setMaximumHeight(250)
         self.db_structures_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -740,12 +740,18 @@ then view them in the "View Structure" tab.</p>
                 self.db_structures_table.setRowCount(len(rows))
                 for i, row in enumerate(rows):
                     self.db_structures_table.setItem(i, 0, QTableWidgetItem(str(row.id)))
-                    self.db_structures_table.setItem(i, 1, QTableWidgetItem(row.formula))
-                    self.db_structures_table.setItem(i, 2, QTableWidgetItem(str(row.natoms)))
                     
-                    # Get tags from key_value_pairs
-                    tags = ", ".join(row.key_value_pairs.keys()) if row.key_value_pairs else ""
-                    self.db_structures_table.setItem(i, 3, QTableWidgetItem(tags))
+                    # Get name from key_value_pairs if it exists
+                    name = row.key_value_pairs.get('name', '') if row.key_value_pairs else ''
+                    self.db_structures_table.setItem(i, 1, QTableWidgetItem(name))
+                    
+                    self.db_structures_table.setItem(i, 2, QTableWidgetItem(row.formula))
+                    self.db_structures_table.setItem(i, 3, QTableWidgetItem(str(row.natoms)))
+                    
+                    # Get tags from key_value_pairs (excluding 'name' as it's now in its own column)
+                    tags_list = [k for k in row.key_value_pairs.keys() if k != 'name'] if row.key_value_pairs else []
+                    tags = ", ".join(tags_list)
+                    self.db_structures_table.setItem(i, 4, QTableWidgetItem(tags))
             else:
                 self.db_status_label.setText("ℹ️ Database is empty. Use Upload or Build tabs to add structures.")
                 self.db_status_label.setStyleSheet("color: blue;")

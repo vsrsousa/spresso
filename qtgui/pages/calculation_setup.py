@@ -886,6 +886,9 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             config['enable_hubbard'] = False
             config['hubbard_u'] = {}
         
+        # Always use crystal coordinates for atomic positions
+        config['crystal_coordinates'] = True
+        
         return config
     
     def _prepare_calculation(self):

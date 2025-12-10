@@ -58,8 +58,18 @@ class RemoteExecutionMixin:
 
         # Generate unique remote directory name to avoid collisions
         # when multiple jobs with the same label run from different local directories
-        # Format: {basename}_{hash} where hash is derived from full local path
-        dir_basename = os.path.basename(self.calc.directory.rstrip(os.sep))
+        # Format: {label_with_underscores}_{hash} where hash is derived from full local path
+        # Example: For label "Gd2/scf" -> "Gd2_scf_4d36112a"
+        
+        # Get the last 2 parts of the path to preserve structure like "Gd2/scf"
+        # This maintains meaningful names while avoiding deep directory structures
+        path_parts = self.calc.directory.rstrip(os.sep).split(os.sep)
+        if len(path_parts) >= 2:
+            # Use last 2 parts: "Gd2/scf" becomes "Gd2_scf"
+            dir_basename = "_".join(path_parts[-2:])
+        else:
+            # Fallback to just the last part if path is too short
+            dir_basename = path_parts[-1] if path_parts else "calculation"
         
         # Create a hash of the full local directory path for uniqueness
         # Use first 8 characters of MD5 hash for brevity while maintaining uniqueness
@@ -218,6 +228,8 @@ class RemoteExecutionMixin:
                     if hasattr(self, "logger"):
                         self.logger.info(f"SLURM job {job_id} submitted (non-blocking mode).")
                     self.calc.last_job_id = job_id
+                    # Store the actual remote path for monitoring
+                    self.calc.last_remote_path = self.remote_path
                     return stdout, stderr
                 else:
                     if hasattr(self, "logger"):
@@ -234,6 +246,8 @@ class RemoteExecutionMixin:
                     if hasattr(self, "logger"):
                         self.logger.info(f"Direct job started with PID: {pid} (non-blocking mode).")
                     self.calc.last_job_id = f"PID:{pid}"
+                    # Store the actual remote path for monitoring
+                    self.calc.last_remote_path = self.remote_path
                     return stdout, stderr
                 else:
                     if hasattr(self, "logger"):

@@ -470,9 +470,24 @@ class ResultsPostprocessingPage(QWidget):
                     pass
             
             # Additional convergence indicators (backup checks)
+            # Also extract iteration count from "convergence has been achieved in X iterations"
             if 'convergence achieved' in line.lower() or \
                'convergence has been achieved' in line.lower():
                 results['converged'] = True
+                # Extract iteration count if present
+                # Example: "convergence has been achieved in  10 iterations"
+                if 'in' in line.lower() and 'iteration' in line.lower():
+                    try:
+                        # Find the number between "in" and "iteration"
+                        import re
+                        match = re.search(r'in\s+(\d+)\s+iteration', line.lower())
+                        if match:
+                            iterations = int(match.group(1))
+                            # Only update if we haven't counted SCF iterations yet
+                            if results['iterations'] == 0:
+                                results['iterations'] = iterations
+                    except (ValueError, AttributeError):
+                        pass
             
             # Total force
             if 'Total force' in line:

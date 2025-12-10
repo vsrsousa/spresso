@@ -160,6 +160,7 @@ class JobSubmissionPage(QWidget):
         self.session_state = session_state
         self._loading = False  # Guard to prevent recursive updates
         self._job_monitor_ref = None  # Reference to main app's Job Monitor
+        self._calculation_running = False  # Flag to prevent concurrent submissions
         self._setup_ui()
 
     def _setup_ui(self):
@@ -1077,6 +1078,17 @@ Files created in: <code>{full_path}</code>
         Uses the pre-created Espresso calculator and prepared_atoms from Calculation Setup page.
         Simply updates the label and calls atoms.get_potential_energy().
         """
+        # Prevent concurrent submissions
+        if self._calculation_running:
+            QMessageBox.warning(
+                self,
+                "Calculation In Progress",
+                "A calculation is already running.\n\n"
+                "Please wait for the current calculation to complete before starting a new one.\n\n"
+                "For remote non-blocking calculations, check the Job Monitor to see running jobs."
+            )
+            return
+        
         atoms = self.session_state.get("current_structure")
 
         if atoms is None:
@@ -1203,6 +1215,9 @@ with the same parameters. To force a new calculation, either:
                     )
                     return
 
+            # Set flag to prevent concurrent submissions
+            self._calculation_running = True
+            
             # Update status for new calculation
             self.run_status.setText("⏳ Running calculation... (this may take a while)")
             self.run_status.setStyleSheet("color: blue;")
@@ -1423,6 +1438,10 @@ and check on your jobs later.
                 f"Calculation failed with error:\n\n{str(e)}\n\n"
                 f"See details in the Results section below.",
             )
+        
+        finally:
+            # Always clear the running flag, even if an error occurred
+            self._calculation_running = False
 
     def refresh(self):
         """Refresh the page."""

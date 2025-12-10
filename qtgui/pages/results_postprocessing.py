@@ -320,13 +320,12 @@ class ResultsPostprocessingPage(QWidget):
             self.status_text.setStyleSheet("color: red;")
     
     def _parse_with_ase(self, output_path):
-        """Parse QE output using ASE (preferred method).
+        """Parse QE output using ASE (primary method).
         
-        This leverages ASE's built-in parsers which are more robust.
+        ASE is always available since xespresso depends on it.
         Returns a results dictionary compatible with _parse_output.
         """
         try:
-            # Try to import ASE
             from ase import io
             
             # Read the output file with ASE
@@ -390,7 +389,7 @@ class ResultsPostprocessingPage(QWidget):
                 magmoms_array = calc_results['magmoms']
                 if any(abs(m) > 1e-6 for m in magmoms_array):
                     results['is_magnetic'] = True
-                    # Get atom symbols for labeling
+                    # Get atom symbols for labeling (atoms are in same order as input)
                     symbols = atoms.get_chemical_symbols()
                     # Show all atoms' magnetic moments, regardless of magnitude
                     for i, magmom in enumerate(magmoms_array):
@@ -413,9 +412,6 @@ class ResultsPostprocessingPage(QWidget):
             
             return results
             
-        except ImportError:
-            # ASE not available
-            return None
         except Exception as e:
             # ASE parsing failed, will fall back to manual parsing
             return None

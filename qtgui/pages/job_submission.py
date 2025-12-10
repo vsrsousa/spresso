@@ -158,16 +158,28 @@ class JobSubmissionPage(QWidget):
         super().__init__()
         self.session_state = session_state
         self._loading = False  # Guard to prevent recursive updates
+        self.job_monitor = None  # Job Monitor dialog (created on demand)
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup the user interface."""
         main_layout = QVBoxLayout(self)
 
-        # Header
+        # Header with Job Monitor button
+        header_layout = QHBoxLayout()
         header_label = QLabel("<h2>🚀 Job Submission & File Management</h2>")
         header_label.setTextFormat(Qt.RichText)
-        main_layout.addWidget(header_label)
+        header_layout.addWidget(header_label)
+        
+        header_layout.addStretch()
+        
+        # Job Monitor button
+        job_monitor_btn = QPushButton("🔍 Job Monitor")
+        job_monitor_btn.setToolTip("Open Job Monitor to track remote job submissions")
+        job_monitor_btn.clicked.connect(self._open_job_monitor)
+        header_layout.addWidget(job_monitor_btn)
+        
+        main_layout.addLayout(header_layout)
 
         description = QLabel(
             """
@@ -1158,22 +1170,106 @@ This is normal for local calculations.
             if prepared_atoms.calc is None or prepared_atoms.calc != calc:
                 prepared_atoms.calc = calc
 
-            # Run the calculation using ASE/xespresso pattern
-            # This will generate input files, submit the job, and wait for completion
-            # The calculator's queue configuration handles remote execution
-            energy = prepared_atoms.get_potential_energy()
+            # Check if this is a non-blocking remote execution
+            # Default is non-blocking (wait_for_completion defaults to False)
+            # Only blocking if explicitly set to True
+            is_remote_non_blocking = (
+                hasattr(calc, 'queue') and 
+                calc.queue and
+                calc.queue.get("execution") == "remote" and 
+                calc.queue.get("wait_for_completion", False) != True  # Default is False (non-blocking)
+            )
 
-            # Success! Display results
-            self.run_status.setText("✅ Calculation completed successfully!")
-            self.run_status.setStyleSheet("color: green;")
+            if is_remote_non_blocking:
+                # Non-blocking mode: Submit job and return immediately
+                try:
+                    # This will submit the job but not wait for completion
+                    prepared_atoms.get_potential_energy()
+                except Exception:
+                    # In non-blocking mode, we expect this to fail when trying to read results
+                    # This is normal behavior - the job was submitted successfully
+                    pass
+                
+                # Get the job/process ID that was stored
+                job_id = getattr(calc, 'last_job_id', 'Unknown')
+                
+                # Determine scheduler type for display
+                scheduler = calc.queue.get("scheduler", "unknown")
+                
+                # Add job to monitor
+                job_info = {
+                    'label': label,
+                    'job_id': job_id,
+                    'scheduler': scheduler,
+                    'remote_host': calc.queue.get('remote_host', 'N/A'),
+                    'remote_user': calc.queue.get('remote_user', 'N/A'),
+                    'remote_dir': calc.queue.get('remote_dir', ''),
+                    'local_dir': full_path.rsplit('/' + label, 1)[0] if label in full_path else full_path,
+                    'queue': calc.queue,
+                    'status': 'submitted'
+                }
+                self._add_job_to_monitor(job_info)
+                
+                # Display success message for non-blocking submission
+                self.run_status.setText(f"✅ Job submitted successfully!")
+                self.run_status.setStyleSheet("color: green;")
+                
+                self.energy_label.setText(f"Job ID: {job_id}")
+                
+                results_text = f"""
+<b>✅ Job Submitted Successfully!</b>
 
-            self.energy_label.setText(f"Energy: {energy:.6f} eV")
+<b>Job ID:</b> <code>{job_id}</code>
+<b>Scheduler:</b> {scheduler}
+<b>Working Directory:</b> <code>{full_path}</code>
 
-            # Get prefix for output files
-            prefix = self._get_prefix_from_label(label)
+<b>Non-blocking Mode Active</b>
+The job has been submitted and is running on the remote server.
+The GUI remains responsive and you can continue working.
 
-            # Get additional results if available
-            results_text = f"""
+<b>Job Monitor</b>
+The job has been added to the Job Monitor. Click the "🔍 Job Monitor" button
+at the top of this page to:
+<ul>
+<li>Check job status</li>
+<li>Retrieve results when complete</li>
+<li>View job details</li>
+<li>Track all submitted jobs</li>
+</ul>
+
+<b>Note:</b> Job information persists across sessions - you can close the GUI
+and check on your jobs later.
+"""
+                
+                self.run_results.setHtml(results_text)
+                
+                QMessageBox.information(
+                    self,
+                    "Job Submitted",
+                    f"Job submitted successfully in non-blocking mode!\n\n"
+                    f"Job ID: {job_id}\n\n"
+                    f"The job is running on the remote server. "
+                    f"You can continue using the GUI while it runs.",
+                )
+                
+            else:
+                # Blocking mode: Run the calculation and wait for completion (original behavior)
+                # Run the calculation using ASE/xespresso pattern
+                # This will generate input files, submit the job, and wait for completion
+                # The calculator's queue configuration handles remote execution
+                energy = prepared_atoms.get_potential_energy()
+
+                # Success! Display results
+                self.run_status.setText("✅ Calculation completed successfully!")
+                self.run_status.setStyleSheet("color: green;")
+
+                self.energy_label.setText(f"Energy: {energy:.6f} eV")
+
+                # Get prefix for output files
+                prefix = self._get_prefix_from_label(label)
+
+                # Get additional results if available
+                results_text = f"""
 <b>✅ Calculation Completed Successfully!</b>
 
 <b>Energy:</b> {energy:.6f} eV
@@ -1195,38 +1291,38 @@ This is normal for local calculations.
 </ul>
 """
 
-            # Add forces if available
-            # Some calculation types may not have forces available
-            if hasattr(prepared_atoms, "get_forces"):
-                try:
-                    forces = prepared_atoms.get_forces()
-                    max_force = float((forces**2).sum(axis=1).max() ** 0.5)
-                    results_text += f"\n<b>Max Force:</b> {max_force:.6f} eV/Å\n"
-                except (RuntimeError, KeyError) as e:
-                    # Forces not available for this calculation type (e.g., SCF)
-                    # This is expected and not an error
-                    import logging
+                # Add forces if available
+                # Some calculation types may not have forces available
+                if hasattr(prepared_atoms, "get_forces"):
+                    try:
+                        forces = prepared_atoms.get_forces()
+                        max_force = float((forces**2).sum(axis=1).max() ** 0.5)
+                        results_text += f"\n<b>Max Force:</b> {max_force:.6f} eV/Å\n"
+                    except (RuntimeError, KeyError) as e:
+                        # Forces not available for this calculation type (e.g., SCF)
+                        # This is expected and not an error
+                        import logging
 
-                    logging.debug(f"Forces not available: {e}")
-                except Exception as e:
-                    # Unexpected error getting forces
-                    import logging
+                        logging.debug(f"Forces not available: {e}")
+                    except Exception as e:
+                        # Unexpected error getting forces
+                        import logging
 
-                    logging.warning(f"Unexpected error getting forces: {e}")
+                        logging.warning(f"Unexpected error getting forces: {e}")
 
-            self.run_results.setHtml(results_text)
+                self.run_results.setHtml(results_text)
 
-            # Process pending events to ensure filesystem changes are reflected
-            QApplication.processEvents()
+                # Process pending events to ensure filesystem changes are reflected
+                QApplication.processEvents()
 
-            # Refresh browser to show new files
-            self._refresh_browser()
+                # Refresh browser to show new files
+                self._refresh_browser()
 
-            QMessageBox.information(
-                self,
-                "Calculation Complete",
-                f"Calculation completed successfully!\n\nEnergy: {energy:.6f} eV",
-            )
+                QMessageBox.information(
+                    self,
+                    "Calculation Complete",
+                    f"Calculation completed successfully!\n\nEnergy: {energy:.6f} eV",
+                )
 
         except Exception as e:
             import traceback
@@ -1279,3 +1375,27 @@ This is normal for local calculations.
         self._refresh_browser()
         self._update_dry_run_config()
         self._update_run_config()
+    
+    def _open_job_monitor(self):
+        """Open or show the Job Monitor dialog."""
+        if self.job_monitor is None:
+            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
+            # Get working directory from session state
+            working_dir = self.session_state.working_directory
+            self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
+        
+        # Show and raise the dialog
+        self.job_monitor.show()
+        self.job_monitor.raise_()
+        self.job_monitor.activateWindow()
+    
+    def _add_job_to_monitor(self, job_info):
+        """Add a job to the Job Monitor."""
+        # Ensure job monitor is created
+        if self.job_monitor is None:
+            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
+            working_dir = self.session_state.working_directory
+            self.job_monitor = JobMonitorDialog(working_dir=working_dir, parent=self)
+        
+        # Add the job
+        self.job_monitor.add_job(job_info)

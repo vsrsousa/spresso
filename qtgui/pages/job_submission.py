@@ -5,6 +5,7 @@ This page handles file browsing, dry run, and job submission.
 """
 
 import os
+import logging
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -158,28 +159,18 @@ class JobSubmissionPage(QWidget):
         super().__init__()
         self.session_state = session_state
         self._loading = False  # Guard to prevent recursive updates
-        self.job_monitor = None  # Job Monitor dialog (created on demand)
+        self._job_monitor_ref = None  # Reference to main app's Job Monitor
+        self._calculation_running = False  # Flag to prevent concurrent submissions
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup the user interface."""
         main_layout = QVBoxLayout(self)
 
-        # Header with Job Monitor button
-        header_layout = QHBoxLayout()
+        # Header (Job Monitor button removed - now available in toolbar)
         header_label = QLabel("<h2>🚀 Job Submission & File Management</h2>")
         header_label.setTextFormat(Qt.RichText)
-        header_layout.addWidget(header_label)
-        
-        header_layout.addStretch()
-        
-        # Job Monitor button
-        job_monitor_btn = QPushButton("🔍 Job Monitor")
-        job_monitor_btn.setToolTip("Open Job Monitor to track remote job submissions")
-        job_monitor_btn.clicked.connect(self._open_job_monitor)
-        header_layout.addWidget(job_monitor_btn)
-        
-        main_layout.addLayout(header_layout)
+        main_layout.addWidget(header_label)
 
         description = QLabel(
             """
@@ -1133,6 +1124,17 @@ Files created in: <code>{full_path}</code>
                 self, "Error", f"Invalid calculation label: {error_msg}"
             )
             return
+        
+        # Prevent concurrent submissions (check after all validation)
+        if self._calculation_running:
+            QMessageBox.warning(
+                self,
+                "Calculation In Progress",
+                "A calculation is already running.\n\n"
+                "Please wait for the current calculation to complete before starting a new one.\n\n"
+                "For remote non-blocking calculations, check the Job Monitor to see running jobs."
+            )
+            return
 
         try:
             # Set up environment for xespresso
@@ -1142,12 +1144,81 @@ Files created in: <code>{full_path}</code>
             safe_makedirs(full_path)
 
             # Set the directory and prefix for the calculation
-            # This tells xespresso where to write and read files
+            # Only update if different to preserve ASE's calculation state tracking
             prefix = self._get_prefix_from_label(label)
-            calc.directory = full_path
-            calc.prefix = prefix
+            if calc.directory != full_path:
+                calc.directory = full_path
+            if calc.prefix != prefix:
+                calc.prefix = prefix
 
-            # Update status
+            # Ensure calculator is attached to atoms (following xespresso pattern)
+            # Defensive check for robustness (e.g., restored from old session state)
+            if prepared_atoms.calc is None or prepared_atoms.calc != calc:
+                prepared_atoms.calc = calc
+            
+            # Try to load existing results from output file if they exist
+            # This allows ASE's built-in caching to work properly
+            # In newer ASE (3.23+), execute() is called by calculate(), but ASE checks
+            # if results are already present before calling execute()
+            try:
+                if hasattr(calc, 'read_results'):
+                    # Try to read existing results without raising error if file doesn't exist
+                    import os
+                    output_file = os.path.join(full_path, f"{prefix}.pwo")
+                    if os.path.exists(output_file):
+                        calc.read_results()
+            except Exception:
+                pass  # No existing results, will run calculation
+            
+            # Check if calculation is required
+            # ASE's get_property() checks if 'energy' in calc.results before calling calculate()
+            # If results exist and atoms haven't changed, it returns cached result
+            if 'energy' in calc.results:
+                # Results already loaded - check if atoms changed
+                system_changes = calc.check_state(prepared_atoms)
+                if not system_changes:
+                    # No changes - use existing results
+                    energy = calc.results['energy']
+                    
+                    self.run_status.setText("✅ Using existing calculation results")
+                    self.run_status.setStyleSheet("color: green;")
+                    self.energy_label.setText(f"Energy: {energy:.6f} eV")
+                    
+                    self.run_results.setHtml(
+                        f"""
+<b>✅ Calculation Already Completed</b>
+
+<b>Energy:</b> {energy:.6f} eV
+
+<b>Working Directory:</b> <code>{full_path}</code>
+
+<b>Status:</b> Results found from previous calculation with same parameters.
+No recalculation needed.
+
+<b>Note:</b> xespresso detected that this calculation has already been run
+with the same parameters. To force a new calculation, either:
+<ul>
+<li>Change calculation parameters in Calculation Setup</li>
+<li>Delete or rename the output directory</li>
+<li>Change the calculation label</li>
+</ul>
+"""
+                    )
+                    
+                    QMessageBox.information(
+                        self,
+                        "Calculation Already Complete",
+                        f"This calculation has already been completed.\n\n"
+                        f"Energy: {energy:.6f} eV\n\n"
+                        f"xespresso's built-in verification detected that the calculation "
+                        f"with these parameters already exists. No resubmission needed."
+                    )
+                    return
+
+            # Set flag to prevent concurrent submissions
+            self._calculation_running = True
+            
+            # Update status for new calculation
             self.run_status.setText("⏳ Running calculation... (this may take a while)")
             self.run_status.setStyleSheet("color: blue;")
             self.run_results.setHtml(
@@ -1164,11 +1235,6 @@ This is normal for local calculations.
 """
             )
             QApplication.processEvents()  # Update UI
-
-            # Ensure calculator is attached to atoms (following xespresso pattern)
-            # Defensive check for robustness (e.g., restored from old session state)
-            if prepared_atoms.calc is None or prepared_atoms.calc != calc:
-                prepared_atoms.calc = calc
 
             # Check if this is a non-blocking remote execution
             # Default is non-blocking (wait_for_completion defaults to False)
@@ -1232,7 +1298,7 @@ The GUI remains responsive and you can continue working.
 
 <b>Job Monitor</b>
 The job has been added to the Job Monitor. Click the "🔍 Job Monitor" button
-at the top of this page to:
+in the toolbar to:
 <ul>
 <li>Check job status</li>
 <li>Retrieve results when complete</li>
@@ -1372,6 +1438,10 @@ and check on your jobs later.
                 f"Calculation failed with error:\n\n{str(e)}\n\n"
                 f"See details in the Results section below.",
             )
+        
+        finally:
+            # Always clear the running flag, even if an error occurred
+            self._calculation_running = False
 
     def refresh(self):
         """Refresh the page."""
@@ -1379,27 +1449,29 @@ and check on your jobs later.
         self._update_dry_run_config()
         self._update_run_config()
     
-    def _open_job_monitor(self):
-        """Open or show the Job Monitor dialog."""
-        if self.job_monitor is None:
-            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
-            # Use ~/.xespresso for consistency with other configuration files
-            xespresso_dir = os.path.expanduser("~/.xespresso")
-            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
+    def set_job_monitor(self, job_monitor):
+        """
+        Set the reference to the main app's Job Monitor dialog.
         
-        # Show and raise the dialog
-        self.job_monitor.show()
-        self.job_monitor.raise_()
-        self.job_monitor.activateWindow()
+        Args:
+            job_monitor: Reference to the JobMonitorDialog instance from main app
+        """
+        self._job_monitor_ref = job_monitor
     
     def _add_job_to_monitor(self, job_info):
         """Add a job to the Job Monitor."""
-        # Ensure job monitor is created
-        if self.job_monitor is None:
+        # Use the main app's job monitor reference
+        if self._job_monitor_ref is not None:
+            self._job_monitor_ref.add_job(job_info)
+        else:
+            # This shouldn't normally happen, but if it does, the job will still be
+            # saved to the jobs file and will appear when Job Monitor is opened
+            logging.warning("Job Monitor reference not set. Job info saved but dialog not updated.")
+            # The JobMonitorDialog reads from a shared JSON file, so the job will
+            # still be tracked even without updating the dialog immediately
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
-            # Use ~/.xespresso for consistency with other configuration files
             xespresso_dir = os.path.expanduser("~/.xespresso")
-            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
-        
-        # Add the job
-        self.job_monitor.add_job(job_info)
+            # Create a temporary instance just to save the job to the file
+            temp_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=None)
+            temp_monitor.add_job(job_info)
+            # Don't show the dialog or keep the reference

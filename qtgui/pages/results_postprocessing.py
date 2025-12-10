@@ -5,6 +5,7 @@ This page displays calculation results and provides post-processing tools.
 """
 
 import os
+import re
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -117,7 +118,7 @@ class ResultsPostprocessingPage(QWidget):
         
         self.convergence_table = QTableWidget()
         self.convergence_table.setColumnCount(3)
-        self.convergence_table.setHorizontalHeaderLabels(["Iteration", "Energy (Ry)", "Delta E"])
+        self.convergence_table.setHorizontalHeaderLabels(["Iteration", "Energy (eV)", "Delta E (eV)"])
         self.convergence_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         convergence_layout.addWidget(self.convergence_table)
         
@@ -237,17 +238,24 @@ class ResultsPostprocessingPage(QWidget):
                 results = self._parse_output(content)
             else:
                 # Supplement ASE results with manual parsing for additional fields
+                # that ASE doesn't provide (SCF history, convergence iterations)
                 with open(output_path, 'r') as f:
                     content = f.read()
                 manual_results = self._parse_output(content)
-                # Merge results, preferring ASE values when available
-                for key in ['scf_history', 'is_magnetic', 'pressure', 'stress_tensor']:
+                # Merge results: prefer ASE for everything it provides (stress, pressure)
+                # Only take scf_history and iterations from manual parsing
+                for key in ['scf_history', 'iterations']:
                     if key in manual_results and manual_results[key]:
-                        results[key] = manual_results[key]
+                        # Only override if ASE didn't provide a value
+                        if not results.get(key):
+                            results[key] = manual_results[key]
+                # For is_magnetic, use manual parsing if ASE didn't detect it
+                if not results.get('is_magnetic') and manual_results.get('is_magnetic'):
+                    results['is_magnetic'] = True
             
             # Update display
             if results.get('energy'):
-                self.energy_label.setText(f"Total Energy: {results['energy']:.6f} Ry")
+                self.energy_label.setText(f"Total Energy: {results['energy']:.6f} eV")
             
             if results.get('converged'):
                 self.status_label.setText("Status: ✅ Converged")
@@ -259,7 +267,7 @@ class ResultsPostprocessingPage(QWidget):
             # Results text
             results_text = []
             results_text.append(f"Output File: {output_files[0]}")
-            results_text.append(f"Total Energy: {results.get('energy', 'N/A')} Ry")
+            results_text.append(f"Total Energy: {results.get('energy', 'N/A')} eV")
             results_text.append(f"Converged: {results.get('converged', 'Unknown')}")
             results_text.append(f"SCF Iterations: {results.get('iterations', 'N/A')}")
             
@@ -284,7 +292,9 @@ class ResultsPostprocessingPage(QWidget):
             if results.get('is_magnetic') and results.get('magnetic_moments'):
                 results_text.append("\nMagnetic Moments per Atom:")
                 for atom_info in results['magnetic_moments']:
-                    results_text.append(f"  Atom {atom_info['atom']}: charge={atom_info['charge']:.4f}, magn={atom_info['magn']:.4f}")
+                    # Use atom symbol if available, otherwise just the number
+                    atom_label = f"{atom_info.get('symbol', 'X')}{atom_info['atom']}" if 'symbol' in atom_info else f"Atom {atom_info['atom']}"
+                    results_text.append(f"  {atom_label}: charge={atom_info['charge']:.4f}, magn={atom_info['magn']:.4f}")
             
             # Show forces per atom if available
             if results.get('forces'):
@@ -317,13 +327,12 @@ class ResultsPostprocessingPage(QWidget):
             self.status_text.setStyleSheet("color: red;")
     
     def _parse_with_ase(self, output_path):
-        """Parse QE output using ASE (preferred method).
+        """Parse QE output using ASE (primary method).
         
-        This leverages ASE's built-in parsers which are more robust.
+        ASE is always available since xespresso depends on it.
         Returns a results dictionary compatible with _parse_output.
         """
         try:
-            # Try to import ASE
             from ase import io
             
             # Read the output file with ASE
@@ -332,6 +341,7 @@ class ResultsPostprocessingPage(QWidget):
             if atoms.calc is None:
                 return None
             
+            # Access calc.results directly to avoid triggering new calculations
             calc_results = atoms.calc.results
             
             results = {
@@ -350,11 +360,12 @@ class ResultsPostprocessingPage(QWidget):
                 'is_magnetic': False
             }
             
-            # Extract energy (in eV, convert to Ry)
+            # Extract energy from calc.results - avoids triggering calculation
+            # Note: ASE stores energy in eV (no conversion needed)
             if 'energy' in calc_results:
-                results['energy'] = calc_results['energy'] * EV_TO_RY
+                results['energy'] = calc_results['energy']
             
-            # Extract forces
+            # Extract forces from calc.results - avoids triggering calculation
             if 'forces' in calc_results and calc_results['forces'] is not None:
                 forces_array = calc_results['forces']
                 # Convert from eV/Angstrom to Ry/Bohr
@@ -369,7 +380,7 @@ class ResultsPostprocessingPage(QWidget):
                 total_f = sum([f[0]**2 + f[1]**2 + f[2]**2 for f in forces_array])**0.5
                 results['total_force'] = total_f * EVANG_TO_RYBOHR
             
-            # Extract stress
+            # Extract stress from calc.results - avoids triggering calculation
             if 'stress' in calc_results and calc_results['stress'] is not None:
                 stress_array = calc_results['stress']
                 # Convert from eV/Angstrom^3 to kbar
@@ -382,34 +393,38 @@ class ResultsPostprocessingPage(QWidget):
                 # Calculate pressure (negative trace / 3)
                 results['pressure'] = -(stress_array[0] + stress_array[1] + stress_array[2]) * EVANG3_TO_KBAR / 3.0
             
-            # Extract magnetic moments
+            # Extract magnetic moments from calc.results - avoids triggering calculation
             if 'magmoms' in calc_results and calc_results['magmoms'] is not None:
                 magmoms_array = calc_results['magmoms']
-                if any(abs(m) > 1e-6 for m in magmoms_array):
+                # Check if this is a magnetic calculation (any non-zero moment)
+                if any(abs(m) > 1e-10 for m in magmoms_array):
                     results['is_magnetic'] = True
-                    for i, magmom in enumerate(magmoms_array):
-                        if abs(magmom) > 1e-6:
-                            results['magnetic_moments'].append({
-                                'atom': i + 1,
-                                'charge': 0.0,  # Not available from ASE
-                                'magn': magmom
-                            })
-                    # Calculate total magnetization
-                    results['total_magnetization'] = sum(magmoms_array)
-                    results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
+                # Get atom symbols for labeling (atoms are in same order as input)
+                symbols = atoms.get_chemical_symbols()
+                # Show ALL atoms' magnetic moments, regardless of magnitude
+                for i, magmom in enumerate(magmoms_array):
+                    results['magnetic_moments'].append({
+                        'atom': i + 1,
+                        'symbol': symbols[i] if i < len(symbols) else 'X',
+                        'charge': 0.0,  # Not available from ASE
+                        'magn': magmom
+                    })
+                # Calculate total magnetization
+                results['total_magnetization'] = sum(magmoms_array)
+                results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
             
-            # Extract Fermi energy
-            try:
-                if hasattr(atoms.calc, 'get_fermi_level'):
+            # Extract Fermi energy from calc.results - avoids triggering calculation
+            # Note: Fermi energy not always in calc.results, so fallback to method if needed
+            if 'fermi_level' in calc_results:
+                results['fermi_energy'] = calc_results['fermi_level']
+            elif hasattr(atoms.calc, 'get_fermi_level'):
+                try:
                     results['fermi_energy'] = atoms.calc.get_fermi_level()
-            except Exception:
-                pass
+                except Exception:
+                    pass
             
             return results
             
-        except ImportError:
-            # ASE not available
-            return None
         except Exception as e:
             # ASE parsing failed, will fall back to manual parsing
             return None
@@ -449,7 +464,8 @@ class ResultsPostprocessingPage(QWidget):
                     parts = line.split('=')
                     if len(parts) > 1:
                         energy_str = parts[1].replace('Ry', '').strip()
-                        results['energy'] = float(energy_str)
+                        # Convert from Ry to eV
+                        results['energy'] = float(energy_str) * RY_TO_EV
                         # The presence of '!' in the total energy line means converged
                         results['converged'] = True
                 except (ValueError, IndexError):
@@ -461,7 +477,8 @@ class ResultsPostprocessingPage(QWidget):
                     parts = line.split('=')
                     if len(parts) > 1:
                         energy_str = parts[1].replace('Ry', '').strip()
-                        energy = float(energy_str)
+                        # Convert from Ry to eV
+                        energy = float(energy_str) * RY_TO_EV
                         delta = energy - prev_energy if prev_energy else 0
                         results['scf_history'].append((energy, delta))
                         prev_energy = energy
@@ -470,9 +487,23 @@ class ResultsPostprocessingPage(QWidget):
                     pass
             
             # Additional convergence indicators (backup checks)
+            # Also extract iteration count from "convergence has been achieved in X iterations"
             if 'convergence achieved' in line.lower() or \
                'convergence has been achieved' in line.lower():
                 results['converged'] = True
+                # Extract iteration count if present
+                # Example: "convergence has been achieved in  10 iterations"
+                if 'in' in line.lower() and 'iteration' in line.lower():
+                    try:
+                        # Find the number between "in" and "iteration(s)"
+                        match = re.search(r'in\s+(\d+)\s+iterations?', line.lower())
+                        if match:
+                            iterations = int(match.group(1))
+                            # Only update if we haven't counted SCF iterations yet
+                            if results['iterations'] == 0:
+                                results['iterations'] = iterations
+                    except (ValueError, AttributeError):
+                        pass
             
             # Total force
             if 'Total force' in line:
@@ -517,6 +548,8 @@ class ResultsPostprocessingPage(QWidget):
                     pass
             
             # Magnetic moment per site
+            # Show ALL magnetic moments regardless of value
+            # Note: Atom symbols will be added by ASE parsing; manual parsing doesn't extract symbols
             if 'atom:' in line.lower() and 'charge:' in line.lower() and 'magn:' in line.lower():
                 results['is_magnetic'] = True
                 try:
@@ -534,11 +567,13 @@ class ResultsPostprocessingPage(QWidget):
                         elif part.lower() == 'magn:' and j + 1 < len(parts):
                             magn = float(parts[j + 1])
                     
+                    # Include ALL atoms with magnetic moments, no filtering by magnitude
                     if atom_idx is not None and charge is not None and magn is not None:
                         results['magnetic_moments'].append({
                             'atom': atom_idx,
                             'charge': charge,
                             'magn': magn
+                            # 'symbol' will be added when merging with ASE results
                         })
                 except (ValueError, IndexError):
                     pass

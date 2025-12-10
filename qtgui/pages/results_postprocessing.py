@@ -306,7 +306,7 @@ class ResultsPostprocessingPage(QWidget):
                         results['energy'] = float(energy_str)
                         # The presence of '!' in the total energy line means converged
                         results['converged'] = True
-                except:
+                except (ValueError, IndexError):
                     pass
             
             # SCF iteration energies (without '!')
@@ -320,7 +320,7 @@ class ResultsPostprocessingPage(QWidget):
                         results['scf_history'].append((energy, delta))
                         prev_energy = energy
                         results['iterations'] += 1
-                except:
+                except (ValueError, IndexError):
                     pass
             
             # Additional convergence indicators (backup checks)
@@ -335,7 +335,7 @@ class ResultsPostprocessingPage(QWidget):
                     if len(parts) > 1:
                         force_str = parts[1].strip()
                         results['total_force'] = float(force_str)
-                except:
+                except (ValueError, IndexError):
                     pass
             
             # Fermi energy
@@ -345,7 +345,7 @@ class ResultsPostprocessingPage(QWidget):
                     if len(parts) > 1:
                         fermi_str = parts[1].replace('ev', '').replace('eV', '').strip()
                         results['fermi_energy'] = float(fermi_str)
-                except:
+                except (ValueError, IndexError):
                     pass
             
             # Total magnetization
@@ -355,7 +355,7 @@ class ResultsPostprocessingPage(QWidget):
                     if len(parts) > 1:
                         mag_str = parts[1].split('Bohr')[0].strip()
                         results['total_magnetization'] = float(mag_str)
-                except:
+                except (ValueError, IndexError):
                     pass
             
             # Absolute magnetization
@@ -365,7 +365,7 @@ class ResultsPostprocessingPage(QWidget):
                     if len(parts) > 1:
                         mag_str = parts[1].split('Bohr')[0].strip()
                         results['absolute_magnetization'] = float(mag_str)
-                except:
+                except (ValueError, IndexError):
                     pass
             
             # Magnetic moment per site
@@ -391,7 +391,7 @@ class ResultsPostprocessingPage(QWidget):
                             'charge': charge,
                             'magn': magn
                         })
-                except:
+                except (ValueError, IndexError):
                     pass
         
         return results

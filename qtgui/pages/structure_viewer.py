@@ -962,15 +962,19 @@ then view them in the "View Structure" tab.</p>
                 new_name = name_edit.text().strip()
                 new_tags = tags_edit.text().strip()
                 
-                # Prepare new key-value pairs
-                key_value_pairs = {}
+                # Start with existing key-value pairs to preserve unmodified data
+                key_value_pairs = dict(row.key_value_pairs) if row.key_value_pairs else {}
                 
+                # Remove old tags (but keep name and source)
+                keys_to_remove = [k for k in key_value_pairs.keys() if k not in ['name', 'source']]
+                for k in keys_to_remove:
+                    del key_value_pairs[k]
+                
+                # Update name
                 if new_name:
                     key_value_pairs['name'] = new_name
-                
-                # Keep source if it exists
-                if row.key_value_pairs and 'source' in row.key_value_pairs:
-                    key_value_pairs['source'] = row.key_value_pairs['source']
+                elif 'name' in key_value_pairs:
+                    del key_value_pairs['name']
                 
                 # Add new tags
                 if new_tags:

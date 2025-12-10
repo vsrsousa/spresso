@@ -486,7 +486,8 @@ class JobMonitorDialog(QDialog):
             downloaded = []
             
             for filename in output_files:
-                remote_file = f"{remote_dir}/{label}/{filename}"
+                # remote_dir already contains the full unique path
+                remote_file = f"{remote_dir}/{filename}"
                 local_file = os.path.join(local_dir, label, filename)
                 
                 try:
@@ -536,7 +537,7 @@ class JobMonitorDialog(QDialog):
 <tr><td><b>Scheduler:</b></td><td>{job.get('scheduler', 'N/A')}</td></tr>
 <tr><td><b>Remote Host:</b></td><td>{job.get('remote_host', 'N/A')}</td></tr>
 <tr><td><b>Remote User:</b></td><td>{job.get('remote_user', 'N/A')}</td></tr>
-<tr><td><b>Remote Directory:</b></td><td>{job.get('remote_dir', 'N/A')}/{job.get('label', '')}</td></tr>
+<tr><td><b>Remote Directory:</b></td><td>{job.get('remote_dir', 'N/A')}</td></tr>
 <tr><td><b>Local Directory:</b></td><td>{job.get('local_dir', 'N/A')}/{job.get('label', '')}</td></tr>
 <tr><td><b>Submitted:</b></td><td>{job.get('submitted_time', 'N/A')}</td></tr>
 </table>

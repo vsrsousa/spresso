@@ -274,7 +274,7 @@ class CalculationPreparation(BaseCalculationPreparation):
             calc_params["parallel"] = config["parallel"]
 
         # Add any additional parameters from config
-        for key in ["package", "debug"]:
+        for key in ["package", "debug", "crystal_coordinates"]:
             if key in config:
                 calc_params[key] = config[key]
 

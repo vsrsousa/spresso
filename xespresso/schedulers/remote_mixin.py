@@ -218,6 +218,8 @@ class RemoteExecutionMixin:
                     if hasattr(self, "logger"):
                         self.logger.info(f"SLURM job {job_id} submitted (non-blocking mode).")
                     self.calc.last_job_id = job_id
+                    # Store the actual remote path for monitoring
+                    self.calc.last_remote_path = self.remote_path
                     return stdout, stderr
                 else:
                     if hasattr(self, "logger"):
@@ -234,6 +236,8 @@ class RemoteExecutionMixin:
                     if hasattr(self, "logger"):
                         self.logger.info(f"Direct job started with PID: {pid} (non-blocking mode).")
                     self.calc.last_job_id = f"PID:{pid}"
+                    # Store the actual remote path for monitoring
+                    self.calc.last_remote_path = self.remote_path
                     return stdout, stderr
                 else:
                     if hasattr(self, "logger"):

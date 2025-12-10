@@ -1185,13 +1185,48 @@ This is normal for local calculations.
                 try:
                     # This will submit the job but not wait for completion
                     prepared_atoms.get_potential_energy()
-                except Exception:
-                    # In non-blocking mode, we expect this to fail when trying to read results
-                    # This is normal behavior - the job was submitted successfully
-                    pass
+                except Exception as e:
+                    # In non-blocking mode, we might get an exception when trying to read results
+                    # Check if this is expected (no output file) or an actual submission error
+                    error_msg = str(e).lower()
+                    
+                    # These are expected errors in non-blocking mode (job submitted but no results yet)
+                    expected_errors = ['no such file', 'output file', 'not found', 'does not exist']
+                    is_expected_error = any(exp in error_msg for exp in expected_errors)
+                    
+                    # If job_id was set, submission likely succeeded even with the error
+                    job_id_was_set = hasattr(calc, 'last_job_id') and calc.last_job_id and calc.last_job_id != 'Unknown'
+                    
+                    if not is_expected_error and not job_id_was_set:
+                        # This is an actual submission error
+                        self.run_status.setText("❌ Job submission failed")
+                        self.run_status.setStyleSheet("color: red;")
+                        self.run_results.setHtml(f"""
+<b>❌ Job Submission Error</b>
+
+<pre style="color: red;">{str(e)}</pre>
+
+<b>Possible causes:</b>
+<ul>
+<li>SSH connection failed</li>
+<li>Remote directory not accessible</li>
+<li>Missing pseudopotentials</li>
+<li>Invalid queue configuration</li>
+</ul>
+""")
+                        QMessageBox.critical(
+                            self,
+                            "Job Submission Failed",
+                            f"Failed to submit remote job:\n\n{str(e)}"
+                        )
+                        return
+                    # else: Expected error in non-blocking mode, continue
                 
                 # Get the job/process ID that was stored
                 job_id = getattr(calc, 'last_job_id', 'Unknown')
+                
+                # Get the actual remote path used (with hash suffix)
+                remote_path = getattr(calc, 'last_remote_path', calc.queue.get('remote_dir', ''))
                 
                 # Determine scheduler type for display
                 scheduler = calc.queue.get("scheduler", "unknown")
@@ -1203,7 +1238,7 @@ This is normal for local calculations.
                     'scheduler': scheduler,
                     'remote_host': calc.queue.get('remote_host', 'N/A'),
                     'remote_user': calc.queue.get('remote_user', 'N/A'),
-                    'remote_dir': calc.queue.get('remote_dir', ''),
+                    'remote_dir': remote_path,
                     'local_dir': full_path.rsplit('/' + label, 1)[0] if label in full_path else full_path,
                     'queue': calc.queue,
                     'status': 'submitted'

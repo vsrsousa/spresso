@@ -1,4 +1,4 @@
-ase==3.22.1              # Compatível com o código original do projeto
+ase>=3.22.0             # Atomic Simulation Environment - compatible with latest versions
 numpy>=1.21.0            # Cálculos numéricos
 scipy>=1.7.0             # Operações científicas
 matplotlib>=3.4.0        # Visualização de dados

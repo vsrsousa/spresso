@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTableWidget, QTableWidgetItem,
     QHeaderView, QFileDialog, QTabWidget, QTextEdit, QCheckBox,
-    QDoubleSpinBox, QSpinBox, QSlider, QRadioButton, QButtonGroup
+    QDoubleSpinBox, QSpinBox, QSlider, QRadioButton, QButtonGroup,
+    QDialog, QDialogButtonBox
 )
 from PySide6.QtCore import Qt
 
@@ -357,9 +358,21 @@ then view them in the "View Structure" tab.</p>
         self.db_structures_table.setSelectionMode(QTableWidget.SingleSelection)
         load_layout.addWidget(self.db_structures_table)
         
+        db_buttons_layout = QHBoxLayout()
+        
         load_selected_btn = QPushButton("📥 Load Selected Structure")
         load_selected_btn.clicked.connect(self._load_from_database)
-        load_layout.addWidget(load_selected_btn)
+        db_buttons_layout.addWidget(load_selected_btn)
+        
+        edit_selected_btn = QPushButton("✏️ Edit Properties")
+        edit_selected_btn.clicked.connect(self._edit_database_entry)
+        db_buttons_layout.addWidget(edit_selected_btn)
+        
+        delete_selected_btn = QPushButton("🗑️ Delete Entry")
+        delete_selected_btn.clicked.connect(self._delete_database_entry)
+        db_buttons_layout.addWidget(delete_selected_btn)
+        
+        load_layout.addLayout(db_buttons_layout)
         
         self.db_load_result = QLabel("")
         self.db_load_result.setWordWrap(True)
@@ -878,3 +891,174 @@ then view them in the "View Structure" tab.</p>
             self.results_label.setText(f"❌ Error saving to database: {e}")
             self.results_label.setStyleSheet("color: red;")
             QMessageBox.critical(self, "Error", f"Error saving to database:\n{e}")
+    
+    def _edit_database_entry(self):
+        """Edit properties (name, tags) of a database entry."""
+        if not ASE_DB_AVAILABLE:
+            return
+        
+        selected_rows = self.db_structures_table.selectedItems()
+        if not selected_rows:
+            QMessageBox.warning(self, "Warning", "Please select a structure to edit")
+            return
+        
+        # Get the ID from the first column of the selected row
+        selected_row = self.db_structures_table.currentRow()
+        id_item = self.db_structures_table.item(selected_row, 0)
+        if not id_item:
+            return
+        
+        try:
+            structure_id = int(id_item.text())
+        except ValueError:
+            QMessageBox.warning(self, "Warning", "Invalid structure ID")
+            return
+        
+        db_path = os.path.abspath(os.path.expanduser(self.db_path_edit.text().strip()))
+        
+        if not os.path.exists(db_path):
+            QMessageBox.warning(self, "Warning", "Database file not found")
+            return
+        
+        try:
+            db = ase_db_connect(db_path)
+            row = db.get(id=structure_id)
+            
+            # Get current values
+            current_name = row.key_value_pairs.get('name', '') if row.key_value_pairs else ''
+            current_tags = [k for k in row.key_value_pairs.keys() if k != 'name' and k != 'source'] if row.key_value_pairs else []
+            current_tags_str = ", ".join(current_tags)
+            
+            # Create edit dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Edit Database Entry (ID: {structure_id})")
+            dialog.setMinimumWidth(400)
+            
+            layout = QVBoxLayout(dialog)
+            
+            info_label = QLabel(f"<b>Formula:</b> {row.formula}<br><b>Atoms:</b> {row.natoms}")
+            info_label.setTextFormat(Qt.RichText)
+            layout.addWidget(info_label)
+            
+            form_layout = QFormLayout()
+            
+            name_edit = QLineEdit(current_name)
+            name_edit.setPlaceholderText("Structure name")
+            form_layout.addRow("Name:", name_edit)
+            
+            tags_edit = QLineEdit(current_tags_str)
+            tags_edit.setPlaceholderText("comma-separated tags")
+            form_layout.addRow("Tags:", tags_edit)
+            
+            layout.addLayout(form_layout)
+            
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
+            
+            if dialog.exec() == QDialog.Accepted:
+                # Update the entry
+                new_name = name_edit.text().strip()
+                new_tags = tags_edit.text().strip()
+                
+                # Start with existing key-value pairs to preserve unmodified data
+                key_value_pairs = dict(row.key_value_pairs) if row.key_value_pairs else {}
+                
+                # Remove old tags (but keep name and source)
+                keys_to_remove = [k for k in key_value_pairs.keys() if k not in ['name', 'source']]
+                for k in keys_to_remove:
+                    del key_value_pairs[k]
+                
+                # Update name
+                if new_name:
+                    key_value_pairs['name'] = new_name
+                elif 'name' in key_value_pairs:
+                    del key_value_pairs['name']
+                
+                # Add new tags
+                if new_tags:
+                    for tag in new_tags.split(','):
+                        tag = tag.strip()
+                        if tag:
+                            key_value_pairs[tag] = True
+                
+                # Update the entry by updating its key_value_pairs
+                db.update(id=structure_id, **key_value_pairs)
+                
+                self.db_load_result.setText(f"✅ Updated entry ID {structure_id}")
+                self.db_load_result.setStyleSheet("color: green;")
+                
+                # Refresh the list
+                self._refresh_db_list()
+                
+        except Exception as e:
+            self.db_load_result.setText(f"❌ Error editing entry: {e}")
+            self.db_load_result.setStyleSheet("color: red;")
+            QMessageBox.critical(self, "Error", f"Error editing entry:\n{e}")
+    
+    def _delete_database_entry(self):
+        """Delete a structure from the database."""
+        if not ASE_DB_AVAILABLE:
+            return
+        
+        selected_rows = self.db_structures_table.selectedItems()
+        if not selected_rows:
+            QMessageBox.warning(self, "Warning", "Please select a structure to delete")
+            return
+        
+        # Get the ID from the first column of the selected row
+        selected_row = self.db_structures_table.currentRow()
+        id_item = self.db_structures_table.item(selected_row, 0)
+        name_item = self.db_structures_table.item(selected_row, 1)
+        formula_item = self.db_structures_table.item(selected_row, 2)
+        
+        if not id_item:
+            return
+        
+        try:
+            structure_id = int(id_item.text())
+        except ValueError:
+            QMessageBox.warning(self, "Warning", "Invalid structure ID")
+            return
+        
+        # Confirm deletion
+        name = name_item.text() if name_item else ""
+        formula = formula_item.text() if formula_item else ""
+        display_name = name if name else formula
+        
+        reply = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Are you sure you want to delete this structure?\n\n"
+            f"ID: {structure_id}\n"
+            f"Name: {display_name}\n"
+            f"Formula: {formula}\n\n"
+            f"This action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        db_path = os.path.abspath(os.path.expanduser(self.db_path_edit.text().strip()))
+        
+        if not os.path.exists(db_path):
+            QMessageBox.warning(self, "Warning", "Database file not found")
+            return
+        
+        try:
+            db = ase_db_connect(db_path)
+            db.delete([structure_id])
+            
+            self.db_load_result.setText(f"✅ Deleted entry ID {structure_id}")
+            self.db_load_result.setStyleSheet("color: green;")
+            
+            # Refresh the list
+            self._refresh_db_list()
+            
+        except Exception as e:
+            self.db_load_result.setText(f"❌ Error deleting entry: {e}")
+            self.db_load_result.setStyleSheet("color: red;")
+            QMessageBox.critical(self, "Error", f"Error deleting entry:\n{e}")

@@ -920,6 +920,9 @@ Version: 1.2.0<br>
             _get_page_class('ResultsPostprocessingPage')(self.session_state)
         ]
         
+        # Store reference to JobSubmissionPage for setting job monitor later
+        self._job_submission_page = self.pages[3]  # 4th page in the list
+        
         for page in self.pages:
             self.content_stack.addWidget(page)
     
@@ -1407,11 +1410,9 @@ Version: 1.2.0<br>
             self._job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
             
             # Set the job monitor reference in the Job Submission page
-            # Find the JobSubmissionPage in the pages list
-            for page in self.pages:
-                if page.__class__.__name__ == 'JobSubmissionPage':
-                    page.set_job_monitor(self._job_monitor)
-                    break
+            # Use the stored reference (safer than searching by class name)
+            if hasattr(self, '_job_submission_page'):
+                self._job_submission_page.set_job_monitor(self._job_monitor)
         
         return self._job_monitor
     

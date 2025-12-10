@@ -5,6 +5,7 @@ This page displays calculation results and provides post-processing tools.
 """
 
 import os
+import re
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -479,7 +480,6 @@ class ResultsPostprocessingPage(QWidget):
                 if 'in' in line.lower() and 'iteration' in line.lower():
                     try:
                         # Find the number between "in" and "iteration"
-                        import re
                         match = re.search(r'in\s+(\d+)\s+iteration', line.lower())
                         if match:
                             iterations = int(match.group(1))

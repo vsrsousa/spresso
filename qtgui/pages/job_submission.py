@@ -1383,8 +1383,14 @@ and check on your jobs later.
         if self._job_monitor_ref is not None:
             self._job_monitor_ref.add_job(job_info)
         else:
-            # Fallback: create local instance if reference not set (shouldn't happen)
+            # This shouldn't normally happen, but if it does, the job will still be
+            # saved to the jobs file and will appear when Job Monitor is opened
+            print("Warning: Job Monitor reference not set. Job info saved but dialog not updated.")
+            # The JobMonitorDialog reads from a shared JSON file, so the job will
+            # still be tracked even without updating the dialog immediately
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
             xespresso_dir = os.path.expanduser("~/.xespresso")
-            job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
-            job_monitor.add_job(job_info)
+            # Create a temporary instance just to save the job to the file
+            temp_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=None)
+            temp_monitor.add_job(job_info)
+            # Don't show the dialog or keep the reference

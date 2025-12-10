@@ -1029,6 +1029,36 @@ Go to <b>Job Submission</b> page to use these objects.
         if not config:
             return
         
+        # Restore machine selection from config (check both current_machine_name and machine_name)
+        # Session state may have current_machine_name at the top level
+        machine_name = self.session_state.get('current_machine_name') or config.get('machine_name')
+        if machine_name:
+            idx = self.machine_combo.findText(machine_name)
+            if idx >= 0:
+                self.machine_combo.blockSignals(True)
+                self.machine_combo.setCurrentIndex(idx)
+                self.machine_combo.blockSignals(False)
+                # Manually trigger machine changed to load codes
+                self._on_machine_changed(machine_name)
+        
+        # Restore QE version selection
+        qe_version = config.get('qe_version')
+        if qe_version:
+            idx = self.version_combo.findText(qe_version)
+            if idx >= 0:
+                self.version_combo.blockSignals(True)
+                self.version_combo.setCurrentIndex(idx)
+                self.version_combo.blockSignals(False)
+                # Manually trigger version changed to load codes for this version
+                self._on_version_changed(qe_version)
+        
+        # Restore selected code
+        selected_code = config.get('selected_code')
+        if selected_code:
+            idx = self.code_combo.findText(selected_code)
+            if idx >= 0:
+                self.code_combo.setCurrentIndex(idx)
+        
         # Restore magnetic configuration checkbox state
         if config.get('enable_magnetism'):
             self.magnetic_group.setChecked(True)

@@ -299,8 +299,14 @@ class ResultsPostprocessingPage(QWidget):
                 except:
                     pass
             
-            # Convergence
-            if 'convergence achieved' in line.lower():
+            # Convergence - check multiple patterns used by QE
+            if 'convergence achieved' in line.lower() or \
+               'convergence has been achieved' in line.lower() or \
+               'scf convergence' in line.lower() and 'reached' in line.lower():
+                results['converged'] = True
+            
+            # Also check for "End of self-consistent calculation" which indicates SCF finished
+            if 'end of self-consistent calculation' in line.lower():
                 results['converged'] = True
             
             # Total force
@@ -375,5 +381,17 @@ class ResultsPostprocessingPage(QWidget):
         )
     
     def refresh(self):
-        """Refresh the page."""
-        pass
+        """Refresh the page and auto-load output directory from session."""
+        # Auto-load output directory from working directory and calculation label
+        working_dir = self.session_state.get('working_directory', os.path.expanduser("~"))
+        config = self.session_state.get('workflow_config', {})
+        label = config.get('label', '')
+        
+        if working_dir and label:
+            # Construct the expected output directory
+            output_dir = os.path.join(working_dir, label)
+            if os.path.exists(output_dir):
+                self.output_dir_edit.setText(output_dir)
+            else:
+                # If full path doesn't exist, just set working directory
+                self.output_dir_edit.setText(working_dir)

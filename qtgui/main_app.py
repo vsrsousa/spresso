@@ -711,6 +711,9 @@ class MainWindow(QMainWindow):
         # Configuration dialog (created on demand)
         self._config_dialog = None
         
+        # Job monitor dialog (created on demand, accessible without session)
+        self._job_monitor = None
+        
         # Guard to prevent recursive updates during session changes
         self._updating = False
         
@@ -1008,6 +1011,14 @@ Version: 1.2.0<br>
         load_action.triggered.connect(self._load_session_dialog)
         toolbar.addAction(load_action)
         
+        toolbar.addSeparator()
+        
+        # Job Monitor button - accessible without session
+        job_monitor_action = QAction("🔍 Job Monitor", self)
+        job_monitor_action.setToolTip("Track remote job submissions")
+        job_monitor_action.triggered.connect(self._open_job_monitor)
+        toolbar.addAction(job_monitor_action)
+        
         # Spacer to push quit button to the right
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -1231,11 +1242,22 @@ Version: 1.2.0<br>
             # Clear session state
             self.session_state.clear_state()
             
+            # Clear the session combo box (no active session)
+            self.session_combo.blockSignals(True)
+            self.session_combo.clear()
+            self.session_combo.blockSignals(False)
+            
+            # Process events to keep UI responsive
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
             # Refresh all pages to show empty state
             for page in self.pages:
                 if hasattr(page, 'refresh'):
                     try:
                         page.refresh()
+                        # Process events after each page refresh for responsiveness
+                        QApplication.processEvents()
                     except Exception as e:
                         print(f"Warning: Could not refresh page: {e}")
             
@@ -1359,6 +1381,31 @@ Version: 1.2.0<br>
 <li>Viewing and selecting molecular structures</li>
 <li>Configuring calculations and workflows</li>
 <li>Submitting computational jobs</li>
+<li>Tracking remote jobs with the Job Monitor</li>
+</ul></p>
+<p><b>New in 1.2.0:</b>
+<ul>
+<li>Migrated from PyQt5 to PySide6 for faster startup</li>
+<li>Improved session management with save/load</li>
+<li>Multiple session support</li>
+</ul></p>
+<p><a href="https://github.com/vsrsousa/spresso">GitHub Repository</a></p>
+"""
+        )
+    
+    def _open_job_monitor(self):
+        """Open or show the Job Monitor dialog."""
+        if self._job_monitor is None:
+            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
+            # Use ~/.xespresso as the base directory for jobs file
+            xespresso_dir = os.path.expanduser("~/.xespresso")
+            self._job_monitor = JobMonitorDialog(working_dir=xespresso_dir, parent=self)
+        
+        # Show and raise the dialog
+        self._job_monitor.show()
+        self._job_monitor.raise_()
+        self._job_monitor.activateWindow()
+    
 </ul></p>
 <p><b>New in 1.2.0:</b>
 <ul>

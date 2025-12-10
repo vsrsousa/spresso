@@ -124,12 +124,15 @@ class JobMonitorDialog(QDialog):
         Initialize the job monitor dialog.
         
         Args:
-            working_dir: Directory where jobs file is stored (defaults to current directory)
+            working_dir: Directory where jobs file is stored (defaults to ~/.xespresso)
             parent: Parent widget (main window)
         """
         super().__init__(parent)
-        self.working_dir = working_dir or os.getcwd()
-        self.jobs_file = os.path.join(self.working_dir, ".spresso_jobs.json")
+        # Default to ~/.xespresso for consistency with other configuration files
+        self.working_dir = working_dir or os.path.expanduser("~/.xespresso")
+        # Ensure the directory exists
+        os.makedirs(self.working_dir, exist_ok=True)
+        self.jobs_file = os.path.join(self.working_dir, "submitted_jobs.json")
         self.jobs = self._load_jobs()
         
         # Track active worker threads
@@ -279,17 +282,21 @@ class JobMonitorDialog(QDialog):
             job_id = job.get('job_id', 'N/A')
             self.table.setItem(row, 1, QTableWidgetItem(str(job_id)))
             
-            # Status with color coding
+            # Status with color coding - using good contrast colors
             status = job.get('status', 'unknown')
             status_item = QTableWidgetItem(status.upper())
             if status == 'completed':
-                status_item.setBackground(QColor(200, 255, 200))  # Light green
+                status_item.setBackground(QColor(220, 255, 220))  # Light green
+                status_item.setForeground(QColor(0, 100, 0))  # Dark green text
             elif status == 'failed':
-                status_item.setBackground(QColor(255, 200, 200))  # Light red
+                status_item.setBackground(QColor(255, 220, 220))  # Light red
+                status_item.setForeground(QColor(150, 0, 0))  # Dark red text
             elif status == 'running':
-                status_item.setBackground(QColor(200, 230, 255))  # Light blue
+                status_item.setBackground(QColor(220, 240, 255))  # Light blue
+                status_item.setForeground(QColor(0, 60, 120))  # Dark blue text
             elif status == 'pending':
-                status_item.setBackground(QColor(255, 255, 200))  # Light yellow
+                status_item.setBackground(QColor(255, 255, 220))  # Light yellow
+                status_item.setForeground(QColor(120, 100, 0))  # Dark yellow/brown text
             self.table.setItem(row, 2, status_item)
             
             # Scheduler
@@ -476,8 +483,9 @@ class JobMonitorDialog(QDialog):
             # Create local directory if it doesn't exist
             os.makedirs(local_dir, exist_ok=True)
             
-            # Download output files
-            output_files = [f"{prefix}.pwo", f"{prefix}.pwi", "job_file"]
+            # Download only output files (not input files or job scripts)
+            # Output files are typically .pwo, .out, and any calculation results
+            output_files = [f"{prefix}.pwo", f"{prefix}.out"]
             downloaded = []
             
             for filename in output_files:

@@ -1132,12 +1132,65 @@ Files created in: <code>{full_path}</code>
             safe_makedirs(full_path)
 
             # Set the directory and prefix for the calculation
-            # This tells xespresso where to write and read files
+            # Only update if different to preserve ASE's calculation state tracking
             prefix = self._get_prefix_from_label(label)
-            calc.directory = full_path
-            calc.prefix = prefix
+            if calc.directory != full_path:
+                calc.directory = full_path
+            if calc.prefix != prefix:
+                calc.prefix = prefix
 
-            # Update status
+            # Ensure calculator is attached to atoms (following xespresso pattern)
+            # Defensive check for robustness (e.g., restored from old session state)
+            if prepared_atoms.calc is None or prepared_atoms.calc != calc:
+                prepared_atoms.calc = calc
+            
+            # Check if calculation is required using xespresso/ASE's built-in verification
+            # This checks if parameters changed or if results already exist
+            if hasattr(calc, 'calculation_required') and not calc.calculation_required(prepared_atoms, ['energy']):
+                # Calculation not required - results already exist and parameters unchanged
+                self.run_status.setText("✅ Using existing calculation results")
+                self.run_status.setStyleSheet("color: green;")
+                
+                # Try to load existing energy
+                try:
+                    if 'energy' in calc.results:
+                        energy = calc.results['energy']
+                        self.energy_label.setText(f"Energy: {energy:.6f} eV")
+                        
+                        self.run_results.setHtml(
+                            f"""
+<b>✅ Calculation Already Completed</b>
+
+<b>Energy:</b> {energy:.6f} eV
+
+<b>Working Directory:</b> <code>{full_path}</code>
+
+<b>Status:</b> Results found from previous calculation with same parameters.
+No recalculation needed.
+
+<b>Note:</b> xespresso detected that this calculation has already been run
+with the same parameters. To force a new calculation, either:
+<ul>
+<li>Change calculation parameters in Calculation Setup</li>
+<li>Delete or rename the output directory</li>
+<li>Change the calculation label</li>
+</ul>
+"""
+                        )
+                        
+                        QMessageBox.information(
+                            self,
+                            "Calculation Already Complete",
+                            f"This calculation has already been completed.\n\n"
+                            f"Energy: {energy:.6f} eV\n\n"
+                            f"xespresso's built-in verification detected that the calculation "
+                            f"with these parameters already exists. No resubmission needed."
+                        )
+                        return
+                except Exception:
+                    pass  # Fall through to run calculation if we can't read results
+
+            # Update status for new calculation
             self.run_status.setText("⏳ Running calculation... (this may take a while)")
             self.run_status.setStyleSheet("color: blue;")
             self.run_results.setHtml(
@@ -1154,11 +1207,6 @@ This is normal for local calculations.
 """
             )
             QApplication.processEvents()  # Update UI
-
-            # Ensure calculator is attached to atoms (following xespresso pattern)
-            # Defensive check for robustness (e.g., restored from old session state)
-            if prepared_atoms.calc is None or prepared_atoms.calc != calc:
-                prepared_atoms.calc = calc
 
             # Check if this is a non-blocking remote execution
             # Default is non-blocking (wait_for_completion defaults to False)

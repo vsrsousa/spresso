@@ -119,20 +119,20 @@ class JobMonitorDialog(QDialog):
     
     job_completed = Signal(str, str)
     
-    def __init__(self, working_dir=None, parent=None):
+    def __init__(self, config_dir=None, parent=None):
         """
         Initialize the job monitor dialog.
         
         Args:
-            working_dir: xespresso configuration directory where jobs file is stored (defaults to ~/.xespresso)
+            config_dir: xespresso configuration directory where jobs file is stored (defaults to ~/.xespresso)
             parent: Parent widget (main window)
         """
         super().__init__(parent)
         # Default to ~/.xespresso - the xespresso configuration directory
-        self.working_dir = working_dir or os.path.expanduser("~/.xespresso")
+        self.config_dir = config_dir or os.path.expanduser("~/.xespresso")
         # Ensure the directory exists
-        os.makedirs(self.working_dir, exist_ok=True)
-        self.jobs_file = os.path.join(self.working_dir, "submitted_jobs.json")
+        os.makedirs(self.config_dir, exist_ok=True)
+        self.jobs_file = os.path.join(self.config_dir, "submitted_jobs.json")
         self.jobs = self._load_jobs()
         
         # Track active worker threads

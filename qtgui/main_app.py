@@ -1399,7 +1399,7 @@ Version: 1.2.0<br>
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
             # Use ~/.xespresso as the base directory for jobs file
             xespresso_dir = os.path.expanduser("~/.xespresso")
-            self._job_monitor = JobMonitorDialog(working_dir=xespresso_dir, parent=self)
+            self._job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
         
         # Show and raise the dialog
         self._job_monitor.show()

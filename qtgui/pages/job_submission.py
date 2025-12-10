@@ -1385,7 +1385,7 @@ and check on your jobs later.
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
             # Use ~/.xespresso for consistency with other configuration files
             xespresso_dir = os.path.expanduser("~/.xespresso")
-            self.job_monitor = JobMonitorDialog(working_dir=xespresso_dir, parent=self)
+            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
         
         # Show and raise the dialog
         self.job_monitor.show()
@@ -1399,7 +1399,7 @@ and check on your jobs later.
             from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
             # Use ~/.xespresso for consistency with other configuration files
             xespresso_dir = os.path.expanduser("~/.xespresso")
-            self.job_monitor = JobMonitorDialog(working_dir=xespresso_dir, parent=self)
+            self.job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
         
         # Add the job
         self.job_monitor.add_job(job_info)

@@ -238,13 +238,20 @@ class ResultsPostprocessingPage(QWidget):
                 results = self._parse_output(content)
             else:
                 # Supplement ASE results with manual parsing for additional fields
+                # that ASE doesn't provide (SCF history, convergence iterations)
                 with open(output_path, 'r') as f:
                     content = f.read()
                 manual_results = self._parse_output(content)
-                # Merge results, preferring ASE values when available
-                for key in ['scf_history', 'is_magnetic', 'pressure', 'stress_tensor']:
+                # Merge results: prefer ASE for everything it provides (stress, pressure)
+                # Only take scf_history and iterations from manual parsing
+                for key in ['scf_history', 'iterations']:
                     if key in manual_results and manual_results[key]:
-                        results[key] = manual_results[key]
+                        # Only override if ASE didn't provide a value
+                        if not results.get(key):
+                            results[key] = manual_results[key]
+                # For is_magnetic, use manual parsing if ASE didn't detect it
+                if not results.get('is_magnetic') and manual_results.get('is_magnetic'):
+                    results['is_magnetic'] = True
             
             # Update display
             if results.get('energy'):
@@ -387,21 +394,22 @@ class ResultsPostprocessingPage(QWidget):
             # Extract magnetic moments
             if 'magmoms' in calc_results and calc_results['magmoms'] is not None:
                 magmoms_array = calc_results['magmoms']
-                if any(abs(m) > 1e-6 for m in magmoms_array):
+                # Check if this is a magnetic calculation (any non-zero moment)
+                if any(abs(m) > 1e-10 for m in magmoms_array):
                     results['is_magnetic'] = True
-                    # Get atom symbols for labeling (atoms are in same order as input)
-                    symbols = atoms.get_chemical_symbols()
-                    # Show all atoms' magnetic moments, regardless of magnitude
-                    for i, magmom in enumerate(magmoms_array):
-                        results['magnetic_moments'].append({
-                            'atom': i + 1,
-                            'symbol': symbols[i] if i < len(symbols) else 'X',
-                            'charge': 0.0,  # Not available from ASE
-                            'magn': magmom
-                        })
-                    # Calculate total magnetization
-                    results['total_magnetization'] = sum(magmoms_array)
-                    results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
+                # Get atom symbols for labeling (atoms are in same order as input)
+                symbols = atoms.get_chemical_symbols()
+                # Show ALL atoms' magnetic moments, regardless of magnitude
+                for i, magmom in enumerate(magmoms_array):
+                    results['magnetic_moments'].append({
+                        'atom': i + 1,
+                        'symbol': symbols[i] if i < len(symbols) else 'X',
+                        'charge': 0.0,  # Not available from ASE
+                        'magn': magmom
+                    })
+                # Calculate total magnetization
+                results['total_magnetization'] = sum(magmoms_array)
+                results['absolute_magnetization'] = sum(abs(m) for m in magmoms_array)
             
             # Extract Fermi energy
             try:

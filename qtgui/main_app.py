@@ -655,7 +655,8 @@ class SessionState:
                 # Try to use the saved full path
                 file_path = self._state.get('structure_file_path')
                 if file_path and os.path.exists(file_path):
-                    atoms = ase_io.read(file_path)
+                    from .utils import read_structure
+                    atoms = read_structure(file_path)
                     self._state['current_structure'] = atoms
                     print(f"Restored structure from file: {file_path}")
                 else:

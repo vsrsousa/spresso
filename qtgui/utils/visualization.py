@@ -17,13 +17,38 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
-# Element color map for visualization
-ELEMENT_COLORS = {
-    'H': 'white', 'C': 'gray', 'N': 'blue', 'O': 'red',
-    'F': 'green', 'P': 'orange', 'S': 'yellow',
-    'Cl': 'green', 'Fe': 'brown', 'Cu': 'brown',
-    'Al': 'silver', 'Si': 'pink', 'Pt': 'silver'
-}
+def _get_element_color(symbol):
+    """
+    Get color for an element symbol using ASE's Jmol colors.
+    Falls back to a hash-based color if element is not in ASE's database.
+    
+    Args:
+        symbol: Element symbol (e.g., 'H', 'C', 'Si')
+        
+    Returns:
+        RGB color tuple or color name
+    """
+    try:
+        from ase.data.colors import jmol_colors
+        from ase.data import atomic_numbers
+        
+        # Try to get the atomic number for this symbol
+        if symbol in atomic_numbers:
+            z = atomic_numbers[symbol]
+            if z < len(jmol_colors):
+                # Return Jmol color as RGB tuple
+                return jmol_colors[z]
+    except (ImportError, KeyError):
+        pass
+    
+    # Fallback: generate a consistent color based on element symbol hash
+    # This ensures the same element always gets the same color
+    import hashlib
+    hash_val = int(hashlib.md5(symbol.encode()).hexdigest()[:6], 16)
+    r = ((hash_val >> 16) & 0xFF) / 255.0
+    g = ((hash_val >> 8) & 0xFF) / 255.0
+    b = (hash_val & 0xFF) / 255.0
+    return (r, g, b)
 
 
 def create_structure_figure(atoms, figure=None):
@@ -50,25 +75,84 @@ def create_structure_figure(atoms, figure=None):
     positions = atoms.get_positions()
     symbols = atoms.get_chemical_symbols()
     
-    colors = [ELEMENT_COLORS.get(s, 'purple') for s in symbols]
+    # Get colors for all atoms using element-based coloring
+    colors = [_get_element_color(s) for s in symbols]
     
+    # Draw bonds between atoms
+    _draw_bonds(ax, atoms)
+    
+    # Draw atoms (after bonds so atoms are on top)
     ax.scatter(positions[:, 0], positions[:, 1], positions[:, 2],
                c=colors, s=100, edgecolors='black')
-    
-    # Add labels
-    for pos, sym in zip(positions, symbols):
-        ax.text(pos[0], pos[1], pos[2], sym, fontsize=8)
     
     # Draw cell if present
     if atoms.cell is not None and atoms.pbc.any():
         _draw_cell(ax, atoms.cell.array)
     
-    ax.set_xlabel('X (Å)')
-    ax.set_ylabel('Y (Å)')
-    ax.set_zlabel('Z (Å)')
+    # Add legend with element labels in corner
+    _add_element_legend(ax, symbols, colors)
+    
+    # Hide axes
+    ax.set_axis_off()
     
     figure.tight_layout()
     return figure
+
+
+def _draw_bonds(ax, atoms):
+    """Draw bonds between atoms based on natural cutoff distances."""
+    try:
+        from ase.neighborlist import natural_cutoffs, NeighborList
+    except ImportError:
+        # If neighbor list not available, skip bond drawing
+        return
+    
+    # Use natural cutoffs with a multiplier for bond detection
+    cutoffs = natural_cutoffs(atoms, mult=1.1)
+    nl = NeighborList(cutoffs, self_interaction=False, bothways=False)
+    nl.update(atoms)
+    
+    positions = atoms.get_positions()
+    
+    # Draw bonds
+    for i in range(len(atoms)):
+        indices, offsets = nl.get_neighbors(i)
+        for j, offset in zip(indices, offsets):
+            # Calculate position of neighbor including periodic offset
+            pos_j = positions[j] + np.dot(offset, atoms.cell.array if atoms.cell is not None else np.zeros((3, 3)))
+            
+            # Draw bond as a line
+            ax.plot([positions[i][0], pos_j[0]], 
+                   [positions[i][1], pos_j[1]], 
+                   [positions[i][2], pos_j[2]], 
+                   'gray', linewidth=1.5, alpha=0.6)
+
+
+def _add_element_legend(ax, symbols, colors):
+    """Add a legend in the corner showing unique elements and their colors."""
+    from matplotlib.lines import Line2D
+    
+    # Get unique elements and their colors
+    unique_elements = []
+    unique_colors = []
+    seen = set()
+    
+    for sym, color in zip(symbols, colors):
+        if sym not in seen:
+            unique_elements.append(sym)
+            unique_colors.append(color)
+            seen.add(sym)
+    
+    # Create legend handles using scatter-style markers (filled circles)
+    legend_elements = []
+    for elem, color in zip(unique_elements, unique_colors):
+        legend_elements.append(Line2D([0], [0], marker='o', color='w', 
+                                     markerfacecolor=color, markeredgecolor='black',
+                                     markersize=10, label=elem, linewidth=0))
+    
+    # Add legend in upper right corner
+    ax.legend(handles=legend_elements, loc='upper right', 
+             framealpha=0.9, fontsize=10)
 
 
 def _draw_cell(ax, cell):

@@ -106,8 +106,8 @@ class StructureTab(QWidget):
             return
         
         try:
-            from ase import io as ase_io
-            atoms = ase_io.read(file_path)
+            from .utils import read_structure
+            atoms = read_structure(file_path)
             self.state['current_structure'] = atoms
             
             formula = atoms.get_chemical_formula()

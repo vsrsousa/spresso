@@ -1161,7 +1161,6 @@ Files created in: <code>{full_path}</code>
             try:
                 if hasattr(calc, 'read_results'):
                     # Try to read existing results without raising error if file doesn't exist
-                    import os
                     output_file = os.path.join(full_path, f"{prefix}.pwo")
                     if os.path.exists(output_file):
                         calc.read_results()

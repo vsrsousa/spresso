@@ -17,13 +17,38 @@ try:
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
-# Element color map for visualization
-ELEMENT_COLORS = {
-    'H': 'white', 'C': 'gray', 'N': 'blue', 'O': 'red',
-    'F': 'green', 'P': 'orange', 'S': 'yellow',
-    'Cl': 'green', 'Fe': 'brown', 'Cu': 'brown',
-    'Al': 'silver', 'Si': 'pink', 'Pt': 'silver'
-}
+def _get_element_color(symbol):
+    """
+    Get color for an element symbol using ASE's Jmol colors.
+    Falls back to a hash-based color if element is not in ASE's database.
+    
+    Args:
+        symbol: Element symbol (e.g., 'H', 'C', 'Si')
+        
+    Returns:
+        RGB color tuple or color name
+    """
+    try:
+        from ase.data.colors import jmol_colors
+        from ase.data import atomic_numbers
+        
+        # Try to get the atomic number for this symbol
+        if symbol in atomic_numbers:
+            z = atomic_numbers[symbol]
+            if z < len(jmol_colors):
+                # Return Jmol color as RGB tuple
+                return jmol_colors[z]
+    except (ImportError, KeyError):
+        pass
+    
+    # Fallback: generate a consistent color based on element symbol hash
+    # This ensures the same element always gets the same color
+    import hashlib
+    hash_val = int(hashlib.md5(symbol.encode()).hexdigest()[:6], 16)
+    r = ((hash_val >> 16) & 0xFF) / 255.0
+    g = ((hash_val >> 8) & 0xFF) / 255.0
+    b = (hash_val & 0xFF) / 255.0
+    return (r, g, b)
 
 
 def create_structure_figure(atoms, figure=None):
@@ -50,16 +75,15 @@ def create_structure_figure(atoms, figure=None):
     positions = atoms.get_positions()
     symbols = atoms.get_chemical_symbols()
     
-    colors = [ELEMENT_COLORS.get(s, 'purple') for s in symbols]
+    # Get colors for all atoms using element-based coloring
+    colors = [_get_element_color(s) for s in symbols]
     
     # Draw bonds between atoms
     _draw_bonds(ax, atoms)
     
-    # Draw atoms as spheres (after bonds so atoms are on top)
-    # Using larger markers and depthshade for 3D sphere effect
+    # Draw atoms (after bonds so atoms are on top)
     ax.scatter(positions[:, 0], positions[:, 1], positions[:, 2],
-               c=colors, s=300, edgecolors='black', alpha=0.9, 
-               depthshade=True, linewidths=1.5)
+               c=colors, s=100, edgecolors='black')
     
     # Draw cell if present
     if atoms.cell is not None and atoms.pbc.any():

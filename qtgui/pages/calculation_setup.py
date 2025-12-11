@@ -23,6 +23,8 @@ try:
         DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
     )
     from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
+    from xespresso import Espresso
+    from xespresso.tools import setup_magnetic_config
     XESPRESSO_AVAILABLE = True
 except ImportError:
     XESPRESSO_AVAILABLE = False
@@ -949,17 +951,74 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Mark that we're using single calculation mode
         self.session_state['workflow_mode'] = 'single'
         
-        # Store config in session state for use in job_submission
-        # Note: Calculation preparation is now handled in job_submission page
+        # ===== CREATE ESPRESSO CALCULATOR AND PREPARED ATOMS =====
+        # This is the critical step that was missing!
+        try:
+            # Prepare atoms with magnetic/Hubbard configuration
+            prepared_atoms = atoms.copy()
+            
+            # Apply magnetic configuration if enabled
+            if config.get('enable_magnetism') and config.get('magnetic_config'):
+                prepared_atoms = setup_magnetic_config(
+                    prepared_atoms,
+                    config['magnetic_config'],
+                    config['pseudopotentials']
+                )
+            
+            # Build input_data for Espresso calculator
+            from qtgui.pages.job_submission import JobSubmissionPage
+            job_submission_helper = JobSubmissionPage(self.session_state)
+            prefix = config.get('label', 'calc').split('/')[-1]
+            input_data = job_submission_helper._build_input_data(config, prefix)
+            
+            # Get k-points configuration
+            if 'kspacing' in config:
+                from ase.io.espresso import kspacing_to_grid
+                kpts = kspacing_to_grid(prepared_atoms, config['kspacing'])
+            else:
+                kpts = config.get('kpts', (4, 4, 4))
+            
+            # Create Espresso calculator
+            calc = Espresso(
+                pseudopotentials=config['pseudopotentials'],
+                tstress=True,
+                tprnfor=True,
+                kpts=kpts,
+                input_data=input_data,
+            )
+            
+            # Set queue configuration if available
+            if config.get('queue'):
+                calc.set_queue(config['queue'])
+            
+            # Store calculator and prepared atoms in session state
+            self.session_state['espresso_calculator'] = calc
+            self.session_state['prepared_atoms'] = prepared_atoms
+            
+            success_msg = "✅ Calculator and atoms prepared successfully!"
+            
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            QMessageBox.critical(
+                self,
+                "Error Preparing Calculator",
+                f"Failed to create Espresso calculator:\n\n{str(e)}\n\nSee console for details."
+            )
+            print(f"Error preparing calculator:\n{error_trace}")
+            return
+        
         import json
         self.config_text.setText(json.dumps(config, indent=2))
         
-        self.results_label.setText("""
+        self.results_label.setText(f"""
 ✅ <b>Configuration saved successfully!</b>
 
-The configuration has been stored and is ready for use.
+{success_msg}
 
-Go to <b>Job Submission</b> page to prepare and run the calculation.
+The configuration has been stored and the Espresso calculator is ready.
+
+Go to <b>Job Submission</b> page to generate files or run the calculation.
 """)
         self.results_label.setStyleSheet("color: green;")
         self.results_label.setTextFormat(Qt.RichText)
@@ -967,7 +1026,7 @@ Go to <b>Job Submission</b> page to prepare and run the calculation.
         QMessageBox.information(
             self, 
             "Configuration Saved",
-            "Configuration has been saved.\n\nGo to Job Submission page to prepare and run the calculation."
+            "Configuration has been saved and calculator prepared.\n\nGo to Job Submission page to generate files or run the calculation."
         )
     
     def refresh(self):

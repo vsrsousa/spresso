@@ -247,7 +247,10 @@ loop_
         atoms = read_structure(temp_cif)
         
         # Check that we get the primitive cell (6 atoms: 2 Gd + 4 Co)
-        # instead of the expanded cell (24 atoms: 8 Gd + 16 Co)
+        # instead of the conventional unit cell (24 atoms: 8 Gd + 16 Co)
+        # Note: The CIF lists 8 Gd and 16 Co atoms, but these represent the
+        # conventional (expanded) unit cell. The primitive cell is 1/4 the volume
+        # and contains 6 atoms (2 Gd + 4 Co) with the same stoichiometry (GdCo2).
         assert len(atoms) == 6, f"Expected 6 atoms in primitive cell, got {len(atoms)}"
         
         # Check composition

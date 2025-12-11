@@ -64,6 +64,10 @@ DEFAULT_DB_PATH = os.path.expanduser("~/.xespresso/structures.db")
 class StructureViewerPage(QWidget):
     """Structure viewer page widget."""
     
+    # Viewer type constants
+    VIEWER_INTERACTIVE = "Interactive 3D"
+    VIEWER_SIMPLE = "Simple 3D"
+    
     def __init__(self, session_state):
         super().__init__()
         self.session_state = session_state
@@ -420,8 +424,8 @@ then view them in the "View Structure" tab.</p>
         self.viewer_combo = QComboBox()
         viewer_options = []
         if MATPLOTLIB_AVAILABLE:
-            viewer_options.append("Interactive 3D")
-            viewer_options.append("Simple 3D")
+            viewer_options.append(self.VIEWER_INTERACTIVE)
+            viewer_options.append(self.VIEWER_SIMPLE)
         
         if viewer_options:
             self.viewer_combo.addItems(viewer_options)
@@ -431,6 +435,7 @@ then view them in the "View Structure" tab.</p>
             viewer_select_layout.addWidget(QLabel("No viewers available"))
         
         # Add external ASE GUI button
+        self.ase_gui_btn = None
         if ASE_VIEW_AVAILABLE:
             self.ase_gui_btn = QPushButton("🚀 Open in ASE GUI")
             self.ase_gui_btn.setToolTip("Open structure in external ASE GUI window")
@@ -671,9 +676,9 @@ then view them in the "View Structure" tab.</p>
                 item.widget().setParent(None)
         
         # Show selected viewer
-        if "Interactive" in viewer_name and MATPLOTLIB_AVAILABLE:
+        if viewer_name == self.VIEWER_INTERACTIVE and MATPLOTLIB_AVAILABLE:
             self._show_interactive_matplotlib_viewer(atoms)
-        elif "Simple" in viewer_name and MATPLOTLIB_AVAILABLE:
+        elif viewer_name == self.VIEWER_SIMPLE and MATPLOTLIB_AVAILABLE:
             self._show_simple_matplotlib_viewer(atoms)
     
     def _show_interactive_matplotlib_viewer(self, atoms):
@@ -700,22 +705,23 @@ then view them in the "View Structure" tab.</p>
         try:
             # Open ASE GUI in external window
             ase_view(atoms)
-            QMessageBox.information(self, "ASE GUI", "ASE GUI opened in external window.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error opening ASE GUI:\n{e}")
     
     def _refresh_visualization(self):
         """Refresh the current visualization."""
-        viewer_name = self.viewer_combo.currentText() if hasattr(self, 'viewer_combo') else ""
+        if not hasattr(self, 'viewer_combo') or self.viewer_combo is None:
+            return
         
-        if "Interactive" in viewer_name and MATPLOTLIB_AVAILABLE:
+        viewer_name = self.viewer_combo.currentText()
+        
+        if viewer_name == self.VIEWER_INTERACTIVE and MATPLOTLIB_AVAILABLE:
             self._refresh_interactive_matplotlib_visualization()
-        elif "Simple" in viewer_name and MATPLOTLIB_AVAILABLE:
+        elif viewer_name == self.VIEWER_SIMPLE and MATPLOTLIB_AVAILABLE:
             self._refresh_simple_matplotlib_visualization()
         else:
             # Default to first available viewer
-            if hasattr(self, 'viewer_combo'):
-                self._on_viewer_changed(self.viewer_combo.currentText())
+            self._on_viewer_changed(viewer_name)
     
     def _refresh_interactive_matplotlib_visualization(self):
         """Refresh the interactive matplotlib structure visualization."""

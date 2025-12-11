@@ -5,6 +5,7 @@ This module provides common utilities used across the GUI pages.
 """
 
 from .validation import validate_path, validate_path_under_base, safe_path_exists, safe_makedirs
+from .structure_io import read_structure
 
 # ASE_ESPRESSO_COMMAND template for Quantum ESPRESSO execution
 # LAUNCHER, PACKAGE, PARALLEL, and PREFIX are placeholders replaced by xespresso
@@ -37,4 +38,5 @@ __all__ = [
     'DatabaseSaveWidget',
     'DatabaseLoadWidget',
     'ASE_DB_AVAILABLE',
+    'read_structure',
 ]

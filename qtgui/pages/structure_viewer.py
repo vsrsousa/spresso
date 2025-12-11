@@ -524,7 +524,8 @@ then view them in the "View Structure" tab.</p>
         
         if file_path:
             try:
-                atoms = ase_io.read(file_path)
+                from ..utils import read_structure
+                atoms = read_structure(file_path)
                 self._set_structure(atoms, f"File: {os.path.basename(file_path)}")
                 # Save the full file path for session restoration
                 self.session_state['structure_file_path'] = file_path

@@ -268,8 +268,8 @@ def test_cif_expanded_cell_option():
     from ase.build import bulk
     from ase import io as ase_io
     
-    # Create a simple test structure with known size
-    atoms_original = bulk("Si", cubic=True)  # 8 atoms
+    # Create a simple test structure
+    atoms_original = bulk("Si", cubic=True)
     
     with tempfile.NamedTemporaryFile(mode='w', suffix='.cif', delete=False) as f:
         temp_cif = f.name

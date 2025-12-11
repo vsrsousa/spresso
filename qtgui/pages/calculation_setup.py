@@ -5,6 +5,8 @@ This page is responsible for configuring calculations.
 """
 
 import os
+import json
+import traceback
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -31,9 +33,11 @@ except ImportError:
 
 try:
     from ase import Atoms
+    from ase.io.espresso import kspacing_to_grid
     ASE_AVAILABLE = True
 except ImportError:
     ASE_AVAILABLE = False
+    kspacing_to_grid = None
 
 # Import the pseudopotentials selector widget
 try:
@@ -1068,12 +1072,15 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 )
             
             # Build input_data for Espresso calculator (inline to avoid circular dependency)
-            prefix = config.get('label', 'calc').split('/')[-1]
+            label = config.get('label', 'calc')
+            # Extract prefix from label (handle both 'calc' and 'path/calc' formats)
+            prefix = label.split('/')[-1] if '/' in label else label
             input_data = self._build_input_data(config, prefix)
             
             # Get k-points configuration
             if 'kspacing' in config:
-                from ase.io.espresso import kspacing_to_grid
+                if kspacing_to_grid is None:
+                    raise ImportError("ASE not available for kspacing_to_grid")
                 kpts = kspacing_to_grid(prepared_atoms, config['kspacing'])
             else:
                 kpts = config.get('kpts', (4, 4, 4))
@@ -1098,7 +1105,6 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             success_msg = "✅ Calculator and atoms prepared successfully!"
             
         except Exception as e:
-            import traceback
             error_trace = traceback.format_exc()
             QMessageBox.critical(
                 self,
@@ -1108,7 +1114,6 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             print(f"Error preparing calculator:\n{error_trace}")
             return
         
-        import json
         self.config_text.setText(json.dumps(config, indent=2))
         
         self.results_label.setText(f"""

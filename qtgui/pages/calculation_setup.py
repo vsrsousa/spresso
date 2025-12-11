@@ -893,6 +893,108 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         return config
     
+    def _build_input_data(self, config, prefix):
+        """Build input_data dictionary for xespresso from GUI config.
+        
+        This is a helper method that constructs the input_data dictionary
+        needed by the Espresso calculator. It handles magnetic and Hubbard
+        configurations according to xespresso's requirements.
+        
+        Args:
+            config: Configuration dictionary from the GUI
+            prefix: Calculation prefix (used for outdir)
+            
+        Returns:
+            dict: Input data dictionary formatted for xespresso
+        """
+        input_data = {
+            'CONTROL': {
+                'calculation': config.get('calc_type', 'scf'),
+                'prefix': prefix,
+                'outdir': './tmp',
+                'verbosity': 'high',
+            },
+            'SYSTEM': {
+                'ecutwfc': config.get('ecutwfc', 50.0),
+                'ecutrho': config.get('ecutrho', 400.0),
+                'occupations': config.get('occupations', 'smearing'),
+            },
+            'ELECTRONS': {
+                'conv_thr': config.get('conv_thr', 1.0e-8),
+            },
+        }
+        
+        # Add smearing parameters if using smearing occupations
+        if config.get('occupations') == 'smearing':
+            input_data['SYSTEM']['smearing'] = config.get('smearing', 'gaussian')
+            input_data['SYSTEM']['degauss'] = config.get('degauss', 0.02)
+        
+        # Add magnetic configuration if enabled
+        # Note: Magnetic moments are set via setup_magnetic_config() on atoms,
+        # but nspin still needs to be set in input_data
+        if config.get('enable_magnetism') and config.get('magnetic_config'):
+            input_data['SYSTEM']['nspin'] = 2
+        
+        # Add Hubbard U configuration if enabled
+        if config.get('enable_hubbard') and config.get('hubbard_u'):
+            # Determine Hubbard format
+            hubbard_format = config.get('hubbard_format', 'old')
+            qe_version = config.get('qe_version', '')
+            
+            # Auto-detect format from QE version if not explicitly set
+            use_new_format = False
+            if hubbard_format == 'new':
+                use_new_format = True
+            elif hubbard_format == 'old':
+                use_new_format = False
+            elif qe_version:
+                # Parse version and determine format
+                try:
+                    major = int(qe_version.split('.')[0])
+                    use_new_format = major >= 7
+                except (ValueError, IndexError):
+                    pass
+            
+            if use_new_format:
+                # NEW FORMAT (QE >= 7.0): Use 'hubbard' dictionary
+                hubbard_dict = {
+                    'projector': config.get('hubbard_projector', 'atomic'),
+                    'u': {},
+                    'v': [],
+                }
+                
+                # Build U parameters with orbital specifications
+                for element, u_value in config.get('hubbard_u', {}).items():
+                    if u_value > 0:
+                        # Get orbital from config, default to 3d
+                        orbital = config.get('hubbard_orbitals', {}).get(element, '3d')
+                        hubbard_dict['u'][f'{element}-{orbital}'] = u_value
+                
+                # Add V parameters if present
+                if config.get('hubbard_v'):
+                    hubbard_dict['v'] = config['hubbard_v']
+                
+                input_data['hubbard'] = hubbard_dict
+                if qe_version:
+                    input_data['qe_version'] = qe_version
+            else:
+                # OLD FORMAT (QE < 7.0): Use 'input_ntyp' with Hubbard_U
+                input_data['SYSTEM']['lda_plus_u'] = True
+                if 'input_ntyp' not in input_data:
+                    input_data['input_ntyp'] = {}
+                input_data['input_ntyp']['Hubbard_U'] = {}
+                for element, u_value in config.get('hubbard_u', {}).items():
+                    if u_value > 0:
+                        input_data['input_ntyp']['Hubbard_U'][element] = u_value
+        
+        # Add relaxation parameters if doing relaxation
+        if config.get('calc_type') in ('relax', 'vc-relax'):
+            input_data['IONS'] = {}
+            if config.get('forc_conv_thr'):
+                input_data['CONTROL']['forc_conv_thr'] = config.get('forc_conv_thr')
+        
+        return input_data
+    
     def _prepare_calculation(self):
         """Prepare the calculation - creates Espresso calculator and stores in session state."""
         atoms = self.session_state.get('current_structure')
@@ -965,11 +1067,9 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                     config['pseudopotentials']
                 )
             
-            # Build input_data for Espresso calculator
-            from qtgui.pages.job_submission import JobSubmissionPage
-            job_submission_helper = JobSubmissionPage(self.session_state)
+            # Build input_data for Espresso calculator (inline to avoid circular dependency)
             prefix = config.get('label', 'calc').split('/')[-1]
-            input_data = job_submission_helper._build_input_data(config, prefix)
+            input_data = self._build_input_data(config, prefix)
             
             # Get k-points configuration
             if 'kspacing' in config:

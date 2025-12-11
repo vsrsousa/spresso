@@ -25,11 +25,9 @@ try:
         DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
     )
     from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
-    from gui.calculations import prepare_calculation_from_gui
     XESPRESSO_AVAILABLE = True
 except ImportError:
     XESPRESSO_AVAILABLE = False
-    prepare_calculation_from_gui = None
 
 try:
     from ase import Atoms
@@ -955,54 +953,58 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Mark that we're using single calculation mode
         self.session_state['workflow_mode'] = 'single'
         
-        # ===== CREATE ESPRESSO CALCULATOR AND PREPARED ATOMS =====
-        # Use the restored prepare_calculation_from_gui function
         try:
-            if prepare_calculation_from_gui is None:
-                raise ImportError("xespresso calculations module not available")
+            # Create a default label for preparation (can be changed in job submission)
+            preparation_label = config.get("label", f"{config.get('calc_type', 'scf')}/{atoms.get_chemical_formula()}")
             
-            # Get label for the calculation
-            label = config.get('label', 'calc')
+            # Use gui.calculations.preparation to create Espresso calculator
+            # This follows the same pattern as Streamlit version
+            from gui.calculations import prepare_calculation_from_gui
             
-            # Call prepare_calculation_from_gui to create calculator and prepared atoms
-            # This properly handles magnetic/Hubbard configuration via setup_magnetic_config
-            prepared_atoms, calc = prepare_calculation_from_gui(atoms, config, label=label)
+            # Prepare atoms and calculator
+            prepared_atoms, calc = prepare_calculation_from_gui(
+                atoms, config, label=preparation_label
+            )
             
-            # Store calculator and prepared atoms in session state
+            # Store prepared objects in session state for use in job_submission
             self.session_state['espresso_calculator'] = calc
             self.session_state['prepared_atoms'] = prepared_atoms
             
-            success_msg = "✅ Calculator and atoms prepared successfully!"
+            # Update config display
+            import json
+            self.config_text.setText(json.dumps(config, indent=2))
             
+            self.results_label.setText(f"""
+✅ <b>Calculation prepared successfully!</b>
+
+The calculation module has created:
+• ✓ Prepared atoms object (with magnetic/Hubbard config if enabled)
+• ✓ Espresso calculator object
+• ✓ Configuration: {preparation_label}
+
+Ready for:
+• Dry run (generate input files)
+• Job submission (execute calculation)
+
+Go to <b>Job Submission</b> page to use these objects.
+""")
+            self.results_label.setStyleSheet("color: green;")
+            self.results_label.setTextFormat(Qt.RichText)
+            
+            QMessageBox.information(
+                self, 
+                "Calculation Prepared",
+                "Espresso calculator and atoms objects have been created and stored.\n\nGo to Job Submission page to generate files or run the calculation."
+            )
         except Exception as e:
-            error_trace = traceback.format_exc()
+            import traceback
+            error_details = traceback.format_exc()
             QMessageBox.critical(
                 self,
-                "Error Preparing Calculator",
-                f"Failed to create Espresso calculator:\n\n{str(e)}\n\nSee console for details."
+                "Preparation Failed",
+                f"Failed to prepare calculation: {e}\n\nSee console for details."
             )
-            print(f"Error preparing calculator:\n{error_trace}")
-            return
-        
-        self.config_text.setText(json.dumps(config, indent=2))
-        
-        self.results_label.setText(f"""
-✅ <b>Configuration saved successfully!</b>
-
-{success_msg}
-
-The configuration has been stored and the Espresso calculator is ready.
-
-Go to <b>Job Submission</b> page to generate files or run the calculation.
-""")
-        self.results_label.setStyleSheet("color: green;")
-        self.results_label.setTextFormat(Qt.RichText)
-        
-        QMessageBox.information(
-            self, 
-            "Configuration Saved",
-            "Configuration has been saved and calculator prepared.\n\nGo to Job Submission page to generate files or run the calculation."
-        )
+            print(f"Error preparing calculation:\n{error_details}")
     
     def refresh(self):
         """Refresh the page."""

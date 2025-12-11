@@ -55,9 +55,11 @@ def create_structure_figure(atoms, figure=None):
     # Draw bonds between atoms
     _draw_bonds(ax, atoms)
     
-    # Draw atoms (after bonds so atoms are on top)
+    # Draw atoms as spheres (after bonds so atoms are on top)
+    # Using larger markers and depthshade for 3D sphere effect
     ax.scatter(positions[:, 0], positions[:, 1], positions[:, 2],
-               c=colors, s=100, edgecolors='black')
+               c=colors, s=300, edgecolors='black', alpha=0.9, 
+               depthshade=True, linewidths=1.5)
     
     # Draw cell if present
     if atoms.cell is not None and atoms.pbc.any():
@@ -104,7 +106,7 @@ def _draw_bonds(ax, atoms):
 
 def _add_element_legend(ax, symbols, colors):
     """Add a legend in the corner showing unique elements and their colors."""
-    from matplotlib.patches import Circle
+    from matplotlib.lines import Line2D
     
     # Get unique elements and their colors
     unique_elements = []
@@ -117,11 +119,12 @@ def _add_element_legend(ax, symbols, colors):
             unique_colors.append(color)
             seen.add(sym)
     
-    # Create legend handles
+    # Create legend handles using scatter-style markers (filled circles)
     legend_elements = []
     for elem, color in zip(unique_elements, unique_colors):
-        legend_elements.append(Circle((0, 0), 1, facecolor=color, 
-                                     edgecolor='black', label=elem))
+        legend_elements.append(Line2D([0], [0], marker='o', color='w', 
+                                     markerfacecolor=color, markeredgecolor='black',
+                                     markersize=10, label=elem, linewidth=0))
     
     # Add legend in upper right corner
     ax.legend(handles=legend_elements, loc='upper right', 

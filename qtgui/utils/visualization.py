@@ -59,13 +59,12 @@ def create_structure_figure(atoms, figure=None):
     ax.scatter(positions[:, 0], positions[:, 1], positions[:, 2],
                c=colors, s=100, edgecolors='black')
     
-    # Add labels
-    for pos, sym in zip(positions, symbols):
-        ax.text(pos[0], pos[1], pos[2], sym, fontsize=8)
-    
     # Draw cell if present
     if atoms.cell is not None and atoms.pbc.any():
         _draw_cell(ax, atoms.cell.array)
+    
+    # Add legend with element labels in corner
+    _add_element_legend(ax, symbols, colors)
     
     # Hide axes
     ax.set_axis_off()
@@ -101,6 +100,32 @@ def _draw_bonds(ax, atoms):
                    [positions[i][1], pos_j[1]], 
                    [positions[i][2], pos_j[2]], 
                    'gray', linewidth=1.5, alpha=0.6)
+
+
+def _add_element_legend(ax, symbols, colors):
+    """Add a legend in the corner showing unique elements and their colors."""
+    from matplotlib.patches import Circle
+    
+    # Get unique elements and their colors
+    unique_elements = []
+    unique_colors = []
+    seen = set()
+    
+    for sym, color in zip(symbols, colors):
+        if sym not in seen:
+            unique_elements.append(sym)
+            unique_colors.append(color)
+            seen.add(sym)
+    
+    # Create legend handles
+    legend_elements = []
+    for elem, color in zip(unique_elements, unique_colors):
+        legend_elements.append(Circle((0, 0), 1, facecolor=color, 
+                                     edgecolor='black', label=elem))
+    
+    # Add legend in upper right corner
+    ax.legend(handles=legend_elements, loc='upper right', 
+             framealpha=0.9, fontsize=10)
 
 
 def _draw_cell(ax, cell):

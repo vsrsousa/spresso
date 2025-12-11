@@ -42,12 +42,8 @@ def read_structure(file_path: Union[str, Path], **kwargs) -> Atoms:
         # unless explicitly overridden by user
         if 'primitive_cell' not in kwargs:
             kwargs['primitive_cell'] = True
-        # When using primitive_cell=True, we need to set subtrans_included=False.
-        # The subtrans_included parameter controls whether sublattice translations
-        # (e.g., centering operations like face-centering, body-centering) are included
-        # in the symmetry operations. When these are included, ASE cannot determine
-        # the primitive cell and will raise a RuntimeError. Setting it to False
-        # allows ASE to extract the primitive unit cell from the symmetry information.
+        # Set subtrans_included=False to exclude centering translations from symmetry,
+        # enabling ASE to determine the primitive cell and avoid RuntimeError.
         if kwargs.get('primitive_cell', False) and 'subtrans_included' not in kwargs:
             kwargs['subtrans_included'] = False
     

@@ -291,6 +291,12 @@ def test_cif_expanded_cell_option():
         assert len(atoms_prim) > 0
         assert len(atoms_expanded) > 0
         
+        # Verify that both reading modes work (they may give same result for simple structures,
+        # but the important thing is that primitive_cell=False can be used to override default)
+        # For structures without centering operations, both may be identical
+        assert atoms_prim.get_volume() > 0
+        assert atoms_expanded.get_volume() > 0
+        
     finally:
         # Clean up
         if os.path.exists(temp_cif):

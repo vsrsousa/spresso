@@ -957,9 +957,9 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             # Create a default label for preparation (can be changed in job submission)
             preparation_label = config.get("label", f"{config.get('calc_type', 'scf')}/{atoms.get_chemical_formula()}")
             
-            # Use gui.calculations.preparation to create Espresso calculator
-            # This follows the same pattern as Streamlit version
-            from gui.calculations import prepare_calculation_from_gui
+            # Use qtgui.calculations.preparation to create Espresso calculator
+            # This follows the same pattern as the original working implementation
+            from qtgui.calculations import prepare_calculation_from_gui
             
             # Prepare atoms and calculator
             prepared_atoms, calc = prepare_calculation_from_gui(

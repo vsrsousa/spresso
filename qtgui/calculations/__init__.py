@@ -8,8 +8,8 @@ from GUI configuration.
 The key principle: calculation modules prepare objects, job submission executes them.
 """
 
-from gui.calculations.base import BaseCalculationPreparation
-from gui.calculations.preparation import (
+from qtgui.calculations.base import BaseCalculationPreparation
+from qtgui.calculations.preparation import (
     CalculationPreparation,
     prepare_calculation_from_gui,
     dry_run_calculation

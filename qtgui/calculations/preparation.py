@@ -96,7 +96,8 @@ class CalculationPreparation(BaseCalculationPreparation):
                         hubbard_format = config.get('hubbard_format', 'old')
                         if hubbard_format == 'new':
                             # New format requires orbital specification
-                            orbital = config.get(f'hubbard_orbital_{element}', '3d')
+                            # Get orbital from config['hubbard_orbitals'][element] or default to 3d
+                            orbital = config.get('hubbard_orbitals', {}).get(element, '3d')
                             element_config['U'] = {orbital: u_value}
                         else:
                             # Old format - just the value
@@ -187,9 +188,10 @@ class CalculationPreparation(BaseCalculationPreparation):
             input_data['input_ntyp'] = input_ntyp
         
         # Add Hubbard parameters if using new format
-        if enable_hubbard and enable_magnetism:
-            # Check if new format was used
-            if 'hubbard' in mag_result:
+        # Note: Hubbard can be used with or without magnetism
+        if enable_hubbard:
+            # Check if new format was used (from setup_magnetic_config result)
+            if (enable_magnetism or enable_hubbard) and 'hubbard' in mag_result:
                 input_data['hubbard'] = mag_result['hubbard']
                 if 'hubbard_format' in mag_result:
                     input_data['hubbard_format'] = mag_result['hubbard_format']

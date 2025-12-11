@@ -1116,8 +1116,6 @@ Files created in: <code>{full_path}</code>
         full_path = os.path.join(workdir, label)
 
         # Validate path using centralized validation utility
-        from qtgui.utils import validate_path_under_base, safe_makedirs
-
         is_valid, full_path, error_msg = validate_path_under_base(full_path, workdir)
         if not is_valid:
             QMessageBox.critical(

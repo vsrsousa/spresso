@@ -25,7 +25,7 @@ try:
         DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
     )
     from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
-    from qtgui.calculations import prepare_calculation_from_gui
+    from gui.calculations import prepare_calculation_from_gui
     XESPRESSO_AVAILABLE = True
 except ImportError:
     XESPRESSO_AVAILABLE = False

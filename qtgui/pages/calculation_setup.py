@@ -5,6 +5,8 @@ This page is responsible for configuring calculations.
 """
 
 import os
+import json
+import traceback
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -29,9 +31,11 @@ except ImportError:
 
 try:
     from ase import Atoms
+    from ase.io.espresso import kspacing_to_grid
     ASE_AVAILABLE = True
 except ImportError:
     ASE_AVAILABLE = False
+    kspacing_to_grid = None
 
 # Import the pseudopotentials selector widget
 try:
@@ -949,26 +953,58 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         # Mark that we're using single calculation mode
         self.session_state['workflow_mode'] = 'single'
         
-        # Store config in session state for use in job_submission
-        # Note: Calculation preparation is now handled in job_submission page
-        import json
-        self.config_text.setText(json.dumps(config, indent=2))
-        
-        self.results_label.setText("""
-✅ <b>Configuration saved successfully!</b>
+        try:
+            # Create a default label for preparation (can be changed in job submission)
+            preparation_label = config.get("label", f"{config.get('calc_type', 'scf')}/{atoms.get_chemical_formula()}")
+            
+            # Use qtgui.calculations.preparation to create Espresso calculator
+            # This follows the same pattern as the original working implementation
+            from qtgui.calculations import prepare_calculation_from_gui
+            
+            # Prepare atoms and calculator
+            prepared_atoms, calc = prepare_calculation_from_gui(
+                atoms, config, label=preparation_label
+            )
+            
+            # Store prepared objects in session state for use in job_submission
+            self.session_state['espresso_calculator'] = calc
+            self.session_state['prepared_atoms'] = prepared_atoms
+            
+            # Update config display
+            import json
+            self.config_text.setText(json.dumps(config, indent=2))
+            
+            self.results_label.setText(f"""
+✅ <b>Calculation prepared successfully!</b>
 
-The configuration has been stored and is ready for use.
+The calculation module has created:
+• ✓ Prepared atoms object (with magnetic/Hubbard config if enabled)
+• ✓ Espresso calculator object
+• ✓ Configuration: {preparation_label}
 
-Go to <b>Job Submission</b> page to prepare and run the calculation.
+Ready for:
+• Dry run (generate input files)
+• Job submission (execute calculation)
+
+Go to <b>Job Submission</b> page to use these objects.
 """)
-        self.results_label.setStyleSheet("color: green;")
-        self.results_label.setTextFormat(Qt.RichText)
-        
-        QMessageBox.information(
-            self, 
-            "Configuration Saved",
-            "Configuration has been saved.\n\nGo to Job Submission page to prepare and run the calculation."
-        )
+            self.results_label.setStyleSheet("color: green;")
+            self.results_label.setTextFormat(Qt.RichText)
+            
+            QMessageBox.information(
+                self, 
+                "Calculation Prepared",
+                "Espresso calculator and atoms objects have been created and stored.\n\nGo to Job Submission page to generate files or run the calculation."
+            )
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            QMessageBox.critical(
+                self,
+                "Preparation Failed",
+                f"Failed to prepare calculation: {e}\n\nSee console for details."
+            )
+            print(f"Error preparing calculation:\n{error_details}")
     
     def refresh(self):
         """Refresh the page."""

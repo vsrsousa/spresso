@@ -4,7 +4,7 @@ PySide6-based graphical user interface for xespresso - Quantum ESPRESSO calculat
 
 ## Overview
 
-This is an alternative GUI for xespresso using PySide6 (Qt 6) instead of Streamlit. It provides the same functionality as the Streamlit GUI but with a native desktop application feel.
+This is the GUI for xespresso using PySide6 (Qt 6), providing a native desktop application for managing Quantum ESPRESSO calculations.
 
 **Version 2.0.0**: Added simplified stable version alongside the full-featured version.
 

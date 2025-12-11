@@ -129,9 +129,9 @@ def test_modules_added_to_queue():
     assert 'intel/2023' in queue['modules']
 
 
-def test_streamlit_modules_added_to_queue():
-    """Test that streamlit preparation adds modules to queue."""
-    # Simulate streamlit preparation logic
+def test_gui_modules_added_to_queue():
+    """Test that GUI preparation adds modules to queue."""
+    # Simulate GUI preparation logic
     config = {
         'modules': ['quantum-espresso/7.2'],
         'pseudopotentials': {'Fe': 'Fe.upf'},

@@ -374,7 +374,7 @@ class SimpleMainWindow(QMainWindow):
 <h3>For full features, use:</h3>
 <ul>
 <li>Command line: <code>python -m xespresso</code></li>
-<li>Streamlit GUI: <code>streamlit run gui/streamlit_app.py</code></li>
+<li>Full Qt GUI: <code>python -m qtgui</code></li>
 </ul>
 """)
         info_text.setTextFormat(Qt.RichText)

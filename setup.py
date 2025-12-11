@@ -11,7 +11,7 @@ README = (HERE / "README.md").read_text()
 setup(
     name="spresso",
     version="1.6.0",
-    description="Streamlit GUI for Quantum Espresso - Fork of xespresso with integrated GUI.",
+    description="Qt GUI for Quantum Espresso - Fork of xespresso with integrated Qt GUI.",
     long_description=README,
     long_description_content_type="text/markdown",
     url="https://github.com/vsrsousa/spresso",
@@ -45,14 +45,10 @@ setup(
         "tabulate>=0.8.9",
     ],
     extras_require={
-        "gui": ["streamlit>=1.28.0", "plotly>=5.17.0", "py3Dmol>=2.0.0"],
         "ssh": ["paramiko>=2.12.0"],  # Optional SSH functionality
     },
     entry_points={
-        "console_scripts": [
-            "spresso-gui=gui.__main__:main",
-            "xespresso-gui=gui.__main__:main",  # Keep backward compatibility
-        ],
+        "console_scripts": [],
     },
     python_requires=">=3.8",
 )

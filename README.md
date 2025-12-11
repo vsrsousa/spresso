@@ -1,9 +1,9 @@
 ## spresso
-Streamlit GUI for Quantum Espresso
+Qt GUI for Quantum Espresso
 
 *This project is a fork of [xespresso](https://github.com/vsrsousa/xespresso) (qe_gui branch)*
 
-Quantum ESPRESSO Calculator for Atomic Simulation Environment (ASE) with an integrated Streamlit GUI.
+Quantum ESPRESSO Calculator for Atomic Simulation Environment (ASE) with an integrated Qt GUI.
 
 **Note on naming:** The repository and PyPI package are named `spresso`, but the Python module is `xespresso` (for backwards compatibility). Install with `pip install spresso`, but import as `from xespresso import ...`
 
@@ -23,7 +23,7 @@ For the introduction of ASE , please visit https://wiki.fysik.dtu.dk/ase/index.h
 * **NEW: Simplified workflow with quality presets**
 * **NEW: K-spacing support for easy k-point specification**
 * **NEW: Pseudopotential configuration management**
-* **NEW: Streamlit GUI for easy configuration and job submission** 🚀
+* **NEW: Qt GUI for easy configuration and job submission** 🚀
 
 ### Author
 * Xing Wang  <xingwang1991@gmail.com>
@@ -39,9 +39,6 @@ For the introduction of ASE , please visit https://wiki.fysik.dtu.dk/ase/index.h
 ### Installation using pip
 ```bash
 pip install --upgrade --user spresso
-
-# Install with GUI support
-pip install --upgrade --user spresso[gui]
 ```
 
 ### Installation from source
@@ -50,8 +47,6 @@ You can get the source using git:
 git clone https://github.com/vsrsousa/spresso.git
 cd spresso
 pip install -e .
-# Install with GUI support
-pip install -e ".[gui]"
 ```
 
 **Optional environment variables:**
@@ -64,14 +59,7 @@ export ESPRESSO_PSEUDO="/path/to/pseudo"
 
 ### GUI Interface (NEW!) 🎨
 
-spresso includes a user-friendly Streamlit-based GUI for easy configuration and job submission!
-
-**Launch the GUI:**
-```bash
-spresso-gui
-# or
-python -m gui
-```
+spresso includes a user-friendly Qt-based GUI for easy configuration and job submission!
 
 **Features:**
 - 🖥️ Configure machines (local/remote) with scheduler support
@@ -80,8 +68,6 @@ python -m gui
 - 📊 Configure calculations with quality presets
 - 🔄 Build workflows with easy parameter selection
 - 🚀 Submit jobs to configured machines
-
-See [GUI_IMPLEMENTATION.md](GUI_IMPLEMENTATION.md) for detailed documentation.
 
 
 ### Examples

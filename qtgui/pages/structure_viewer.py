@@ -43,6 +43,7 @@ try:
     if matplotlib.get_backend() != 'QtAgg':
         matplotlib.use('QtAgg')
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
     from matplotlib.figure import Figure
     import numpy as np
     MATPLOTLIB_AVAILABLE = True
@@ -50,11 +51,11 @@ except ImportError:
     MATPLOTLIB_AVAILABLE = False
 
 try:
-    from ase.gui.gui import GUI
-    from ase.gui.images import Images
-    ASE_GUI_AVAILABLE = True
+    # Check if we can launch ASE GUI as external viewer
+    from ase.visualize import view as ase_view
+    ASE_VIEW_AVAILABLE = True
 except ImportError:
-    ASE_GUI_AVAILABLE = False
+    ASE_VIEW_AVAILABLE = False
 
 # Default database path
 DEFAULT_DB_PATH = os.path.expanduser("~/.xespresso/structures.db")
@@ -413,15 +414,14 @@ then view them in the "View Structure" tab.</p>
         view_desc.setWordWrap(True)
         scroll_layout.addWidget(view_desc)
         
-        # Viewer selection
+        # Viewer selection and external viewer button
         viewer_select_layout = QHBoxLayout()
-        viewer_select_layout.addWidget(QLabel("Viewer:"))
+        viewer_select_layout.addWidget(QLabel("Embedded Viewer:"))
         self.viewer_combo = QComboBox()
         viewer_options = []
-        if ASE_GUI_AVAILABLE:
-            viewer_options.append("ASE GUI (Interactive)")
         if MATPLOTLIB_AVAILABLE:
-            viewer_options.append("Matplotlib (Simple)")
+            viewer_options.append("Interactive 3D")
+            viewer_options.append("Simple 3D")
         
         if viewer_options:
             self.viewer_combo.addItems(viewer_options)
@@ -429,6 +429,13 @@ then view them in the "View Structure" tab.</p>
             viewer_select_layout.addWidget(self.viewer_combo)
         else:
             viewer_select_layout.addWidget(QLabel("No viewers available"))
+        
+        # Add external ASE GUI button
+        if ASE_VIEW_AVAILABLE:
+            self.ase_gui_btn = QPushButton("🚀 Open in ASE GUI")
+            self.ase_gui_btn.setToolTip("Open structure in external ASE GUI window")
+            self.ase_gui_btn.clicked.connect(self._open_ase_gui)
+            viewer_select_layout.addWidget(self.ase_gui_btn)
         
         viewer_select_layout.addStretch()
         scroll_layout.addLayout(viewer_select_layout)
@@ -443,34 +450,54 @@ then view them in the "View Structure" tab.</p>
         self.viewer_container_layout.setContentsMargins(0, 0, 0, 0)
         
         # Initialize viewer widgets
-        self.ase_gui_widget = None
-        self.matplotlib_widget = None
+        self.interactive_matplotlib_widget = None
+        self.simple_matplotlib_widget = None
         
-        # Create matplotlib viewer
+        # Create matplotlib viewers
         if MATPLOTLIB_AVAILABLE:
-            self.matplotlib_widget = QWidget()
-            matplotlib_layout = QVBoxLayout(self.matplotlib_widget)
-            matplotlib_layout.setContentsMargins(0, 0, 0, 0)
+            # Interactive matplotlib viewer with toolbar
+            self.interactive_matplotlib_widget = QWidget()
+            interactive_layout = QVBoxLayout(self.interactive_matplotlib_widget)
+            interactive_layout.setContentsMargins(0, 0, 0, 0)
             
-            self.figure = Figure(figsize=(8, 6))
-            self.canvas = FigureCanvas(self.figure)
-            matplotlib_layout.addWidget(self.canvas)
+            self.interactive_figure = Figure(figsize=(8, 6))
+            self.interactive_canvas = FigureCanvas(self.interactive_figure)
+            
+            # Add navigation toolbar for interactivity
+            self.toolbar = NavigationToolbar(self.interactive_canvas, self.interactive_matplotlib_widget)
+            interactive_layout.addWidget(self.toolbar)
+            interactive_layout.addWidget(self.interactive_canvas)
             
             # Visualization controls
             viz_controls = QHBoxLayout()
-            
             refresh_viz_btn = QPushButton("🔄 Refresh View")
             refresh_viz_btn.clicked.connect(self._refresh_visualization)
             viz_controls.addWidget(refresh_viz_btn)
-            
             viz_controls.addStretch()
-            matplotlib_layout.addLayout(viz_controls)
+            interactive_layout.addLayout(viz_controls)
+            
+            # Simple matplotlib viewer without toolbar
+            self.simple_matplotlib_widget = QWidget()
+            simple_layout = QVBoxLayout(self.simple_matplotlib_widget)
+            simple_layout.setContentsMargins(0, 0, 0, 0)
+            
+            self.simple_figure = Figure(figsize=(8, 6))
+            self.simple_canvas = FigureCanvas(self.simple_figure)
+            simple_layout.addWidget(self.simple_canvas)
+            
+            # Simple controls
+            simple_controls = QHBoxLayout()
+            simple_refresh_btn = QPushButton("🔄 Refresh View")
+            simple_refresh_btn.clicked.connect(self._refresh_visualization)
+            simple_controls.addWidget(simple_refresh_btn)
+            simple_controls.addStretch()
+            simple_layout.addLayout(simple_controls)
         
         # Add container to viz_layout
         viz_layout.addWidget(self.viewer_container)
         
-        if not MATPLOTLIB_AVAILABLE and not ASE_GUI_AVAILABLE:
-            viz_label = QLabel("No visualization tools available. Please install ASE or matplotlib.")
+        if not MATPLOTLIB_AVAILABLE:
+            viz_label = QLabel("No visualization tools available. Please install matplotlib.")
             viz_label.setStyleSheet("color: red;")
             viz_layout.addWidget(viz_label)
         else:
@@ -644,59 +671,54 @@ then view them in the "View Structure" tab.</p>
                 item.widget().setParent(None)
         
         # Show selected viewer
-        if "ASE GUI" in viewer_name and ASE_GUI_AVAILABLE:
-            self._show_ase_gui_viewer(atoms)
-        elif "Matplotlib" in viewer_name and MATPLOTLIB_AVAILABLE:
-            self._show_matplotlib_viewer(atoms)
+        if "Interactive" in viewer_name and MATPLOTLIB_AVAILABLE:
+            self._show_interactive_matplotlib_viewer(atoms)
+        elif "Simple" in viewer_name and MATPLOTLIB_AVAILABLE:
+            self._show_simple_matplotlib_viewer(atoms)
     
-    def _show_ase_gui_viewer(self, atoms):
-        """Show ASE GUI viewer."""
+    def _show_interactive_matplotlib_viewer(self, atoms):
+        """Show interactive matplotlib viewer with navigation toolbar."""
+        if self.interactive_matplotlib_widget:
+            self.viewer_container_layout.addWidget(self.interactive_matplotlib_widget)
+            if atoms is not None:
+                self._refresh_interactive_matplotlib_visualization()
+    
+    def _show_simple_matplotlib_viewer(self, atoms):
+        """Show simple matplotlib viewer without toolbar."""
+        if self.simple_matplotlib_widget:
+            self.viewer_container_layout.addWidget(self.simple_matplotlib_widget)
+            if atoms is not None:
+                self._refresh_simple_matplotlib_visualization()
+    
+    def _open_ase_gui(self):
+        """Open structure in external ASE GUI window."""
+        atoms = self.session_state.get('current_structure')
         if atoms is None:
-            label = QLabel("No structure loaded. Load a structure to visualize it.")
-            label.setStyleSheet("color: gray;")
-            self.viewer_container_layout.addWidget(label)
+            QMessageBox.warning(self, "Warning", "No structure loaded. Load a structure first.")
             return
         
         try:
-            # Create Images object from atoms
-            images = Images([atoms])
-            
-            # Create ASE GUI widget (embedded, not standalone window)
-            self.ase_gui_widget = GUI(images, embedded=True)
-            
-            # Add the GUI widget to our container
-            self.viewer_container_layout.addWidget(self.ase_gui_widget)
-            
+            # Open ASE GUI in external window
+            ase_view(atoms)
+            QMessageBox.information(self, "ASE GUI", "ASE GUI opened in external window.")
         except Exception as e:
-            error_label = QLabel(f"Error creating ASE GUI viewer: {e}")
-            error_label.setStyleSheet("color: red;")
-            self.viewer_container_layout.addWidget(error_label)
-            print(f"ASE GUI Error: {e}")
-    
-    def _show_matplotlib_viewer(self, atoms):
-        """Show matplotlib viewer."""
-        if self.matplotlib_widget:
-            self.viewer_container_layout.addWidget(self.matplotlib_widget)
-            if atoms is not None:
-                self._refresh_matplotlib_visualization()
+            QMessageBox.critical(self, "Error", f"Error opening ASE GUI:\n{e}")
     
     def _refresh_visualization(self):
         """Refresh the current visualization."""
         viewer_name = self.viewer_combo.currentText() if hasattr(self, 'viewer_combo') else ""
-        atoms = self.session_state.get('current_structure')
         
-        if "ASE GUI" in viewer_name and ASE_GUI_AVAILABLE:
-            # Refresh ASE GUI viewer
-            self._show_ase_gui_viewer(atoms)
-        elif "Matplotlib" in viewer_name and MATPLOTLIB_AVAILABLE:
-            self._refresh_matplotlib_visualization()
+        if "Interactive" in viewer_name and MATPLOTLIB_AVAILABLE:
+            self._refresh_interactive_matplotlib_visualization()
+        elif "Simple" in viewer_name and MATPLOTLIB_AVAILABLE:
+            self._refresh_simple_matplotlib_visualization()
         else:
             # Default to first available viewer
             if hasattr(self, 'viewer_combo'):
                 self._on_viewer_changed(self.viewer_combo.currentText())
     
-    def _refresh_matplotlib_visualization(self):
-        """Refresh the matplotlib structure visualization."""
+    def _refresh_interactive_matplotlib_visualization(self):
+        """Refresh the interactive matplotlib structure visualization."""
         if not MATPLOTLIB_AVAILABLE:
             return
         
@@ -704,8 +726,23 @@ then view them in the "View Structure" tab.</p>
         if atoms is None:
             return
         
-        self.figure.clear()
-        ax = self.figure.add_subplot(111, projection='3d')
+        self._draw_structure_on_axes(self.interactive_figure, self.interactive_canvas, atoms)
+    
+    def _refresh_simple_matplotlib_visualization(self):
+        """Refresh the simple matplotlib structure visualization."""
+        if not MATPLOTLIB_AVAILABLE:
+            return
+        
+        atoms = self.session_state.get('current_structure')
+        if atoms is None:
+            return
+        
+        self._draw_structure_on_axes(self.simple_figure, self.simple_canvas, atoms)
+    
+    def _draw_structure_on_axes(self, figure, canvas, atoms):
+        """Draw structure on matplotlib axes."""
+        figure.clear()
+        ax = figure.add_subplot(111, projection='3d')
         
         positions = atoms.get_positions()
         symbols = atoms.get_chemical_symbols()
@@ -748,8 +785,8 @@ then view them in the "View Structure" tab.</p>
         ax.set_ylabel('Y (Å)')
         ax.set_zlabel('Z (Å)')
         
-        self.figure.tight_layout()
-        self.canvas.draw()
+        figure.tight_layout()
+        canvas.draw()
     
     def _export_structure(self):
         """Export the current structure."""

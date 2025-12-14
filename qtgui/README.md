@@ -24,14 +24,15 @@ python -m qtgui --simple
 
 ### 2. Full Version (More Features)
 
-The full-featured version with:
-- Advanced session management
-- Configuration dialogs
-- Multi-session support
-- Full workflow pages
+The full-featured version now opens a **Session Manager** by default:
+- Configure machines/codes/pseudopotentials
+- Launch independent session workspaces (each in its own window)
+- Restart/close sessions and open saved ones
+- Monitor jobs from a central place
 
 ```bash
-python -m qtgui
+python -m qtgui             # Session Manager (default)
+python -m qtgui --workspace # Open a single workflow window directly
 ```
 
 ## Features

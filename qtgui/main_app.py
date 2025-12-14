@@ -91,7 +91,29 @@ class SessionState:
         'structure_file_path', 'structure_db_path'  # For restoring structures on session load
     }
     
-    def __new__(cls):
+    def __new__(cls, *, isolated=False):
+        """
+        Create a new SessionState.
+
+        Args:
+            isolated (bool): When True, create an independent SessionState that
+                does not use the singleton instance. This enables multiple
+                windows/sessions to run side by side with their own state.
+        """
+        if isolated:
+            instance = super().__new__(cls)
+            instance._state = {}
+            instance._sessions = {}
+            instance._current_session_id = None
+            instance._sessions_dir = DEFAULT_SESSIONS_DIR
+            instance._listeners = []
+            instance._active_session_names = []
+            instance._notifying = False
+            instance._isolated = True
+            instance._initialize_defaults()
+            instance._load_sessions_index()
+            return instance
+
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._state = {}
@@ -105,6 +127,7 @@ class SessionState:
             # when listeners update state during notification, which would otherwise
             # trigger another notification cycle
             cls._instance._notifying = False
+            cls._instance._isolated = False
             cls._instance._initialize_defaults()
             cls._instance._load_sessions_index()
         return cls._instance
@@ -123,18 +146,42 @@ class SessionState:
         self._state['session_modified'] = datetime.now().isoformat()
     
     def __getitem__(self, key):
-        return self._state.get(key)
+        if key in self._state:
+            return self._state.get(key)
+        if self.is_isolated():
+            return SessionState()._state.get(key)
+        return None
     
     def __setitem__(self, key, value):
         self._state[key] = value
         self._state['session_modified'] = datetime.now().isoformat()
+        if self.is_isolated() and key in (
+            'current_machine', 'current_machine_name',
+            'current_codes', 'selected_code_version',
+            'selected_qe_version'
+        ):
+            shared = SessionState()
+            shared._state[key] = value
+            shared._state['session_modified'] = self._state['session_modified']
         self._notify_listeners()
     
     def __contains__(self, key):
         return key in self._state
     
     def get(self, key, default=None):
-        return self._state.get(key, default)
+        if key in self._state:
+            return self._state.get(key, default)
+        if self.is_isolated():
+            return SessionState()._state.get(key, default)
+        return default
+
+    def get_config_state(self):
+        """Return the shared configuration state (singleton)."""
+        return SessionState()
+
+    def is_isolated(self):
+        """Return True when this state is detached from the singleton."""
+        return getattr(self, "_isolated", False)
     
     def clear_state(self):
         """Clear all state and reinitialize defaults."""
@@ -679,15 +726,17 @@ class SessionState:
         self._notify_listeners()
 
 
-# Global session state instance
+# Global session state instance (kept for backward compatibility and shared
+# configuration storage). Individual workflow windows should prefer isolated
+# SessionState instances when independent state is required.
 session_state = SessionState()
 
 
 class MainWindow(QMainWindow):
     """Main application window for xespresso PySide6 GUI."""
     
-    def __init__(self):
-        super().__init__()
+    def __init__(self, session_state=None, parent=None):
+        super().__init__(parent)
         self.setWindowTitle("⚛️ xespresso - Quantum ESPRESSO Configuration GUI")
         
         # Set window size as a proportion of the screen (80% width, 80% height)
@@ -706,8 +755,8 @@ class MainWindow(QMainWindow):
             (screen.height() - height) // 2
         )
         
-        # Initialize session state - use singleton directly for robustness
-        self.session_state = SessionState()
+        # Initialize session state - allow isolated instances for independent windows
+        self.session_state = session_state or SessionState(isolated=True)
         
         # Configuration dialog (created on demand)
         self._config_dialog = None
@@ -1114,14 +1163,20 @@ Version: 1.2.0<br>
                         pass  # Don't let page refresh errors crash the app
         finally:
             self._updating = False
+
+    def refresh_session(self):
+        """Public helper to refresh UI after session state changes."""
+        self._on_session_changed()
     
     def _open_config_dialog(self):
         """Open the configuration dialog."""
         # Import here to avoid circular imports
         from qtgui.dialogs import ConfigurationDialog
         
+        # Always use the shared configuration state so machines/codes/pseudopotentials
+        # remain global across all sessions and independent of per-session workspace state.
         if self._config_dialog is None:
-            self._config_dialog = ConfigurationDialog(self.session_state, self)
+            self._config_dialog = ConfigurationDialog(self.session_state.get_config_state(), self)
             self._config_dialog.configuration_changed.connect(self._on_config_changed)
         
         self._config_dialog.show()
@@ -1438,6 +1493,290 @@ Version: 1.2.0<br>
         event.accept()
 
 
+class SessionManagerWindow(QMainWindow):
+    """Session manager entry window that opens independent session workspaces."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("⚙️ xespresso - Session Manager")
+        self.resize(900, 600)
+        self.setMinimumSize(700, 500)
+
+        # Reuse the singleton for configuration and indexing
+        self.manager_state = SessionState()
+        self._config_dialog = None
+        self._job_monitor = None
+        self._session_windows = {}
+
+        self._setup_ui()
+        self._setup_menu()
+        self._setup_statusbar()
+        self._refresh_sessions()
+
+    def _setup_ui(self):
+        central = QWidget()
+        layout = QVBoxLayout(central)
+
+        intro = QLabel(
+            "<b>Session Manager</b><br>"
+            "Use this window to configure machines/codes/pseudopotentials, "
+            "open or restart session workspaces, and monitor jobs. "
+            "Each session opens in its own window with isolated state."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        # Sessions panel
+        sessions_group = QGroupBox("Sessions")
+        sessions_layout = QVBoxLayout(sessions_group)
+
+        self.sessions_list = QListWidget()
+        self.sessions_list.itemDoubleClicked.connect(self._open_selected_session)
+        sessions_layout.addWidget(self.sessions_list)
+
+        btn_row = QHBoxLayout()
+        new_btn = QPushButton("New Session")
+        new_btn.clicked.connect(self._new_session)
+        btn_row.addWidget(new_btn)
+
+        open_btn = QPushButton("Open Saved")
+        open_btn.clicked.connect(self._load_session_file)
+        btn_row.addWidget(open_btn)
+
+        restart_btn = QPushButton("Restart")
+        restart_btn.clicked.connect(self._restart_selected_session)
+        btn_row.addWidget(restart_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self._close_selected_session)
+        btn_row.addWidget(close_btn)
+
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self._refresh_sessions)
+        btn_row.addWidget(refresh_btn)
+
+        sessions_layout.addLayout(btn_row)
+        layout.addWidget(sessions_group)
+
+        # Actions panel
+        actions = QHBoxLayout()
+        config_btn = QPushButton("⚙️ Configuration")
+        config_btn.clicked.connect(self._open_config_dialog)
+        actions.addWidget(config_btn)
+
+        monitor_btn = QPushButton("🔍 Job Monitor")
+        monitor_btn.clicked.connect(self._open_job_monitor)
+        actions.addWidget(monitor_btn)
+
+        layout.addLayout(actions)
+        layout.addStretch()
+
+        self.setCentralWidget(central)
+
+    def _setup_menu(self):
+        menubar = self.menuBar()
+
+        file_menu = menubar.addMenu("&File")
+
+        new_action = QAction("New Session", self)
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self._new_session)
+        file_menu.addAction(new_action)
+
+        open_action = QAction("Open Session", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self._load_session_file)
+        file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        tools_menu = menubar.addMenu("&Tools")
+
+        config_action = QAction("Configuration...", self)
+        config_action.setShortcut("Ctrl+,")
+        config_action.triggered.connect(self._open_config_dialog)
+        tools_menu.addAction(config_action)
+
+        monitor_action = QAction("Job Monitor", self)
+        monitor_action.triggered.connect(self._open_job_monitor)
+        tools_menu.addAction(monitor_action)
+
+        view_menu = menubar.addMenu("&View")
+        refresh_action = QAction("Refresh Sessions", self)
+        refresh_action.setShortcut("F5")
+        refresh_action.triggered.connect(self._refresh_sessions)
+        view_menu.addAction(refresh_action)
+
+    def _setup_statusbar(self):
+        self.statusBar().showMessage("Ready")
+
+    def _refresh_sessions(self):
+        """Refresh the sessions list with open windows and saved sessions."""
+        self.sessions_list.clear()
+        items = {}
+
+        # Open windows first
+        for session_id, window in self._session_windows.items():
+            name = window.session_state.get_session_name()
+            items[(session_id, True)] = {
+                'session_id': session_id,
+                'name': name,
+                'open': True,
+                'path': None,
+            }
+
+        # Saved sessions on disk
+        for session_id, session_name, path in self.manager_state.list_session_files():
+            key = (session_id, False)
+            if key in items:
+                continue
+            items[key] = {
+                'session_id': session_id,
+                'name': session_name,
+                'open': False,
+                'path': path,
+            }
+
+        for meta in sorted(items.values(), key=lambda m: m['name'].lower()):
+            label = meta['name']
+            if meta['open']:
+                label += " (open)"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, meta)
+            self.sessions_list.addItem(item)
+
+    def _selected_meta(self):
+        item = self.sessions_list.currentItem()
+        return item.data(Qt.UserRole) if item else None
+
+    def _new_session(self):
+        name, ok = QInputDialog.getText(
+            self,
+            "New Session",
+            "Session name:",
+            QLineEdit.Normal,
+            f"Session {len(self._session_windows) + 1}",
+        )
+        if not ok or not name:
+            return
+
+        state = SessionState(isolated=True)
+        try:
+            state.create_session(name)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"Could not create session:\n{exc}")
+            return
+
+        window = self._spawn_session_window(state)
+        if window is None:
+            QMessageBox.warning(self, "Error", "Failed to open new session window.")
+            return
+
+        window.show()
+        self._refresh_sessions()
+        self.statusBar().showMessage(f"Created session: {name}")
+
+    def _open_selected_session(self, _item=None):
+        meta = self._selected_meta()
+        if not meta:
+            return
+        if meta['open'] and meta['session_id'] in self._session_windows:
+            window = self._session_windows[meta['session_id']]
+            window.show()
+            window.raise_()
+            window.activateWindow()
+            return
+        if meta.get('path'):
+            self._open_session_from_path(meta['path'])
+
+    def _open_session_from_path(self, path):
+        if not path:
+            return
+        state = SessionState(isolated=True)
+        if state.load_session_from_file(path):
+            window = self._spawn_session_window(state)
+            if window is None:
+                QMessageBox.warning(self, "Error", "Could not open session window.")
+                return
+            window.show()
+            self._refresh_sessions()
+            self.statusBar().showMessage(f"Opened session from {path}")
+        else:
+            QMessageBox.warning(self, "Error", f"Could not load session:\n{path}")
+
+    def _load_session_file(self):
+        sessions_dir = self.manager_state.get_sessions_dir()
+        os.makedirs(sessions_dir, exist_ok=True)
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Session File",
+            sessions_dir,
+            "Session Files (*.json);;All Files (*)",
+        )
+        if file_path:
+            self._open_session_from_path(file_path)
+
+    def _restart_selected_session(self):
+        meta = self._selected_meta()
+        if not meta or meta['session_id'] not in self._session_windows:
+            return
+        window = self._session_windows[meta['session_id']]
+        window.session_state.reset()
+        window.refresh_session()
+        self.statusBar().showMessage(f"Restarted session: {window.session_state.get_session_name()}")
+
+    def _close_selected_session(self):
+        meta = self._selected_meta()
+        if not meta or meta['session_id'] not in self._session_windows:
+            return
+        window = self._session_windows.pop(meta['session_id'])
+        window.close()
+        self._refresh_sessions()
+        self.statusBar().showMessage("Session closed")
+
+    def _spawn_session_window(self, state):
+        """Create a new session workspace window with isolated state."""
+        window = MainWindow(session_state=state)
+        session_name = state.get_session_name()
+        window.setWindowTitle(f"⚛️ xespresso - {session_name}")
+        self._session_windows[state.get_current_session_id()] = window
+        return window
+
+    def _open_config_dialog(self):
+        from qtgui.dialogs import ConfigurationDialog
+        if self._config_dialog is None:
+            self._config_dialog = ConfigurationDialog(self.manager_state, self)
+        self._config_dialog.show()
+        self._config_dialog.raise_()
+        self._config_dialog.activateWindow()
+
+    def _get_job_monitor(self):
+        if self._job_monitor is None:
+            from qtgui.dialogs.job_monitor_dialog import JobMonitorDialog
+            xespresso_dir = os.path.expanduser("~/.xespresso")
+            self._job_monitor = JobMonitorDialog(config_dir=xespresso_dir, parent=self)
+        return self._job_monitor
+
+    def _open_job_monitor(self):
+        monitor = self._get_job_monitor()
+        monitor.show()
+        monitor.raise_()
+        monitor.activateWindow()
+
+    def closeEvent(self, event):
+        for window in list(self._session_windows.values()):
+            try:
+                window.close()
+            except Exception as exc:  # pragma: no cover - defensive cleanup
+                print(f"Warning: Exception occurred while closing session window: {exc}", file=sys.stderr)
+        super().closeEvent(event)
+
+
 def main():
     """Main entry point for the application."""
     app = QApplication(sys.argv)
@@ -1462,7 +1801,11 @@ def main():
         }
     """)
     
-    window = MainWindow()
+    # Default entry opens the session manager; allow direct workspace with flag
+    if "--workspace" in sys.argv:
+        window = MainWindow()
+    else:
+        window = SessionManagerWindow()
     window.show()
     
     sys.exit(app.exec())

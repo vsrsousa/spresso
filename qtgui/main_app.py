@@ -146,18 +146,38 @@ class SessionState:
         self._state['session_modified'] = datetime.now().isoformat()
     
     def __getitem__(self, key):
-        return self._state.get(key)
+        if key in self._state:
+            return self._state.get(key)
+        if self.is_isolated():
+            return SessionState()._state.get(key)
+        return None
     
     def __setitem__(self, key, value):
         self._state[key] = value
         self._state['session_modified'] = datetime.now().isoformat()
+        if self.is_isolated() and key in (
+            'current_machine', 'current_machine_name',
+            'current_codes', 'selected_code_version',
+            'selected_qe_version'
+        ):
+            shared = SessionState()
+            shared._state[key] = value
+            shared._state['session_modified'] = self._state['session_modified']
         self._notify_listeners()
     
     def __contains__(self, key):
         return key in self._state
     
     def get(self, key, default=None):
-        return self._state.get(key, default)
+        if key in self._state:
+            return self._state.get(key, default)
+        if self.is_isolated():
+            return SessionState()._state.get(key, default)
+        return default
+
+    def get_config_state(self):
+        """Return the shared configuration state (singleton)."""
+        return SessionState()
 
     def is_isolated(self):
         """Return True when this state is detached from the singleton."""
@@ -1156,7 +1176,7 @@ Version: 1.2.0<br>
         # Always use the shared configuration state so machines/codes/pseudopotentials
         # remain global across all sessions and independent of per-session workspace state.
         if self._config_dialog is None:
-            self._config_dialog = ConfigurationDialog(SessionState(), self)
+            self._config_dialog = ConfigurationDialog(self.session_state.get_config_state(), self)
             self._config_dialog.configuration_changed.connect(self._on_config_changed)
         
         self._config_dialog.show()

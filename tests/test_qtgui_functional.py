@@ -146,6 +146,28 @@ class TestSessionStateSignals:
         SessionState._instance = None
 
 
+class TestIsolatedSessions:
+    """Tests for isolated session handling."""
+
+    def test_isolated_session_state_independent(self, temp_sessions_dir):
+        from qtgui.main_app import SessionState
+
+        SessionState._instance = None
+
+        shared = SessionState()
+        shared._sessions_dir = temp_sessions_dir
+        isolated = SessionState(isolated=True)
+        isolated._sessions_dir = temp_sessions_dir
+
+        shared['working_directory'] = '/shared'
+        isolated['working_directory'] = '/isolated'
+
+        assert shared['working_directory'] == '/shared'
+        assert isolated['working_directory'] == '/isolated'
+        assert isolated.is_isolated() is True
+        assert shared.is_isolated() is False
+
+
 class TestWorkingDirectoryPerSession:
     """Test that working directory is properly associated with each session."""
     
@@ -198,9 +220,53 @@ class TestWorkingDirectoryPerSession:
         # Verify working directory was restored to Session 2's directory
         assert state['working_directory'] == workdir2
         assert window.workdir_label.text() == workdir2
-        
+
+
+class TestSessionManagerWindow:
+    """Ensure the session manager opens isolated session windows."""
+
+    def test_manager_spawns_isolated_window(self, temp_sessions_dir, mock_qapplication):
+        from qtgui.main_app import SessionManagerWindow, SessionState
+
+        SessionState._instance = None
+
+        manager = SessionManagerWindow()
+        manager.manager_state._sessions_dir = temp_sessions_dir
+
+        state = SessionState(isolated=True)
+        state._sessions_dir = temp_sessions_dir
+        state.create_session("Managed Session")
+
+        window = manager._spawn_session_window(state)
+        assert window.session_state is state
+        assert state.is_isolated()
+
+        manager._session_windows[state.get_current_session_id()] = window
+        manager._refresh_sessions()
+
         window.close()
-        
+        manager.close()
+
+    def test_workspace_config_uses_shared_state(self, temp_sessions_dir, mock_qapplication):
+        from qtgui.main_app import SessionManagerWindow, SessionState, MainWindow
+
+        SessionState._instance = None
+
+        isolated_state = SessionState(isolated=True)
+        isolated_state._sessions_dir = temp_sessions_dir
+
+        window = MainWindow(session_state=isolated_state)
+        try:
+            window._open_config_dialog()
+
+            shared_state = SessionState()
+            assert window._config_dialog.session_state is shared_state
+            assert window._config_dialog.session_state.is_isolated() is False
+        finally:
+            if window._config_dialog is not None:
+                window._config_dialog.close()
+            window.close()
+
         # Reset singleton
         SessionState._instance = None
     

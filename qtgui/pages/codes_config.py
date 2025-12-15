@@ -223,10 +223,10 @@ in the Calculation Setup or Workflow Builder pages.</p>
                     self.machine_combo.addItem(machine)
             else:
                 self.results_label.setText("⚠️ No machines configured. Please configure a machine first.")
-                self.results_label.setStyleSheet("color: orange;")
+                self.results_label.setStyleSheet("color: #d97706;")
         except Exception as e:
             self.results_label.setText(f"⚠️ Could not load machines: {e}")
-            self.results_label.setStyleSheet("color: orange;")
+            self.results_label.setStyleSheet("color: #d97706;")
         finally:
             self.machine_combo.blockSignals(False)
         # Manually trigger the handler for the first item if any
@@ -284,7 +284,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
                 self._display_detected_codes(all_codes, codes_config.label)
             else:
                 self.results_label.setText("⚠️ No codes detected. Check paths and modules.")
-                self.results_label.setStyleSheet("color: orange;")
+                self.results_label.setStyleSheet("color: #d97706;")
                 self.detected_codes = None
                 self.detected_group.setVisible(False)
                 
@@ -372,7 +372,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
                 
         except Exception as e:
             self.existing_status_label.setText(f"⚠️ Could not load codes configuration: {e}")
-            self.existing_status_label.setStyleSheet("color: orange;")
+            self.existing_status_label.setStyleSheet("color: #d97706;")
         finally:
             self.version_combo.blockSignals(False)
     

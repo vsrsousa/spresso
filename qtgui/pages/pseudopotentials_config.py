@@ -311,7 +311,7 @@ During calculations, xespresso automatically copies the needed pseudopotentials 
         """Load existing pseudopotential configurations."""
         if not XESPRESSO_AVAILABLE:
             self.existing_status.setText("⚠️ xespresso modules not available")
-            self.existing_status.setStyleSheet("color: orange;")
+            self.existing_status.setStyleSheet("color: #d97706;")
             return
         
         try:
@@ -328,7 +328,7 @@ During calculations, xespresso automatically copies the needed pseudopotentials 
                 self.existing_status.setStyleSheet("color: blue;")
         except Exception as e:
             self.existing_status.setText(f"⚠️ Could not load configurations: {e}")
-            self.existing_status.setStyleSheet("color: orange;")
+            self.existing_status.setStyleSheet("color: #d97706;")
     
     def _browse_pseudo_dir(self):
         """Browse for pseudopotential directory."""
@@ -374,7 +374,7 @@ During calculations, xespresso automatically copies the needed pseudopotentials 
                         }
                 except Exception as e:
                     self.detection_status.setText(f"⚠️ Could not load machine SSH details: {e}")
-                    self.detection_status.setStyleSheet("color: orange;")
+                    self.detection_status.setStyleSheet("color: #d97706;")
             
             # Get optional fields
             functional = self.functional_edit.text().strip() or None

@@ -22,12 +22,14 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 # Required imports - these are always available as they're in requirements.txt
 from ase import io as ase_io
 from ase import Atoms
 from ase.build import bulk, molecule
 from ase.visualize import view as ase_view
+from qtgui.data.element_colors import get_default_element_colors, DEFAULT_ELEMENT_COLORS
 
 import matplotlib
 # Only set backend if not already set to avoid conflicts
@@ -50,17 +52,45 @@ DEFAULT_DB_PATH = os.path.expanduser("~/.xespresso/structures.db")
 
 
 class StructureViewerPage(QWidget):
-    """Structure viewer page widget."""
-    
+    """Structure viewer page widget.
+
+    Supports a `view_only` mode where only the visualization UI is created
+    (no Upload/Build/DB tabs). This is used by session windows that only
+    want to display the structure without exposing the other management tabs.
+    """
+
     # Viewer type constants
     VIEWER_INTERACTIVE = "Interactive 3D"
     VIEWER_SIMPLE = "Simple 3D"
-    
-    def __init__(self, session_state):
+
+    def __init__(self, session_state, view_only=False):
         super().__init__()
         self.session_state = session_state
         self._loading = False  # Guard to prevent infinite loops
+        self._view_only = bool(view_only)
         self._setup_ui()
+
+        # Ensure defaults for visualization settings
+        try:
+            if 'viz_atom_size' not in self.session_state:
+                self.session_state['viz_atom_size'] = 120
+            if 'viz_bond_scale' not in self.session_state:
+                self.session_state['viz_bond_scale'] = 1.2
+            if 'element_colors' not in self.session_state:
+                # populate session with a sensible default palette (copy)
+                try:
+                    self.session_state['element_colors'] = get_default_element_colors()
+                except Exception:
+                    # fallback to module-level constant
+                    self.session_state['element_colors'] = dict(DEFAULT_ELEMENT_COLORS)
+        except Exception:
+            try:
+                # session_state may be dict-like internal storage
+                if getattr(self.session_state, '_data', None) is not None:
+                    self.session_state._data.setdefault('viz_atom_size', 120)
+                    self.session_state._data.setdefault('viz_bond_scale', 1.2)
+            except Exception:
+                pass
     
     def _setup_ui(self):
         """Setup the user interface."""
@@ -98,22 +128,36 @@ then view them in the "View Structure" tab.</p>
         self.current_group.setVisible(False)
         main_layout.addWidget(self.current_group)
         
-        # Main tabs
-        self.tabs = QTabWidget()
-        
-        # Upload File Tab
-        self._create_upload_tab()
-        
-        # Build Structure Tab
-        self._create_build_tab()
-        
-        # ASE Database Tab
-        self._create_database_tab()
-        
-        # View Structure Tab (visualization)
-        self._create_view_tab()
-        
-        main_layout.addWidget(self.tabs)
+        # Create either a full tabbed interface (manager) or a single
+        # visualization area (session view-only).
+        if not self._view_only:
+            # Main tabs
+            self.tabs = QTabWidget()
+
+            # Upload File Tab
+            self._create_upload_tab()
+
+            # Build Structure Tab
+            self._create_build_tab()
+
+            # ASE Database Tab
+            self._create_database_tab()
+
+            # View Structure Tab (visualization)
+            self._create_view_tab()
+
+            main_layout.addWidget(self.tabs)
+        else:
+            # Only create the view UI directly (no QTabWidget)
+            self.tabs = None
+            self._create_view_tab()
+            # _create_view_tab constructs and stores `self.view_tab` (a QWidget)
+            # Add it directly to the main layout for a clean single-view UI.
+            try:
+                main_layout.addWidget(self.view_tab)
+            except Exception:
+                # Fallback in case view_tab is not set
+                pass
         
         # Results area (at the bottom, outside tabs)
         self.results_label = QLabel("")
@@ -416,6 +460,35 @@ then view them in the "View Structure" tab.</p>
         
         viewer_select_layout.addStretch()
         scroll_layout.addLayout(viewer_select_layout)
+
+        # Visualization controls (atom size, bond threshold)
+        viz_controls_row = QHBoxLayout()
+        viz_controls_row.addWidget(QLabel("Atom Size:"))
+        self.atom_size_slider = QSlider(Qt.Horizontal)
+        self.atom_size_slider.setRange(20, 300)
+        self.atom_size_slider.setValue(self.session_state.get('viz_atom_size', 120))
+        self.atom_size_slider.setToolTip("Adjust atom marker size")
+        self.atom_size_slider.valueChanged.connect(lambda v: self._on_viz_setting_changed('viz_atom_size', v))
+        viz_controls_row.addWidget(self.atom_size_slider)
+
+        viz_controls_row.addWidget(QLabel("Bond Scale (%):"))
+        self.bond_scale_slider = QSlider(Qt.Horizontal)
+        self.bond_scale_slider.setRange(80, 200)
+        self.bond_scale_slider.setValue(int(self.session_state.get('viz_bond_scale', 1.2) * 100))
+        self.bond_scale_slider.setToolTip("Adjust bond distance threshold as percent of (r1+r2)")
+        self.bond_scale_slider.valueChanged.connect(lambda v: self._on_viz_setting_changed('viz_bond_scale', v/100.0))
+        viz_controls_row.addWidget(self.bond_scale_slider)
+
+        scroll_layout.addLayout(viz_controls_row)
+
+        # Element color management
+        color_row = QHBoxLayout()
+        self.element_color_btn = QPushButton("Element Colors...")
+        self.element_color_btn.setToolTip("Edit per-element colors for visualization")
+        self.element_color_btn.clicked.connect(self._open_element_color_dialog)
+        color_row.addWidget(self.element_color_btn)
+        color_row.addStretch()
+        scroll_layout.addLayout(color_row)
         
         # Visualization Section
         viz_group = QGroupBox("🔬 3D Structure Visualization")
@@ -506,12 +579,31 @@ then view them in the "View Structure" tab.</p>
         
         # Store reference to view tab for later use
         self.view_tab = view_tab
-        self.tabs.addTab(view_tab, "🔬 View Structure")
+        # If running in the full tabbed UI, add it to the QTabWidget.
+        if getattr(self, 'tabs', None) is not None:
+            self.tabs.addTab(view_tab, "🔬 View Structure")
+
+        # end of view tab creation
     
     def _on_build_type_changed(self, build_type):
         """Handle build type change."""
         self.bulk_group.setVisible(build_type == "Bulk Crystal")
         self.molecule_group.setVisible(build_type == "Molecule")
+
+    def _on_viz_setting_changed(self, key, value):
+        """Persist visualization setting and refresh the view."""
+        try:
+            self.session_state[key] = value
+        except Exception:
+            try:
+                # if session_state is dict-like
+                self.session_state._data[key] = value
+            except Exception:
+                pass
+        try:
+            self._refresh_visualization()
+        except Exception:
+            pass
     
     def _open_structure_file(self):
         """Open a structure file."""
@@ -709,22 +801,29 @@ then view them in the "View Structure" tab.</p>
         positions = atoms.get_positions()
         symbols = atoms.get_chemical_symbols()
         
-        # Color map for elements
-        color_map = {
-            'H': 'white', 'C': 'gray', 'N': 'blue', 'O': 'red',
-            'F': 'green', 'P': 'orange', 'S': 'yellow',
-            'Cl': 'green', 'Fe': 'brown', 'Cu': 'brown',
-            'Al': 'silver', 'Si': 'pink', 'Pt': 'silver'
-        }
+        # Color map for elements (defaults)
+        # Merge user-provided element colors from session_state with comprehensive defaults
+        try:
+            user_colors = self.session_state.get('element_colors') or {}
+        except Exception:
+            user_colors = getattr(self.session_state, '_data', {}).get('element_colors', {}) if getattr(self.session_state, '_data', None) is not None else {}
+
+        # Use DEFAULT_ELEMENT_COLORS loaded from JSON as fallback
+        defaults = dict(DEFAULT_ELEMENT_COLORS)
+        colors = []
+        for s in symbols:
+            col = user_colors.get(s) or defaults.get(s) or 'purple'
+            colors.append(col)
         
-        colors = [color_map.get(s, 'purple') for s in symbols]
-        
+        # Draw atoms as scatter points
+        # Use configurable atom size
+        atom_size = int(self.session_state.get('viz_atom_size', 120))
         ax.scatter(positions[:, 0], positions[:, 1], positions[:, 2],
-                   c=colors, s=100, edgecolors='black')
-        
-        # Add labels
+               c=colors, s=atom_size, edgecolors='black', depthshade=True)
+
+        # Add element labels (small)
         for i, (pos, sym) in enumerate(zip(positions, symbols)):
-            ax.text(pos[0], pos[1], pos[2], sym, fontsize=8)
+            ax.text(pos[0], pos[1], pos[2], sym, fontsize=7, ha='center', va='center')
         
         # Draw cell if present
         if atoms.cell is not None and atoms.pbc.any():
@@ -741,14 +840,179 @@ then view them in the "View Structure" tab.</p>
                 start_pt = np.dot(start, cell)
                 end_pt = np.dot(end, cell)
                 ax.plot([start_pt[0], end_pt[0]], [start_pt[1], end_pt[1]], 
-                        [start_pt[2], end_pt[2]], 'k-', linewidth=0.5)
+                        [start_pt[2], end_pt[2]], color='k', linewidth=0.8)
         
-        ax.set_xlabel('X (Å)')
-        ax.set_ylabel('Y (Å)')
-        ax.set_zlabel('Z (Å)')
-        
+        # Draw bonds between atoms using covalent radii when available
+        try:
+            from ase.data import covalent_radii, atomic_numbers
+            # get atomic numbers
+            z = [atomic_numbers[s] for s in symbols]
+            radii = [covalent_radii[zz] if zz < len(covalent_radii) else 0.7 for zz in z]
+        except Exception:
+            # fallback radii
+            radii = [0.7 for _ in symbols]
+
+        # distance matrix (use minimum-image if periodic)
+        try:
+            dmat = atoms.get_all_distances(mic=True)
+        except Exception:
+            dmat = atoms.get_all_distances()
+
+        n = len(symbols)
+        for i in range(n):
+            for j in range(i+1, n):
+                dij = dmat[i, j]
+                if dij <= 0:
+                    continue
+                cutoff = 1.2 * (radii[i] + radii[j])
+                # use configurable bond scale
+                bond_scale = float(self.session_state.get('viz_bond_scale', 1.2))
+                cutoff = bond_scale * (radii[i] + radii[j])
+                if dij <= cutoff:
+                    p1 = positions[i]
+                    p2 = positions[j]
+                    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]], color='gray', linewidth=1.0)
+
+        # Hide axes and grid for a clean visualization
+        try:
+            # remove ticks
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_zticks([])
+            # disable grid
+            ax.grid(False)
+            # keep aspect ratio
+            ax.set_box_aspect((1, 1, 1))
+
+            # Hide the 3D axis panes (background planes)
+            try:
+                ax.xaxis.pane.set_edgecolor('none')
+                ax.yaxis.pane.set_edgecolor('none')
+                ax.zaxis.pane.set_edgecolor('none')
+                ax.xaxis.pane.set_facecolor((1, 1, 1, 0))
+                ax.yaxis.pane.set_facecolor((1, 1, 1, 0))
+                ax.zaxis.pane.set_facecolor((1, 1, 1, 0))
+            except Exception:
+                # older mpl versions or different backends may not have pane attrs
+                try:
+                    ax.xaxis.pane.fill = False
+                    ax.yaxis.pane.fill = False
+                    ax.zaxis.pane.fill = False
+                except Exception:
+                    pass
+
+            # Hide axis lines for 3D axes (w_xaxis/w_yaxis/w_zaxis)
+            try:
+                if hasattr(ax, 'w_xaxis'):
+                    ax.w_xaxis.line.set_visible(False)
+                if hasattr(ax, 'w_yaxis'):
+                    ax.w_yaxis.line.set_visible(False)
+                if hasattr(ax, 'w_zaxis'):
+                    ax.w_zaxis.line.set_visible(False)
+            except Exception:
+                pass
+
+            # Hide tick lines
+            try:
+                for line in ax.xaxis.get_ticklines():
+                    line.set_visible(False)
+                for line in ax.yaxis.get_ticklines():
+                    line.set_visible(False)
+                # z-axis ticklines may be available via zaxis
+                if hasattr(ax, 'zaxis'):
+                    for line in ax.zaxis.get_ticklines():
+                        line.set_visible(False)
+            except Exception:
+                pass
+
+            # Hide any 2D spines if present
+            for spine in getattr(ax, 'spines', {}).values():
+                try:
+                    spine.set_visible(False)
+                except Exception:
+                    pass
+            # As a final, robust fallback hide everything axis-related
+            try:
+                ax.set_axis_off()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         figure.tight_layout()
         canvas.draw()
+
+    def _open_element_color_dialog(self):
+        """Open a dialog allowing the user to pick colors per element present in the structure."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton
+        from PySide6.QtWidgets import QLabel, QWidget
+
+        # Determine elements to show: use current structure if available
+        atoms = self.session_state.get('current_structure') if hasattr(self.session_state, 'get') else None
+        if atoms is not None:
+            elements = sorted(set(atoms.get_chemical_symbols()))
+        else:
+            # fallback: common elements
+            elements = ['H', 'C', 'N', 'O', 'P', 'S', 'Cl', 'Fe', 'Cu', 'Si']
+
+        # Retrieve current mapping
+        try:
+            elem_colors = self.session_state.get('element_colors') or {}
+        except Exception:
+            elem_colors = getattr(self.session_state, '_data', {}).get('element_colors', {}) if getattr(self.session_state, '_data', None) is not None else {}
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Element Colors")
+        dlg.setMinimumSize(400, 300)
+        v = QVBoxLayout(dlg)
+
+        # Map of buttons so we can update styles
+        btns = {}
+        for el in elements:
+            row = QHBoxLayout()
+            row.addWidget(QLabel(el))
+            b = QPushButton()
+            color = elem_colors.get(el) or '#808080'
+            b.setStyleSheet(f'background-color: {color};')
+            b.setFixedWidth(80)
+            def make_handler(sym, button):
+                def handler():
+                    from PySide6.QtWidgets import QColorDialog
+                    from PySide6.QtGui import QColor
+                    cur = elem_colors.get(sym) or '#808080'
+                    q = QColor(cur)
+                    res = QColorDialog.getColor(q, self, f"Choose color for {sym}")
+                    if res.isValid():
+                        hexc = res.name()
+                        elem_colors[sym] = hexc
+                        try:
+                            self.session_state['element_colors'] = elem_colors
+                        except Exception:
+                            try:
+                                self.session_state._data['element_colors'] = elem_colors
+                            except Exception:
+                                pass
+                        button.setStyleSheet(f'background-color: {hexc};')
+                        try:
+                            self._refresh_visualization()
+                        except Exception:
+                            pass
+                return handler
+            b.clicked.connect(make_handler(el, b))
+            row.addWidget(b)
+            row.addStretch()
+            v.addLayout(row)
+            btns[el] = b
+
+        # Close button
+        hb = QHBoxLayout()
+        hb.addStretch()
+        close_b = QPushButton("Close")
+        close_b.clicked.connect(dlg.accept)
+        hb.addWidget(close_b)
+        v.addLayout(hb)
+
+        dlg.exec()
     
     def _export_structure(self):
         """Export the current structure."""
@@ -840,7 +1104,7 @@ then view them in the "View Structure" tab.</p>
         db_path = self.db_path_edit.text().strip()
         if not db_path:
             self.db_status_label.setText("⚠️ Please enter a database path")
-            self.db_status_label.setStyleSheet("color: orange;")
+            self.db_status_label.setStyleSheet("color: #d97706;")
             return
         
         # Normalize the path
@@ -979,12 +1243,16 @@ then view them in the "View Structure" tab.</p>
                     if tag:
                         key_value_pairs[tag] = True
             
-            # Save to database
-            db.write(atoms, **key_value_pairs)
-            
+            # Save to database and capture inserted row id when available
+            try:
+                row_id = db.write(atoms, **key_value_pairs)
+            except Exception:
+                # Some ASE versions may not return an id; fall back to None
+                row_id = None
+
             self.results_label.setText(f"✅ Structure saved to database: {db_path}")
             self.results_label.setStyleSheet("color: green;")
-            
+
             QMessageBox.information(
                 self, "Success",
                 f"Structure saved to database!\n\n"
@@ -992,15 +1260,21 @@ then view them in the "View Structure" tab.</p>
                 f"Database: {db_path}\n\n"
                 "💡 Go to the 'ASE Database' tab to see the updated list."
             )
-            
+
             # Clear the name and tags
             name_edit.clear()
             tags_edit.clear()
-            
+
+            # Return the new row id when available
+            try:
+                return int(row_id) if row_id is not None else None
+            except Exception:
+                return None
         except Exception as e:
             self.results_label.setText(f"❌ Error saving to database: {e}")
             self.results_label.setStyleSheet("color: red;")
             QMessageBox.critical(self, "Error", f"Error saving to database:\n{e}")
+            return None
     
     def _edit_database_entry(self):
         """Edit properties (name, tags) of a database entry."""

@@ -232,7 +232,7 @@ class DatabaseLoadWidget(QWidget):
         db_path = self.db_path_edit.text().strip()
         if not db_path:
             self.status_label.setText("⚠️ Please enter a database path")
-            self.status_label.setStyleSheet("color: orange;")
+            self.status_label.setStyleSheet("color: #d97706;")
             return
         
         db_path = os.path.abspath(os.path.expanduser(db_path))

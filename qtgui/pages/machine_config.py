@@ -292,7 +292,7 @@ in the Calculation Setup or Workflow Builder pages.</p>
                 self.machines_status_label.setStyleSheet("color: blue;")
         except Exception as e:
             self.machines_status_label.setText(f"⚠️ Could not load machines list: {e}")
-            self.machines_status_label.setStyleSheet("color: orange;")
+            self.machines_status_label.setStyleSheet("color: #d97706;")
         finally:
             self.machine_combo.blockSignals(False)
     

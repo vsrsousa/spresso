@@ -474,10 +474,10 @@ class WorkflowBuilderPage(QWidget):
                 self._update_pseudo_inputs(atoms)
             else:
                 self.structure_status.setText("⚠️ Invalid structure type")
-                self.structure_status.setStyleSheet("color: orange;")
+                self.structure_status.setStyleSheet("color: #d97706;")
         else:
             self.structure_status.setText("⚠️ No structure loaded. Please load a structure first.")
-            self.structure_status.setStyleSheet("color: orange;")
+            self.structure_status.setStyleSheet("color: #d97706;")
     
     def _update_pseudo_inputs(self, atoms):
         """Update pseudopotential input fields."""

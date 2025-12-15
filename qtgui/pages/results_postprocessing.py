@@ -35,7 +35,56 @@ class ResultsPostprocessingPage(QWidget):
     def __init__(self, session_state):
         super().__init__()
         self.session_state = session_state
+        try:
+            # Refresh when session state changes
+            self.session_state.add_listener(self.refresh)
+        except Exception:
+            pass
         self._setup_ui()
+
+    def refresh(self):
+        """Refresh UI fields from session state.
+
+        Auto-populates the output directory using `working_directory` and
+        `workflow_config['label']` when available. If the resolved directory
+        exists and contains output files, automatically load the results.
+        """
+        try:
+            workdir = self.session_state.get('working_directory') or os.path.expanduser('~')
+            config = self.session_state.get('workflow_config') or {}
+            label = config.get('label') if isinstance(config, dict) else None
+
+            candidate = None
+            if label:
+                candidate = os.path.join(workdir, label)
+            else:
+                candidate = workdir
+
+            if candidate and os.path.isdir(candidate):
+                # Prefill the path
+                try:
+                    self.output_dir_edit.setText(candidate)
+                except Exception:
+                    pass
+
+                # Check for output files and auto-load if present
+                files = [f for f in os.listdir(candidate) if f.endswith(('.pwo', '.out', '.log'))]
+                if files:
+                    try:
+                        self._load_results()
+                    except Exception:
+                        pass
+            else:
+                # If candidate doesn't exist, leave field alone but try fallback
+                prev = self.session_state.get('last_output_dir')
+                if prev and os.path.isdir(prev):
+                    try:
+                        self.output_dir_edit.setText(prev)
+                        self._load_results()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     
     def _setup_ui(self):
         """Setup the user interface."""
@@ -262,7 +311,7 @@ class ResultsPostprocessingPage(QWidget):
                 self.status_label.setStyleSheet("color: green;")
             else:
                 self.status_label.setText("Status: ⚠️ Not converged")
-                self.status_label.setStyleSheet("color: orange;")
+                self.status_label.setStyleSheet("color: #d97706;")
             
             # Results text
             results_text = []
@@ -291,10 +340,43 @@ class ResultsPostprocessingPage(QWidget):
             # Only show magnetic moments if calculation is magnetic
             if results.get('is_magnetic') and results.get('magnetic_moments'):
                 results_text.append("\nMagnetic Moments per Atom:")
-                for atom_info in results['magnetic_moments']:
-                    # Use atom symbol if available, otherwise just the number
-                    atom_label = f"{atom_info.get('symbol', 'X')}{atom_info['atom']}" if 'symbol' in atom_info else f"Atom {atom_info['atom']}"
-                    results_text.append(f"  {atom_label}: charge={atom_info['charge']:.4f}, magn={atom_info['magn']:.4f}")
+                # Determine whether to show numeric suffixes: only show index when
+                # there are multiple atoms with the same symbol in the current structure.
+                atoms_obj = self.session_state.get('current_structure')
+                symbol_counts = {}
+                if atoms_obj is not None:
+                    try:
+                        syms = atoms_obj.get_chemical_symbols()
+                        for s in syms:
+                            symbol_counts[s] = symbol_counts.get(s, 0) + 1
+                    except Exception:
+                        symbol_counts = {}
+
+                # Use the symbols from the session's Atoms object for labels
+                # and DO NOT append numeric suffixes unless those suffixes were
+                # already configured in the Atoms symbols (e.g. 'Co3').
+                atoms_obj = self.session_state.get('current_structure')
+                atoms_syms = None
+                if atoms_obj is not None:
+                    try:
+                        atoms_syms = atoms_obj.get_chemical_symbols()
+                    except Exception:
+                        atoms_syms = None
+
+                for i, atom_info in enumerate(results['magnetic_moments']):
+                    # Prefer the symbol from the Atoms object if available
+                    if atoms_syms and i < len(atoms_syms):
+                        atom_label = atoms_syms[i]
+                    else:
+                        # Fallback to whatever the parser provided (no numeric suffixes)
+                        atom_label = atom_info.get('symbol') or 'X'
+
+                    try:
+                        charge = atom_info.get('charge', 0.0)
+                    except Exception:
+                        charge = 0.0
+                    magn = atom_info.get('magn', 0.0)
+                    results_text.append(f"  {atom_label}: charge={charge:.4f}, magn={magn:.4f}")
             
             # Show forces per atom if available
             if results.get('forces'):

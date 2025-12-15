@@ -666,12 +666,12 @@ class JobSubmissionPage(QWidget):
             status_label.setText(
                 "⚠️ No structure loaded. Please load a structure first."
             )
-            status_label.setStyleSheet("color: orange;")
+            status_label.setStyleSheet("color: #d97706;")
             return
 
         if not ASE_AVAILABLE or not isinstance(atoms, Atoms):
             status_label.setText("⚠️ Invalid structure type.")
-            status_label.setStyleSheet("color: orange;")
+            status_label.setStyleSheet("color: #d97706;")
             return
 
         # Check configuration - be more lenient to avoid false negatives after session save
@@ -682,7 +682,7 @@ class JobSubmissionPage(QWidget):
             status_label.setText(
                 "⚠️ No calculation configured. Please configure in Calculation Setup."
             )
-            status_label.setStyleSheet("color: orange;")
+            status_label.setStyleSheet("color: #d97706;")
             return
 
         # Show warning if pseudopotentials are missing but other config exists
@@ -690,7 +690,7 @@ class JobSubmissionPage(QWidget):
             status_label.setText(
                 "⚠️ Pseudopotentials not configured. Please configure in Calculation Setup."
             )
-            status_label.setStyleSheet("color: orange;")
+            status_label.setStyleSheet("color: #d97706;")
             return
 
         status_label.setText(

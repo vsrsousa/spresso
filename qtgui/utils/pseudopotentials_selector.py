@@ -115,7 +115,7 @@ class PseudopotentialsSelectorWidget(QWidget):
             
         except Exception as e:
             self.status_label.setText(f"⚠️ Could not load configurations: {e}")
-            self.status_label.setStyleSheet("color: orange;")
+            self.status_label.setStyleSheet("color: #d97706;")
         
         self.config_combo.blockSignals(False)
         self._on_config_changed(self.config_combo.currentText())
@@ -158,7 +158,7 @@ class PseudopotentialsSelectorWidget(QWidget):
                 self._update_inputs_from_config(config)
             else:
                 self.status_label.setText(f"⚠️ Could not load configuration: {config_data}")
-                self.status_label.setStyleSheet("color: orange;")
+                self.status_label.setStyleSheet("color: #d97706;")
                 
         except Exception as e:
             self.status_label.setText(f"❌ Error: {e}")
@@ -228,7 +228,7 @@ class PseudopotentialsSelectorWidget(QWidget):
         
         if missing:
             self.status_label.setText(f"⚠️ Missing pseudopotentials for: {', '.join(missing)}")
-            self.status_label.setStyleSheet("color: orange;")
+            self.status_label.setStyleSheet("color: #d97706;")
         else:
             self.status_label.setText("✅ All elements found in configuration")
             self.status_label.setStyleSheet("color: green;")

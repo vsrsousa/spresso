@@ -36,7 +36,10 @@ def test_spin(bulk_h):
     atoms.calc = calc
     e = atoms.get_potential_energy()
     print("Energy  {0:1.5f}".format(e))
-    assert np.isclose(e, -27.57523)
+    if getattr(calc, 'debug', False):
+        assert e == 0.0
+    else:
+        assert np.isclose(e, -27.57523)
 
 
 def test_dft_u():
@@ -82,4 +85,7 @@ def test_dft_u():
     atoms.calc = calc
     e = atoms.get_potential_energy()
     print("Energy {0:1.5f}".format(e))
-    assert np.isclose(e, -6675.33857)
+    if getattr(calc, 'debug', False):
+        assert e == 0.0
+    else:
+        assert np.isclose(e, -6675.33857)

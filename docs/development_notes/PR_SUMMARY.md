@@ -10,8 +10,8 @@ This PR implements two features requested in the problem statement to improve th
 ## Changes Made
 
 ### Files Modified
-- `xespresso/gui/pages/workflow_builder.py` (149 lines changed)
-- `xespresso/gui/pages/structure_viewer.py` (49 lines changed)
+- `qtgui/pages/workflow_builder.py` (149 lines changed)
+- `qtgui/pages/structure_viewer.py` (49 lines changed)
 - Added 3 documentation files (427 lines)
 
 ### Total Impact
@@ -46,7 +46,7 @@ The problem statement indicated that resources should be adaptable to the type o
 - Displays info message explaining scheduler mode
 
 ### Code Changes
-**File:** `xespresso/gui/pages/workflow_builder.py`
+**File:** `qtgui/pages/workflow_builder.py`
 
 **Lines 397-488:** Modified resources configuration section to:
 1. Detect scheduler type from selected machine
@@ -90,7 +90,7 @@ Enhanced all structure loading functions to track source:
 - Both persist across page navigation via Streamlit session state
 
 ### Code Changes
-**File:** `xespresso/gui/pages/structure_viewer.py`
+**File:** `qtgui/pages/structure_viewer.py`
 
 **Lines 18-47:** Added persistent structure display section
 **Lines 66-67:** Enhanced upload tab with source tracking

@@ -6,7 +6,7 @@ This document summarizes the security considerations and mitigations implemented
 
 ## CodeQL Analysis Results
 
-CodeQL reported 4 path injection alerts in `xespresso/gui/streamlit_app.py`. These alerts are related to file path operations using user-provided input.
+CodeQL reported 4 path injection alerts in `qtgui/streamlit_app.py`. These alerts are related to file path operations using user-provided input.
 
 ### Alert Details
 

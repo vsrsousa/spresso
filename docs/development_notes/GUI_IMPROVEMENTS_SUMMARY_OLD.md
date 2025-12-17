@@ -201,7 +201,7 @@ All changes have been validated with:
 
 ## Files Modified
 
-1. `xespresso/gui/streamlit_app.py` - Main GUI application (600+ lines added/modified)
+1. `qtgui/streamlit_app.py` - Main GUI application (600+ lines added/modified)
 
 ## Files Created
 

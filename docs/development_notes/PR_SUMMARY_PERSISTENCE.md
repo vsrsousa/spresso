@@ -42,7 +42,7 @@ The user reported two issues:
 
 ### Files Modified
 
-1. **xespresso/gui/pages/calculation_setup.py**
+1. **qtgui/pages/calculation_setup.py**
    - Lines changed: +206, -107
    - Updated machine/code/version selectors to use shared state variables
    - Added default index handling for machine selector
@@ -50,7 +50,7 @@ The user reported two issues:
    - Added scheduler type detection
    - Added launcher placeholder resolution (`{nprocs}`)
 
-2. **xespresso/gui/pages/workflow_builder.py**
+2. **qtgui/pages/workflow_builder.py**
    - Lines changed: +51, -44
    - Updated machine/code/version selectors to use shared state variables
    - Added default index handling for machine selector
@@ -214,7 +214,7 @@ No special deployment steps required:
 ## 📚 Related Documentation
 
 - Previous implementation: `IMPLEMENTATION_ADAPTIVE_RESOURCES_AND_PERSISTENCE.md`
-- Session management: `xespresso/gui/utils/session_manager.py`
+-- Session management: `qtgui/utils/session_manager.py`
 - Machine configuration: `xespresso/machines/config/loader.py`
 - Codes configuration: `xespresso/codes/manager.py`
 

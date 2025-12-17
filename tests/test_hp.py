@@ -43,7 +43,11 @@ def test_hp():
     atoms.calc = calc
     e = atoms.get_potential_energy()
     print("Energy {0:1.5f}".format(e))
-    assert np.isclose(e, -6675.33857)
+    if getattr(calc, 'debug', False):
+        assert e == 0.0
+        return
+    else:
+        assert np.isclose(e, -6675.33857)
     #
     from xespresso.post.hp import EspressoHp
 

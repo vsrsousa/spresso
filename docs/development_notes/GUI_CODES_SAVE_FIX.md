@@ -79,7 +79,7 @@ def detect_qe_codes(
 - Updated merge logic to preserve label when merging configs
 - Fixed empty config creation to preserve label and qe_version
 
-### 3. xespresso/gui/pages/codes_config.py
+### 3. qtgui/pages/codes_config.py
 - Changed "Version Label" input to "Label" (cleaner naming)
 - Pass label directly to `detect_qe_codes()` function
 - Set `interactive=False` in `save_config()` call

@@ -35,7 +35,7 @@ This document describes the improvements made to the xespresso GUI's browse dire
 
 ### Files Modified
 
-#### `xespresso/gui/utils/selectors.py`
+#### `qtgui/utils/selectors.py`
 - **Lines changed**: 290 deletions, 63 additions
 - **Key changes**:
   - Removed `show_browser` modal state and related UI
@@ -43,7 +43,7 @@ This document describes the improvements made to the xespresso GUI's browse dire
   - Kept all security validations (path traversal prevention, symlink resolution)
   - Reduced complexity while maintaining functionality
 
-#### `xespresso/gui/pages/job_submission.py`
+#### `qtgui/pages/job_submission.py`
 - **Lines changed**: 17 deletions, 13 additions
 - **Key changes**:
   - Added check for `espresso_calculator` in session_state in dry_run_tab

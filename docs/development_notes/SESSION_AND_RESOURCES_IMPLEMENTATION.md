@@ -52,11 +52,11 @@ Users needed a way to adjust computational resources (nodes, tasks, memory, time
 - **account**: Optional billing account/project code
 
 #### Locations
-1. **Calculation Setup Page** (`xespresso/gui/pages/calculation_setup.py`)
+1. **Calculation Setup Page** (`qtgui/pages/calculation_setup.py`)
    - Added resources section after machine/code selection
    - Resources passed to queue configuration when preparing calculations
 
-2. **Workflow Builder Page** (`xespresso/gui/pages/workflow_builder.py`)
+2. **Workflow Builder Page** (`qtgui/pages/workflow_builder.py`)
    - Same resources interface for workflows
    - Resources applied to all steps in the workflow
 
@@ -104,19 +104,19 @@ When loading a saved session, the complete GUI state (including structures) need
 ## File Changes
 
 ### Modified Files
-1. `xespresso/gui/utils/session_manager.py`
+1. `qtgui/utils/session_manager.py`
    - Enhanced `save_session()` with session name support
    - Updated `load_session()` to return session name
    - Added ASE Atoms serialization in `get_serializable_state()`
    - Added deserialization in `restore_session()`
 
-2. `xespresso/gui/pages/calculation_setup.py`
+2. `qtgui/pages/calculation_setup.py`
    - Added resources configuration section
    - Checkbox for adjusting resources
    - Resource input fields with machine defaults
    - Resources passed to queue configuration
 
-3. `xespresso/gui/pages/workflow_builder.py`
+3. `qtgui/pages/workflow_builder.py`
    - Added resources configuration section (same as calculation_setup)
    - Resources applied to workflow queue configuration
 

@@ -71,7 +71,7 @@ if st.button("🏠 Home"):
 
 ## Files Modified
 
-### 1. `xespresso/gui/pages/calculation_setup.py`
+### 1. `qtgui/pages/calculation_setup.py`
 **Lines added: 39**
 
 Added after version selection (around line 320):
@@ -103,14 +103,14 @@ if hasattr(selected_code_obj, "version") and selected_code_obj.version:
     st.caption(f"📦 Version: {selected_code_obj.version}")
 ```
 
-### 2. `xespresso/gui/pages/workflow_builder.py`
+### 2. `qtgui/pages/workflow_builder.py`
 **Lines added: 40**
 
 Same code selection logic as above, but with workflow-specific keys:
 - Uses `workflow_selected_code` in session state
 - Uses `workflow_code_selector` as widget key
 
-### 3. `xespresso/gui/utils/selectors.py`
+### 3. `qtgui/utils/selectors.py`
 **Lines changed: +170, -96 (refactored for clarity)**
 
 Fixed `render_workdir_browser()` function:

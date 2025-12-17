@@ -111,7 +111,7 @@ Existing Tests (Regression):
 ## 📝 Files Changed
 
 ### Implementation (160 lines)
-- `xespresso/gui/utils/directory_browser.py` - Added tkinter dialog
+-- `qtgui/utils/directory_browser.py` - Added tkinter dialog
 - `xespresso/machines/config/loader.py` - Added sanitization functions
 - `xespresso/machines/machine.py` - Updated to use sanitization
 

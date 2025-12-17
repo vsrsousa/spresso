@@ -109,7 +109,7 @@ if qe_prefix:
 
 **Change**: Fixed GUI to read modules from version structure instead of top-level.
 
-**File**: `xespresso/gui/pages/codes_config.py`
+**File**: `qtgui/pages/codes_config.py`
 
 **Code**:
 ```python
@@ -207,7 +207,7 @@ elif hasattr(version_config, 'modules') and version_config.modules:
 
 1. `xespresso/codes/config.py` - Updated `to_dict()` method, improved documentation
 2. `xespresso/codes/manager.py` - Added `detect_common_prefix()`, updated `create_config()`
-3. `xespresso/gui/pages/codes_config.py` - Fixed version-specific module reading
+3. `qtgui/pages/codes_config.py` - Fixed version-specific module reading
 4. `tests/test_codes_structure_improvements.py` - Added 6 comprehensive tests
 
 ## Migration Notes

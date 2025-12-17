@@ -10,7 +10,7 @@ This implementation addresses two main requirements from the problem statement:
 
 **Solution:**
 
-#### File: `xespresso/gui/pages/workflow_builder.py`
+#### File: `qtgui/pages/workflow_builder.py`
 
 Modified the resources configuration section (lines 397-488) to:
 
@@ -41,7 +41,7 @@ Modified the resources configuration section (lines 397-488) to:
 
 **Solution:**
 
-#### File: `xespresso/gui/pages/structure_viewer.py`
+#### File: `qtgui/pages/structure_viewer.py`
 
 1. **Added persistent structure display** (lines 18-47):
    - Shows "Currently Selected Structure" section at the top of the page
@@ -108,10 +108,10 @@ All changes are backward compatible:
 
 ## Files Modified
 
-1. `xespresso/gui/pages/workflow_builder.py`
+1. `qtgui/pages/workflow_builder.py`
    - Lines 397-488: Adaptive resources configuration
 
-2. `xespresso/gui/pages/structure_viewer.py`
+2. `qtgui/pages/structure_viewer.py`
    - Lines 11-47: Persistent structure display
    - Lines 45-76: Enhanced upload tab with source tracking
    - Lines 235-286: Enhanced browse tab with source tracking

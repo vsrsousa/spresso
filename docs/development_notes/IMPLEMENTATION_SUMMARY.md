@@ -26,13 +26,13 @@ Now 6 viewer options available:
 | **Simple** | Text | ❌ No | Text-only terminals, accessibility |
 
 ### Code Changes
-**File: `xespresso/gui/utils/visualization.py`**
+**File: `qtgui/utils/visualization.py`**
 - Added `create_jmol_viewer()` - Generates JSmol HTML viewer
 - Added `create_py3dmol_viewer()` - Uses py3Dmol library
 - Added `launch_ase_viewer()` - Opens ASE's native viewer
 - Updated `render_structure_viewer()` to support all viewer types
 
-**File: `xespresso/gui/streamlit_app.py`**
+**File: `qtgui/streamlit_app.py`**
 - Updated viewer selection UI with 6 options
 - Added helpful descriptions for each viewer type
 
@@ -126,7 +126,7 @@ queue = {
 - Navigate without typing paths
 
 ### Code Changes
-**File: `xespresso/gui/utils/selectors.py`**
+**File: `qtgui/utils/selectors.py`**
 - Enhanced `render_workdir_browser()` with subfolder dropdown
 - Added parent directory navigation
 - Added visual directory contents preview

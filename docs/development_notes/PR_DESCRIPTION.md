@@ -28,7 +28,7 @@ This PR addresses the requirements from the problem statement by modularizing th
 
 ### Files Created
 
-#### Page Modules (`xespresso/gui/pages/`)
+#### Page Modules (`qtgui/pages/`)
 - `__init__.py` - Package initialization with exports
 - `machine_config.py` ⭐ - Machine configuration page (383 lines)
 - `codes_config.py` ⭐ - Codes configuration page (233 lines)
@@ -38,7 +38,7 @@ This PR addresses the requirements from the problem statement by modularizing th
 - `job_submission.py` - Placeholder for future modularization
 - `results_postprocessing.py` - Placeholder for future modularization
 
-#### Utility Modules (`xespresso/gui/utils/`)
+#### Utility Modules (`qtgui/utils/`)
 - `__init__.py` - Package initialization with exports
 - `validation.py` ⭐ - Path validation and security (47 lines)
 - `visualization.py` ⭐ - 3D structure visualization (129 lines)
@@ -198,17 +198,17 @@ python3 tests/test_gui_modular.py
 
 ### 2. Check Syntax
 ```bash
-python3 -m py_compile xespresso/gui/utils/*.py xespresso/gui/pages/*.py
+python3 -m py_compile qtgui/utils/*.py qtgui/pages/*.py
 ```
 
 ### 3. Run GUI (requires dependencies)
 ```bash
-streamlit run xespresso/gui/streamlit_app.py
+streamlit run qtgui/streamlit_app.py
 ```
 
 ### 4. Revert if Needed
 ```bash
-cp xespresso/gui/streamlit_app_original.py xespresso/gui/streamlit_app.py
+cp qtgui/streamlit_app_original.py qtgui/streamlit_app.py
 ```
 
 ## Conclusion

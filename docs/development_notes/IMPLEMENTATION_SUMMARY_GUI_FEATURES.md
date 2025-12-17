@@ -24,7 +24,7 @@ This feature was initially implemented but has been removed. See `SECURITY_FIX_C
 - Manual alternatives for checking available modules
 
 ### 2. Explicit QE Version Specification in GUI ✅
-**Location**: `xespresso/gui/pages/codes_config.py` lines 129-156
+**Location**: `qtgui/pages/codes_config.py` lines 129-156
 
 **Features**:
 - "QE Version" text input field
@@ -71,7 +71,7 @@ version_config = load_codes_config(
 ## Files Changed
 
 ### Modified
-- `xespresso/gui/pages/codes_config.py`
+- `qtgui/pages/codes_config.py`
   - ~~Added Feature 1: Module listing (57 lines)~~ - REMOVED for security
   - Added Feature 1: QE version input (explicit version specification)
   - Added Feature 2: Version selection
@@ -188,7 +188,7 @@ Remaining features are:
 
 ## Files in This PR
 
-1. `xespresso/gui/pages/codes_config.py` - Main implementation
+1. `qtgui/pages/codes_config.py` - Main implementation
 2. `xespresso/codes/manager.py` - Removed vulnerable function
 3. `tests/test_gui_qe_features.py` - Updated tests (8 tests)
 4. `GUI_QE_FEATURES.md` - Updated feature documentation

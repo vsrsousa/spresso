@@ -18,7 +18,7 @@
 
 ### 2. GUI Changes
 
-**File**: `xespresso/gui/pages/codes_config.py`
+**File**: `qtgui/pages/codes_config.py`
 - **Removed**: "🔍 Discover Available Modules" expandable section (Feature 1)
 - **Removed**: Module discovery UI with search pattern and environment setup inputs
 - **Removed**: Auto-population of discovered modules into the detection form
@@ -140,7 +140,7 @@ subprocess.run(['ssh', host, 'module', 'avail', pattern])  # ✅ Safer
 ## Files Modified in This Change
 
 1. `xespresso/codes/manager.py` - Removed list_available_modules()
-2. `xespresso/gui/pages/codes_config.py` - Removed module discovery UI
+2. `qtgui/pages/codes_config.py` - Removed module discovery UI
 3. `tests/test_gui_qe_features.py` - Updated tests
 4. `tests/test_module_listing.py` - Deleted
 5. `examples/module_listing_and_version_example.py` - Deleted

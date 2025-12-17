@@ -131,7 +131,7 @@ version_config = load_codes_config(
 ## Implementation Details
 
 ### Files Modified
-- `xespresso/gui/pages/codes_config.py`: Main implementation
+-- `qtgui/pages/codes_config.py`: Main implementation
 
 ### New UI Elements
 1. **Text Input**: `st.text_input("QE Version")`

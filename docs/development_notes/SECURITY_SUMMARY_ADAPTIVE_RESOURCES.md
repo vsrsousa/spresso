@@ -18,13 +18,13 @@
 
 ### Files Scanned
 
-1. `xespresso/gui/pages/workflow_builder.py`
+1. `qtgui/pages/workflow_builder.py`
    - Added adaptive resources configuration logic
    - Uses session state safely
    - No user input directly executed
    - All inputs properly validated by Streamlit
 
-2. `xespresso/gui/pages/structure_viewer.py`
+2. `qtgui/pages/structure_viewer.py`
    - Added persistent structure display
    - Enhanced structure loading with source tracking
    - Maintains existing path validation

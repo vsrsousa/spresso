@@ -19,7 +19,7 @@ The job submission page showed placeholder text saying "Job submission functiona
 
 ### 1. Save Codes Configuration (Already Fixed)
 
-**File**: `xespresso/gui/pages/codes_config.py` (lines 140-153)
+**File**: `qtgui/pages/codes_config.py` (lines 140-153)
 
 The Save Codes button already correctly uses:
 ```python
@@ -36,7 +36,7 @@ filepath = CodesManager.save_config(
 
 ### 2. Job Submission Dry Run (Implemented)
 
-**File**: `xespresso/gui/streamlit_app.py` (lines 887-1048)
+**File**: `qtgui/streamlit_app.py` (lines 887-1048)
 
 Replaced placeholder code with full implementation that:
 
@@ -147,7 +147,7 @@ The implementation correctly maps all workflow parameters:
 
 ## Files Modified
 
-1. **xespresso/gui/streamlit_app.py** (+147 lines, -25 lines)
+1. **qtgui/streamlit_app.py** (+147 lines, -25 lines)
    - Implemented job submission dry run
    - Added path validation
    - Added proper error handling

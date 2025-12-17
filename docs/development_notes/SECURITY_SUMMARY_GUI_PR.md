@@ -44,14 +44,14 @@ result = subprocess.run(cmd, shell=True, capture_output=True,
 
 **Evidence**:
 - The `list_available_modules()` method was already in the codebase before this PR
-- This PR only modified GUI files: `xespresso/gui/pages/codes_config.py`
+- This PR only modified GUI files: `qtgui/pages/codes_config.py`
 - The manager.py file was NOT modified by this PR
 - Git diff confirms no changes to manager.py
 
 ### Changes Made in This PR
 
 This PR modified only:
-1. `xespresso/gui/pages/codes_config.py` - GUI implementation
+1. `qtgui/pages/codes_config.py` - GUI implementation
 2. `tests/test_gui_qe_features.py` - Test suite
 3. `GUI_QE_FEATURES.md` - Documentation
 4. `GUI_IMPLEMENTATION.md` - Documentation update

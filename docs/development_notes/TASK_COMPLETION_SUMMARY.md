@@ -23,7 +23,7 @@ Solve this once for all."
 
 #### Code Changes:
 ```
-File: xespresso/gui/utils/selectors.py
+File: qtgui/utils/selectors.py
 - Lines removed: 257
 - Lines added: 63
 - Net change: -194 lines (simpler!)
@@ -54,7 +54,7 @@ File: xespresso/gui/utils/selectors.py
 
 #### Code Changes:
 ```
-File: xespresso/gui/pages/job_submission.py
+File: qtgui/pages/job_submission.py
 - Lines removed: 17
 - Lines added: 13
 - Net change: -4 lines (cleaner!)
@@ -154,8 +154,8 @@ Analysis Result for 'python': Found 0 alerts
 - **Documentation added**: 322 lines (detailed guides)
 
 ### Files Changed: 7
-1. ✅ xespresso/gui/utils/selectors.py (simplified browse)
-2. ✅ xespresso/gui/pages/job_submission.py (fixed integration)
+1. ✅ qtgui/utils/selectors.py (simplified browse)
+2. ✅ qtgui/pages/job_submission.py (fixed integration)
 3. ✅ tests/test_gui_browse_improvements.py (NEW)
 4. ✅ tests/test_job_submission_integration.py (NEW)
 5. ✅ GUI_BROWSE_JOB_IMPROVEMENTS.md (NEW)

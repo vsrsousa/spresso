@@ -45,17 +45,17 @@ SOLUTIONS IMPLEMENTED
 FILES MODIFIED
 ========================================================================
 
-1. xespresso/gui/pages/calculation_setup.py (+39 lines)
+1. qtgui/pages/calculation_setup.py (+39 lines)
    - Added code selector after version selection
    - Stores selection in config["selected_code"]
    - Uses session state key: calc_selected_code
    
-2. xespresso/gui/pages/workflow_builder.py (+40 lines)
+2. qtgui/pages/workflow_builder.py (+40 lines)
    - Added code selector after version selection
    - Stores selection in config["selected_code"]
    - Uses session state key: workflow_selected_code
    
-3. xespresso/gui/utils/selectors.py (+170/-96 lines)
+3. qtgui/utils/selectors.py (+170/-96 lines)
    - Fixed render_workdir_browser() function
    - Button handlers update st.session_state.local_workdir
    - Text input uses session state as source of truth

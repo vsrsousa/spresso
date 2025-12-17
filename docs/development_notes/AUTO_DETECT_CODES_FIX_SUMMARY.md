@@ -79,7 +79,7 @@ def get_all_codes(self, version: Optional[str] = None) -> Dict[str, Code]:
 **Purpose**: Intelligently retrieves codes from the correct location based on configuration structure.
 
 ### 2. Updated GUI Code
-Location: `xespresso/gui/pages/codes_config.py`
+Location: `qtgui/pages/codes_config.py`
 
 #### Before (Lines 116-117):
 ```python
@@ -162,8 +162,8 @@ All tests pass ✅
 ## Files Changed
 
 1. `xespresso/codes/config.py` - Added 2 helper methods
-2. `xespresso/gui/pages/codes_config.py` - Updated to use helper methods
-3. `xespresso/gui/streamlit_app_original.py` - Updated to use helper methods
+2. `qtgui/pages/codes_config.py` - Updated to use helper methods
+3. `qtgui/streamlit_app_original.py` - Updated to use helper methods
 4. `tests/test_auto_detect_codes_fix.py` - New test file (9 tests)
 
 ## Example Usage

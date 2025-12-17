@@ -80,7 +80,7 @@ See [GUI_QE_FEATURES.md](GUI_QE_FEATURES.md) for detailed documentation of the n
 
 ### Architecture
 ```
-xespresso/gui/
+qtgui/
 ├── __init__.py           # Module initialization
 ├── __main__.py           # Module launcher (python -m qtgui)
 ├── streamlit_app.py      # Main Streamlit application (800+ lines)
@@ -122,7 +122,7 @@ xespresso-gui
 python -m qtgui
 
 # Or with Streamlit directly
-streamlit run xespresso/gui/streamlit_app.py
+streamlit run qtgui/streamlit_app.py
 ```
 
 ## Configuration Files

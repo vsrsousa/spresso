@@ -90,7 +90,7 @@ For machines with scheduler (SLURM, PBS, SGE):
 
 ### Files Modified
 
-1. **xespresso/gui/pages/calculation_setup.py**
+1. **qtgui/pages/calculation_setup.py**
    - Updated to use shared session state variables
    - Added default index handling for machine selector
    - Implemented adaptive resources configuration
@@ -98,7 +98,7 @@ For machines with scheduler (SLURM, PBS, SGE):
    - Added nprocs configuration for direct execution
    - Added launcher placeholder resolution
 
-2. **xespresso/gui/pages/workflow_builder.py**
+2. **qtgui/pages/workflow_builder.py**
    - Updated to use shared session state variables
    - Added default index handling for machine selector
    - No changes to resources section (already had adaptive resources)
@@ -197,6 +197,6 @@ Possible future improvements:
 ## References
 
 - Original implementation: `IMPLEMENTATION_ADAPTIVE_RESOURCES_AND_PERSISTENCE.md`
-- Session management: `xespresso/gui/utils/session_manager.py`
+- Session management: `qtgui/utils/session_manager.py`
 - Machine configuration: `xespresso/machines/config/loader.py`
 - Codes configuration: `xespresso/codes/manager.py`

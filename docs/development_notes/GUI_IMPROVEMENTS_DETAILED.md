@@ -15,7 +15,7 @@ The GUI has been significantly improved to provide better clarity, separation of
 
 **Implementation:**
 
-#### New Selector Utilities (`xespresso/gui/utils/selectors.py`)
+#### New Selector Utilities (`qtgui/utils/selectors.py`)
 
 Three new reusable selector components were created:
 
@@ -106,7 +106,7 @@ st.sidebar.radio(
 
 **Implementation:**
 
-#### Enhanced Visualization Module (`xespresso/gui/utils/visualization.py`)
+#### Enhanced Visualization Module (`qtgui/utils/visualization.py`)
 
 Added `render_structure_viewer()` function with three viewer options:
 
@@ -203,7 +203,7 @@ Added info box explaining:
 
 #### Complete File Management System
 
-**New Job Submission Page (`xespresso/gui/pages/job_submission.py`):**
+**New Job Submission Page (`qtgui/pages/job_submission.py`):**
 
 1. **Working Directory Browser**
    - Uses `render_workdir_browser()` for navigation
@@ -294,41 +294,41 @@ Added info box explaining:
 
 ### New Files Created
 
-1. **`xespresso/gui/utils/selectors.py`** (270 lines)
+1. **`qtgui/utils/selectors.py`** (270 lines)
    - Machine selector component
    - Codes selector component
    - Working directory browser component
 
 ### Modified Files
 
-1. **`xespresso/gui/streamlit_app.py`**
+1. **`qtgui/streamlit_app.py`**
    - Updated navigation labels
    - Integrated multi-viewer support
    - Added machine/code selectors to calculation pages
    - Enhanced pseudopotential selection
 
-2. **`xespresso/gui/pages/machine_config.py`**
+2. **`qtgui/pages/machine_config.py`**
    - Updated header and documentation
    - Emphasized configuration purpose
    - Added info boxes
 
-3. **`xespresso/gui/pages/codes_config.py`**
+3. **`qtgui/pages/codes_config.py`**
    - Updated header and documentation
    - Emphasized configuration purpose
    - Added info boxes
 
-4. **`xespresso/gui/pages/job_submission.py`** (completely rewritten)
+4. **`qtgui/pages/job_submission.py`** (completely rewritten)
    - New file browser functionality
    - File categorization
    - View/Edit modes
    - Enhanced documentation
 
-5. **`xespresso/gui/utils/visualization.py`**
+5. **`qtgui/utils/visualization.py`**
    - Added `render_structure_viewer()` function
    - Added `create_x3d_viewer()` function
    - Support for multiple viewer types
 
-6. **`xespresso/gui/utils/__init__.py`**
+6. **`qtgui/utils/__init__.py`**
    - Exported new selector functions
    - Exported new visualization functions
 

@@ -33,7 +33,7 @@ The xespresso Streamlit GUI has been successfully modularized to address the req
 **After**: 1104-line main app (34.8% reduction) + separate modules
 
 ```
-xespresso/gui/
+qtgui/
 ├── streamlit_app.py          # Main app (1104 lines, down from 1693)
 ├── streamlit_app_original.py # Backup of original
 ├── pages/                     # Page modules
@@ -125,21 +125,21 @@ The remaining inline pages can be modularized in future iterations:
 ## Files Changed
 
 ### New Files Created
-- `xespresso/gui/pages/__init__.py`
-- `xespresso/gui/pages/machine_config.py` ⭐
-- `xespresso/gui/pages/codes_config.py` ⭐
-- `xespresso/gui/pages/[5 placeholder modules].py`
-- `xespresso/gui/utils/__init__.py`
-- `xespresso/gui/utils/validation.py` ⭐
-- `xespresso/gui/utils/visualization.py` ⭐
-- `xespresso/gui/utils/connection.py` ⭐
-- `xespresso/gui/utils/dry_run.py` ⭐
-- `xespresso/gui/ARCHITECTURE.md` ⭐
-- `xespresso/gui/streamlit_app_original.py` (backup)
+- `qtgui/pages/__init__.py`
+- `qtgui/pages/machine_config.py` ⭐
+- `qtgui/pages/codes_config.py` ⭐
+- `qtgui/pages/[5 placeholder modules].py`
+- `qtgui/utils/__init__.py`
+- `qtgui/utils/validation.py` ⭐
+- `qtgui/utils/visualization.py` ⭐
+- `qtgui/utils/connection.py` ⭐
+- `qtgui/utils/dry_run.py` ⭐
+- `qtgui/ARCHITECTURE.md` ⭐
+- `qtgui/streamlit_app_original.py` (backup)
 - `tests/test_gui_modular.py`
 
 ### Files Modified
-- `xespresso/gui/streamlit_app.py` (reduced from 1693 to 1104 lines)
+- `qtgui/streamlit_app.py` (reduced from 1693 to 1104 lines)
 
 ⭐ = Key implementation files
 
@@ -150,10 +150,10 @@ The remaining inline pages can be modularized in future iterations:
 python3 tests/test_gui_modular.py
 
 # Check syntax
-python3 -m py_compile xespresso/gui/utils/*.py xespresso/gui/pages/*.py
+python3 -m py_compile qtgui/utils/*.py qtgui/pages/*.py
 
 # Run GUI (requires dependencies)
-streamlit run xespresso/gui/streamlit_app.py
+streamlit run qtgui/streamlit_app.py
 ```
 
 ## Conclusion

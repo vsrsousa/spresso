@@ -7,7 +7,7 @@ The xespresso GUI has been fully modularized following a consistent design patte
 ## Modular Structure
 
 ```
-xespresso/gui/
+qtgui/
 ├── calculations/           # Calculation preparation
 │   ├── base.py
 │   ├── preparation.py
@@ -50,7 +50,7 @@ Other Pages (e.g., job submission)
 
 ## Module Responsibilities
 
-### 1. Calculations Module (`gui/calculations/`)
+### 1. Calculations Module (`qtgui/calculations/`)
 
 **Responsibility**: Create Espresso calculator and atoms objects from GUI configuration
 
@@ -67,7 +67,7 @@ atoms, calc = prepare_calculation_from_gui(atoms, config, label='scf/fe')
 st.session_state.espresso_calculator = calc
 ```
 
-### 2. Workflows Module (`gui/workflows/`)
+### 2. Workflows Module (`qtgui/workflows/`)
 
 **Responsibility**: Orchestrate multi-step calculations
 

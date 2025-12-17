@@ -11,9 +11,9 @@ This PR adds structure viewer functionality and restores job submission features
 ### Findings
 CodeQL identified 4 path injection warnings in the GUI code:
 
-1. **xespresso/gui/pages/job_submission.py:295** - `os.walk(workdir)`
-2. **xespresso/gui/pages/structure_viewer.py:54** - `os.path.exists(workdir)` and `os.path.isdir(workdir)`
-3. **xespresso/gui/pages/structure_viewer.py:73** - `os.walk(workdir)`
+1. **qtgui/pages/job_submission.py:295** - `os.walk(workdir)`
+2. **qtgui/pages/structure_viewer.py:54** - `os.path.exists(workdir)` and `os.path.isdir(workdir)`
+3. **qtgui/pages/structure_viewer.py:73** - `os.walk(workdir)`
 
 ### Analysis
 These warnings relate to user-provided directory paths being used in file system operations. While CodeQL flags these as potential security issues, they are **false positives** given the mitigations implemented:

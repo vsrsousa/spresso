@@ -7,7 +7,7 @@ This PR adds multiple structure viewer options and improves folder navigation. A
 
 ### CodeQL Findings
 
-CodeQL identified 5 path injection alerts in `xespresso/gui/utils/selectors.py`. These are related to the folder navigator functionality.
+CodeQL identified 5 path injection alerts in `qtgui/utils/selectors.py`. These are related to the folder navigator functionality.
 
 **Status: ADDRESSED - False Positives with Mitigation**
 
@@ -50,7 +50,7 @@ The alerts are for the working directory browser/selector functionality in `rend
 
 ### Code Changes to Address Security
 
-**File: `xespresso/gui/utils/selectors.py`**
+**File: `qtgui/utils/selectors.py`**
 
 Added security measures:
 ```python
@@ -75,7 +75,7 @@ if '..' in selected_subdir or '/' in selected_subdir or '\\' in selected_subdir:
 
 ### Visualization Components
 
-**JMol Viewer** (`xespresso/gui/utils/visualization.py`):
+**JMol Viewer** (`qtgui/utils/visualization.py`):
 - Uses external CDN for JSmol library (https://chemapps.stolaf.edu)
 - XYZ content is properly escaped for JavaScript injection
 - No user-provided JavaScript is executed
@@ -91,7 +91,7 @@ if '..' in selected_subdir or '/' in selected_subdir or '\\' in selected_subdir:
 
 ### Job File Generation
 
-**Fixed in `xespresso/gui/utils/dry_run.py`**:
+**Fixed in `qtgui/utils/dry_run.py`**:
 - Now uses xespresso's built-in scheduler system instead of manual script generation
 - Scheduler system properly handles command escaping and validation
 - No user input is directly interpolated into shell commands

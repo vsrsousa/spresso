@@ -41,7 +41,7 @@ If the button doesn't appear, it means tkinter is not available on your system (
 
 ### For Developers
 
-The functionality is implemented in `xespresso/gui/utils/directory_browser.py`:
+The functionality is implemented in `qtgui/utils/directory_browser.py`:
 
 ```python
 from qtgui.utils.directory_browser import render_directory_browser
@@ -81,7 +81,7 @@ tkinter comes pre-installed with Python on Windows.
 
 ## Implementation Details
 
-### File: `xespresso/gui/utils/directory_browser.py`
+### File: `qtgui/utils/directory_browser.py`
 
 #### New Function: `open_folder_dialog(initial_path)`
 

@@ -6,7 +6,7 @@
 AttributeError: 'str' object has no attribute 'get_chemical_formula'
 ```
 
-**Location**: `xespresso/gui/pages/job_submission.py`, line 49
+**Location**: `qtgui/pages/job_submission.py`, line 49
 **Root Cause**: Structure was being saved as a string instead of properly serialized ASE Atoms object
 
 ## Root Cause Analysis
@@ -178,13 +178,13 @@ Successfully restored Atoms object for key 'current_structure': Al
 
 ## Files Modified
 
-1. **xespresso/gui/utils/session_manager.py**
+1. **qtgui/utils/session_manager.py**
    - Removed dangerous string conversion fallback
    - Improved exception handling for Atoms serialization
    - Added debug logging for deserialization
    - Skip non-serializable keys with warning
 
-2. **xespresso/gui/pages/job_submission.py**
+2. **qtgui/pages/job_submission.py**
    - Added isinstance checks in `render_dry_run_tab()`
    - Added isinstance checks in `render_job_submission_tab()`
    - Helpful error messages with debug info

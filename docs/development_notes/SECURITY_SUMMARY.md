@@ -27,7 +27,7 @@ Analysis Result for 'python'. Found 0 alerts:
 - ✅ Only sanitizes specific, known fields (launcher, prepend, postpend, modules, etc.)
 
 ### 2. Directory Browser Enhancement
-**File**: `xespresso/gui/utils/directory_browser.py`
+**File**: `qtgui/utils/directory_browser.py`
 
 **Purpose**: Add native folder dialog using tkinter.
 

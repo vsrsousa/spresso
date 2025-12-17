@@ -34,7 +34,7 @@ from xespresso import CalculationWorkflow
 workflow = CalculationWorkflow.from_cif(
     'structure.cif',
     pseudopotentials={'Fe': 'Fe.pbe-spn.UPF'},
-    quality='moderate'
+    protocol='moderate'
 )
 ```
 
@@ -64,10 +64,10 @@ calc = workflow.run_relax(label='relax/fe-vc', relax_type='vc-relax')
 from xespresso import quick_scf, quick_relax
 
 # Quick SCF
-calc = quick_scf('structure.cif', pseudopotentials, quality='moderate')
+calc = quick_scf('structure.cif', pseudopotentials, protocol='moderate')
 
 # Quick relaxation
-calc = quick_relax('structure.cif', pseudopotentials, quality='moderate', relax_type='vc-relax')
+calc = quick_relax('structure.cif', pseudopotentials, protocol='moderate', relax_type='vc-relax')
 ```
 
 **Files:**
@@ -86,13 +86,13 @@ Three presets are available:
 from xespresso import PRESETS
 
 # Fast: ecutwfc=30 Ry, kspacing=0.5, conv_thr=1e-6
-workflow = CalculationWorkflow(..., quality='fast')
+workflow = CalculationWorkflow(..., protocol='fast')
 
 # Moderate: ecutwfc=50 Ry, kspacing=0.3, conv_thr=1e-8
-workflow = CalculationWorkflow(..., quality='moderate')
+workflow = CalculationWorkflow(..., protocol='moderate')
 
 # Accurate: ecutwfc=80 Ry, kspacing=0.15, conv_thr=1e-10
-workflow = CalculationWorkflow(..., quality='accurate')
+workflow = CalculationWorkflow(..., protocol='accurate')
 ```
 
 **Preset details:**
@@ -120,7 +120,7 @@ from xespresso import CalculationWorkflow
 workflow = CalculationWorkflow(
     atoms=atoms,
     pseudopotentials=pseudopotentials,
-    quality='moderate',
+    protocol='moderate',
     kspacing=0.20/(2*np.pi)  # Converts to k-points automatically
 )
 
@@ -172,7 +172,7 @@ from xespresso import quick_scf
 config = load_pseudo_config("pbe_efficiency")
 
 # Use in calculation
-calc = quick_scf('structure.cif', config['pseudopotentials'], quality='moderate')
+calc = quick_scf('structure.cif', config['pseudopotentials'], protocol='moderate')
 ```
 
 **Manage configurations:**
@@ -217,7 +217,7 @@ config = load_pseudo_config("my_calculation")
 workflow = CalculationWorkflow.from_cif(
     'fe_structure.cif',
     pseudopotentials=config['pseudopotentials'],
-    quality='moderate',              # Quality preset
+    protocol='moderate',              # Protocol preset
     kspacing=0.20/(2*np.pi)          # K-spacing as in problem statement
 )
 

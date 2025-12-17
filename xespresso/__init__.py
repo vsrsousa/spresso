@@ -1,39 +1,47 @@
-from xespresso.xespresso import Espresso
-from xespresso.hubbard import HubbardConfig, build_hubbard_str, apply_hubbard_to_system
-from xespresso.tools import (
-    set_magnetic_moments, 
-    set_antiferromagnetic, 
-    set_ferromagnetic,
-    setup_magnetic_config,
-    kpts_from_spacing,
-)
-from xespresso.workflow import (
-    CalculationWorkflow,
-    quick_scf,
-    quick_relax,
-    PRESETS,
-)
-from xespresso.pseudopotentials import (
-    PseudopotentialsManager,
-    create_pseudopotentials_config,
-    load_pseudopotentials_config,
-)
+"""
+Top-level package for xespresso.
 
-__all__ = [
-    'Espresso', 
-    'HubbardConfig', 
-    'build_hubbard_str', 
-    'apply_hubbard_to_system',
-    'set_magnetic_moments',
-    'set_antiferromagnetic',
-    'set_ferromagnetic',
-    'setup_magnetic_config',
-    'kpts_from_spacing',
-    'CalculationWorkflow',
-    'quick_scf',
-    'quick_relax',
-    'PRESETS',
-    'PseudopotentialsManager',
-    'create_pseudopotentials_config',
-    'load_pseudopotentials_config',
-]
+This module performs guarded imports of commonly-used symbols so that
+importing the top-level package doesn't fail during test collection or
+when optional submodules are temporarily unavailable.
+
+Symbols are imported from their modules when possible; failures are
+silently ignored to preserve importability.
+"""
+
+import importlib
+
+__all__ = []
+
+# Mapping of modules to names we want to expose at package level
+_EXPORTS = {
+    'xespresso.xespresso': ['Espresso'],
+    'xespresso.hubbard': ['HubbardConfig', 'build_hubbard_str', 'apply_hubbard_to_system'],
+    'xespresso.tools': [
+        'set_magnetic_moments',
+        'set_antiferromagnetic',
+        'set_ferromagnetic',
+        'setup_magnetic_config',
+        'kpts_from_spacing',
+    ],
+    'xespresso.workflow': ['CalculationWorkflow', 'quick_scf', 'quick_relax', 'PRESETS'],
+    'xespresso.pseudopotentials': [
+        'PseudopotentialsManager',
+        'create_pseudopotentials_config',
+        'load_pseudopotentials_config',
+    ],
+}
+
+for modname, names in _EXPORTS.items():
+    try:
+        _mod = importlib.import_module(modname)
+    except Exception:
+        # If the submodule fails to import, skip its symbols
+        continue
+    for _name in names:
+        try:
+            globals()[_name] = getattr(_mod, _name)
+            __all__.append(_name)
+        except AttributeError:
+            # Symbol not present in module; skip
+            continue

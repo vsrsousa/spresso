@@ -4,8 +4,8 @@
 This document provides a security assessment of the GUI browse directory and job submission improvements made to the xespresso repository.
 
 ## Changes Analyzed
-- Modified: `xespresso/gui/utils/selectors.py` (browse directory functionality)
-- Modified: `xespresso/gui/pages/job_submission.py` (job submission integration)
+-- Modified: `qtgui/utils/selectors.py` (browse directory functionality)
+-- Modified: `qtgui/pages/job_submission.py` (job submission integration)
 - Added: `tests/test_gui_browse_improvements.py` (browse functionality tests)
 - Added: `tests/test_job_submission_integration.py` (job submission integration tests)
 

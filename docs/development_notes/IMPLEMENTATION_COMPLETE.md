@@ -19,9 +19,9 @@ All issues from the problem statement have been successfully resolved. The xespr
 
 **Solution**:
 - Fixed condition in 3 locations:
-  - `xespresso/gui/utils/selectors.py`
-  - `xespresso/gui/pages/workflow_builder.py`
-  - `xespresso/gui/pages/calculation_setup.py`
+   - `qtgui/utils/selectors.py`
+   - `qtgui/pages/workflow_builder.py`
+   - `qtgui/pages/calculation_setup.py`
 - Now ALWAYS retrieves and displays modules if they exist in codes JSON
 
 ### 3. ✅ Infinite Loop in Job Submission
@@ -106,41 +106,41 @@ All issues from the problem statement have been successfully resolved. The xespr
 ## Changes Summary
 
 ### Files Modified (7):
-1. `xespresso/gui/streamlit_app.py`
+1. `qtgui/streamlit_app.py`
    - Added working directory dropdown at top
    - Added configuration toggle
    - Added session manager integration
 
-2. `xespresso/gui/pages/job_submission.py`
+2. `qtgui/pages/job_submission.py`
    - Removed browse UI from all 3 tabs
    - Uses centralized working_directory
    - Clean output paths: `working_directory/calc_label/`
 
-3. `xespresso/gui/pages/structure_viewer.py`
+3. `qtgui/pages/structure_viewer.py`
    - Removed browse UI
    - Uses centralized working_directory
 
-4. `xespresso/gui/utils/selectors.py`
+4. `qtgui/utils/selectors.py`
    - Fixed infinite loop in text input
    - Fixed module display to always show when defined
    - Fixed manual path entry loop
 
-5. `xespresso/gui/pages/workflow_builder.py`
+5. `qtgui/pages/workflow_builder.py`
    - Changed module retrieval condition
    - Stores modules in config dictionary
    - Shows modules in UI
 
-6. `xespresso/gui/pages/calculation_setup.py`
+6. `qtgui/pages/calculation_setup.py`
    - Changed module retrieval condition
    - Stores modules in config dictionary
    - Shows modules in UI
 
-7. `xespresso/gui/utils/session_manager.py`
+7. `qtgui/utils/session_manager.py`
    - Excludes machine/code configs from session
    - Added documentation about what gets saved
 
 ### Files Created (2):
-8. `xespresso/gui/utils/session_manager.py` (NEW)
+8. `qtgui/utils/session_manager.py` (NEW)
    - Complete session save/load/reset functionality
    - JSON-based persistence
    - Proper exclusion of persistent configs

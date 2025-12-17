@@ -12,7 +12,7 @@ This guide provides step-by-step instructions for testing the new session naming
 
 ### Test 1.1: Save Session with Custom Name
 **Steps:**
-1. Open xespresso GUI: `streamlit run xespresso/gui/streamlit_app.py`
+1. Open xespresso GUI: `streamlit run qtgui/streamlit_app.py`
 2. Create or load a structure in Structure Viewer
 3. Go to Sessions panel in sidebar
 4. Click "✏️ Rename" button

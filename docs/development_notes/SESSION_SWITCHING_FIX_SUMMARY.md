@@ -103,7 +103,7 @@ Result: ✅ All checks passed
 No security vulnerabilities introduced. CodeQL analysis shows 0 alerts.
 
 ## Files Changed
-1. `xespresso/gui/utils/session_manager.py` - Added filtering logic
+1. `qtgui/utils/session_manager.py` - Added filtering logic
 2. `tests/test_widget_key_filtering.py` - New comprehensive test suite
 
 ## Conclusion

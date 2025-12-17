@@ -10,7 +10,7 @@ The GUI code needed modularization where:
 
 ## Solution Implemented ✅
 
-### 1. GUI Calculations Module (`xespresso/gui/calculations/`)
+### 1. GUI Calculations Module (`qtgui/calculations/`)
 
 **Purpose**: Create Espresso and atoms objects from GUI configuration
 
@@ -38,7 +38,7 @@ class CalculationPreparation:
 - `prepare_calculation_from_gui(atoms, config, label)` → Returns (atoms, Espresso_calc)
 - `dry_run_calculation(atoms, config, label)` → Creates calc and writes input files
 
-### 2. GUI Workflows Module (`xespresso/gui/workflows/`)
+### 2. GUI Workflows Module (`qtgui/workflows/`)
 
 **Purpose**: Orchestrate multi-step calculations
 
@@ -117,10 +117,10 @@ job_submission.py
 
 ### Calculations Module
 ```bash
-$ grep "from xespresso import Espresso" xespresso/gui/calculations/preparation.py
+$ grep "from xespresso import Espresso" qtgui/calculations/preparation.py
 from xespresso import Espresso  # Line 10 ✓
 
-$ grep "Espresso(" xespresso/gui/calculations/preparation.py  
+$ grep "Espresso(" qtgui/calculations/preparation.py  
 self.calculator = Espresso(**calc_params)  # Line 126 ✓
 ```
 
@@ -157,23 +157,23 @@ calc_atoms, calculator = prepare_calculation_from_gui(...)  # Line 77 ✓
 ## Files Changed
 
 **New Files**:
-- `xespresso/gui/calculations/__init__.py`
-- `xespresso/gui/calculations/base.py`
-- `xespresso/gui/calculations/preparation.py`
-- `xespresso/gui/workflows/__init__.py`
-- `xespresso/gui/workflows/base.py`
-- `xespresso/gui/MODULAR_ARCHITECTURE.md`
+- `qtgui/calculations/__init__.py`
+- `qtgui/calculations/base.py`
+- `qtgui/calculations/preparation.py`
+- `qtgui/workflows/__init__.py`
+- `qtgui/workflows/base.py`
+- `qtgui/MODULAR_ARCHITECTURE.md`
 - `examples/gui_modular_example.py`
 
 **Modified Files**:
-- `xespresso/gui/pages/calculation_setup.py` (6 → 235 lines)
-- `xespresso/gui/pages/workflow_builder.py` (6 → 258 lines)
-- `xespresso/gui/pages/job_submission.py` (refactored to use modules)
+- `qtgui/pages/calculation_setup.py` (6 → 235 lines)
+- `qtgui/pages/workflow_builder.py` (6 → 258 lines)
+- `qtgui/pages/job_submission.py` (refactored to use modules)
 - `.gitignore` (made calculations/ path more specific)
 
 ## Documentation
 
-- **Architecture Guide**: `xespresso/gui/MODULAR_ARCHITECTURE.md`
+- **Architecture Guide**: `qtgui/MODULAR_ARCHITECTURE.md`
   - Complete explanation of the design
   - Usage examples
   - Migration guide

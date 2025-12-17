@@ -73,14 +73,14 @@ else:
 
 ## Files Modified
 
-1. **xespresso/gui/pages/calculation_setup.py**
+1. **qtgui/pages/calculation_setup.py**
    - Updated machine/code/version selectors to use shared state
    - Added default index handling for machine selector
    - Implemented adaptive resources configuration
    - Added scheduler type detection
    - Added launcher placeholder resolution
 
-2. **xespresso/gui/pages/workflow_builder.py**
+2. **qtgui/pages/workflow_builder.py**
    - Updated machine/code/version selectors to use shared state
    - Added default index handling for machine selector
    - No changes to resources (already had adaptive resources)

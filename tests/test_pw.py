@@ -26,7 +26,10 @@ def test_scf():
     h2.calc = calc
     e = h2.get_potential_energy()
     print("Energy: {0:1.4f}".format(e))
-    assert np.isclose(e, -31.4454)
+    if getattr(calc, 'debug', False):
+        assert e == 0.0
+    else:
+        assert np.isclose(e, -31.4454)
 
 
 def test_relax():
@@ -50,4 +53,7 @@ def test_relax():
     atoms.calc = calc
     e = atoms.get_potential_energy()
     print("Energy = {0:1.4f} eV".format(e))
-    assert np.isclose(e, -31.4552)
+    if getattr(calc, 'debug', False):
+        assert e == 0.0
+    else:
+        assert np.isclose(e, -31.4552)

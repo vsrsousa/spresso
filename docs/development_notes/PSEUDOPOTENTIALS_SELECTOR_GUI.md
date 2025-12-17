@@ -150,7 +150,7 @@ If no configurations are available, the selector falls back to manual entry mode
 ## Code Structure
 
 ```
-xespresso/gui/utils/pseudopotentials_selector.py
+qtgui/utils/pseudopotentials_selector.py
 └── render_pseudopotentials_selector(elements, config_dict, key_prefix)
     ├── Load available configurations
     ├── Render filter controls (library, functional)

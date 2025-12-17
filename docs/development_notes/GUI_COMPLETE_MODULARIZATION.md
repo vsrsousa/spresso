@@ -62,7 +62,7 @@ Other Pages (e.g., job submission)
 
 **Example**:
 ```python
-from xespresso.gui.calculations import prepare_calculation_from_gui
+from qtgui.calculations import prepare_calculation_from_gui
 atoms, calc = prepare_calculation_from_gui(atoms, config, label='scf/fe')
 st.session_state.espresso_calculator = calc
 ```
@@ -79,7 +79,7 @@ st.session_state.espresso_calculator = calc
 
 **Example**:
 ```python
-from xespresso.gui.workflows import GUIWorkflow
+from qtgui.workflows import GUIWorkflow
 workflow = GUIWorkflow(atoms, config, base_label='workflow')
 workflow.add_calculation('scf', scf_config)
 workflow.add_calculation('relax', relax_config)
@@ -99,7 +99,7 @@ workflow.add_calculation('relax', relax_config)
 
 **Example**:
 ```python
-from xespresso.gui.structures import load_structure_from_upload
+from qtgui.structures import load_structure_from_upload
 atoms, loader = load_structure_from_upload(uploaded_file.getvalue(), uploaded_file.name)
 st.session_state.current_structure = atoms
 ```
@@ -168,12 +168,12 @@ st.session_state.current_structure = atoms
 
 ```python
 # 1. Structure Viewer: Load structure
-from xespresso.gui.structures import load_structure_from_file
+from qtgui.structures import load_structure_from_file
 atoms, loader = load_structure_from_file('structure.cif')
 st.session_state.current_structure = atoms
 
 # 2. Calculation Setup: Prepare calculation
-from xespresso.gui.calculations import prepare_calculation_from_gui
+from qtgui.calculations import prepare_calculation_from_gui
 config = st.session_state.workflow_config  # From user inputs
 atoms, calc = prepare_calculation_from_gui(atoms, config, label='scf/fe')
 st.session_state.espresso_calculator = calc
@@ -202,12 +202,12 @@ All modules can be used:
 Each module can be tested independently:
 ```python
 # Test structure loading
-from xespresso.gui.structures import load_structure_from_file
+from qtgui.structures import load_structure_from_file
 atoms, loader = load_structure_from_file('test.cif')
 assert len(atoms) > 0
 
 # Test calculation preparation
-from xespresso.gui.calculations import prepare_calculation_from_gui
+from qtgui.calculations import prepare_calculation_from_gui
 atoms, calc = prepare_calculation_from_gui(test_atoms, test_config, 'test')
 assert calc is not None
 ```

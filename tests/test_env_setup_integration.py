@@ -6,6 +6,7 @@ These tests validate the implementation without requiring full imports.
 import unittest
 import sys
 import os
+from pathlib import Path
 
 # Test the structure of the code
 class TestEnvSetupImplementation(unittest.TestCase):
@@ -15,7 +16,9 @@ class TestEnvSetupImplementation(unittest.TestCase):
         """Verify CodesManager.detect_codes has env_setup parameter"""
         import ast
         
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/codes/manager.py"
+        from pathlib import Path
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'codes' / 'manager.py'
         with open(file_path, 'r') as f:
             tree = ast.parse(f.read())
         
@@ -35,7 +38,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
         """Verify Machine.__init__ has env_setup parameter"""
         import ast
         
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/machines/machine.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'machines' / 'machine.py'
         with open(file_path, 'r') as f:
             tree = ast.parse(f.read())
         
@@ -55,7 +59,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
     
     def test_remote_mixin_uses_env_setup(self):
         """Verify remote_mixin.py uses queue env_setup"""
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/schedulers/remote_mixin.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'schedulers' / 'remote_mixin.py'
         with open(file_path, 'r') as f:
             content = f.read()
         
@@ -71,7 +76,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
         """Verify detect_qe_codes function has env_setup parameter"""
         import ast
         
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/codes/manager.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'codes' / 'manager.py'
         with open(file_path, 'r') as f:
             tree = ast.parse(f.read())
         
@@ -91,7 +97,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
         """Verify all helper functions have env_setup parameter"""
         import ast
         
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/codes/manager.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'codes' / 'manager.py'
         with open(file_path, 'r') as f:
             tree = ast.parse(f.read())
         
@@ -116,7 +123,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
     
     def test_env_setup_used_in_commands(self):
         """Verify env_setup is actually used in command construction"""
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/codes/manager.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'codes' / 'manager.py'
         with open(file_path, 'r') as f:
             content = f.read()
         
@@ -130,7 +138,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
     
     def test_machine_stores_env_setup(self):
         """Verify Machine class stores env_setup attribute"""
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/machines/machine.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'machines' / 'machine.py'
         with open(file_path, 'r') as f:
             content = f.read()
         
@@ -140,7 +149,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
     
     def test_machine_includes_env_setup_in_to_dict(self):
         """Verify Machine.to_dict() includes env_setup"""
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/machines/machine.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'machines' / 'machine.py'
         with open(file_path, 'r') as f:
             content = f.read()
         
@@ -150,7 +160,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
     
     def test_machine_includes_env_setup_in_to_queue(self):
         """Verify Machine.to_queue() includes env_setup"""
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/machines/machine.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'machines' / 'machine.py'
         with open(file_path, 'r') as f:
             content = f.read()
         
@@ -161,7 +172,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
     def test_documentation_updated(self):
         """Verify documentation mentions env_setup"""
         # Check Machine docstring
-        machine_file = "/home/runner/work/xespresso/xespresso/xespresso/machines/machine.py"
+        repo_root = Path(__file__).parent.parent
+        machine_file = repo_root / 'xespresso' / 'machines' / 'machine.py'
         with open(machine_file, 'r') as f:
             content = f.read()
         
@@ -169,7 +181,8 @@ class TestEnvSetupImplementation(unittest.TestCase):
                      "Machine documentation should mention env_setup")
         
         # Check RemoteExecutionMixin docstring
-        remote_file = "/home/runner/work/xespresso/xespresso/xespresso/schedulers/remote_mixin.py"
+        repo_root = Path(__file__).parent.parent
+        remote_file = repo_root / 'xespresso' / 'schedulers' / 'remote_mixin.py'
         with open(remote_file, 'r') as f:
             content = f.read()
         
@@ -182,7 +195,8 @@ class TestEnvSetupLogic(unittest.TestCase):
     
     def test_env_setup_extraction_from_machine_config(self):
         """Verify detect_qe_codes extracts env_setup from machine config"""
-        file_path = "/home/runner/work/xespresso/xespresso/xespresso/codes/manager.py"
+        repo_root = Path(__file__).parent.parent
+        file_path = repo_root / 'xespresso' / 'codes' / 'manager.py'
         with open(file_path, 'r') as f:
             content = f.read()
         

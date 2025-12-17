@@ -31,20 +31,35 @@ def set_queue(calc, package=None, parallel=None, queue=None, command=None):
     """
     logger = logging.getLogger(__name__)
     queue = queue or calc.queue
-    
+
     # Convert Machine object to queue dict if necessary
     from xespresso.machines.machine import Machine
     if isinstance(queue, Machine):
         queue = queue.to_queue()
-    
+    # If queue is falsy (False/None) or not a dict, coerce to empty dict
+    if not isinstance(queue, dict):
+        if not queue:
+            queue = {}
+        else:
+            # Unknown type; coerce to empty queue to preserve robustness
+            queue = {}
+
     calc.queue = queue
     package = package or calc.package
     parallel = parallel or calc.parallel
     command = command or os.environ.get("ASE_ESPRESSO_COMMAND", "")
 
     # Replace placeholders
+    # Support expanding launcher placeholders such as {nprocs}
+    launcher_val = queue.get("launcher", "")
+    try:
+        nprocs_val = int(queue.get("nprocs", 1))
+    except Exception:
+        nprocs_val = 1
+    if "{nprocs}" in str(launcher_val):
+        launcher_val = str(launcher_val).replace("{nprocs}", str(nprocs_val))
     if "LAUNCHER" in command:
-        command = command.replace("LAUNCHER", queue.get("launcher", ""))
+        command = command.replace("LAUNCHER", launcher_val)
     if "PACKAGE" in command:
         command = command.replace("PACKAGE", package)
     if "PREFIX" in command:

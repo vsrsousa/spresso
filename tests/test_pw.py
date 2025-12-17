@@ -20,6 +20,7 @@ def test_scf():
         occupations="smearing",
         degauss=0.03,
         kpts=(1, 1, 1),
+        queue={},
         debug=True,
     )
     h2.calc = calc
@@ -43,6 +44,7 @@ def test_relax():
         calculation="relax",
         ecutwfc=20,
         kpts=(1, 1, 1),
+        queue={},
         debug=True,
     )
     atoms.calc = calc

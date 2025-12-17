@@ -47,6 +47,7 @@ def test_espresso_write_input_creates_files():
             pseudopotentials=pseudopotentials,
             input_data=input_data,
             kpts=(4, 4, 4),
+            queue={},
         )
         
         atoms.calc = calc
@@ -151,6 +152,7 @@ def test_espresso_label_creates_directory():
             pseudopotentials={'Fe': 'Fe.pbe-spn-rrkjus_psl.1.0.0.UPF'},
             input_data={'calculation': 'scf', 'ecutwfc': 40.0},
             kpts=(2, 2, 2),
+            queue={},
         )
         
         atoms.calc = calc
@@ -186,6 +188,7 @@ def test_espresso_with_kspacing():
             pseudopotentials={'Fe': 'Fe.pbe-spn-rrkjus_psl.1.0.0.UPF'},
             input_data={'calculation': 'scf', 'ecutwfc': 40.0},
             kspacing=0.3,  # Using kspacing
+            queue={},
         )
         
         atoms.calc = calc

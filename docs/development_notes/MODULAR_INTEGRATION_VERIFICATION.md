@@ -28,10 +28,10 @@ Other Pages (e.g., job submission) use stored objects
 
 **Imports**:
 ```python
-from xespresso.gui.structures import load_structure_from_upload
-from xespresso.gui.structures import StructureLoader, load_structure_from_file
-from xespresso.gui.structures import export_structure, StructureExporter
-from xespresso.gui.utils.visualization import render_structure_viewer, display_structure_info
+from qtgui.structures import load_structure_from_upload
+from qtgui.structures import StructureLoader, load_structure_from_file
+from qtgui.structures import export_structure, StructureExporter
+from qtgui.utils.visualization import render_structure_viewer, display_structure_info
 ```
 
 **Usage**:
@@ -49,7 +49,7 @@ from xespresso.gui.utils.visualization import render_structure_viewer, display_s
 
 **Imports**:
 ```python
-from xespresso.gui.calculations import prepare_calculation_from_gui
+from qtgui.calculations import prepare_calculation_from_gui
 ```
 
 **Usage**:
@@ -63,7 +63,7 @@ from xespresso.gui.calculations import prepare_calculation_from_gui
 ```python
 if st.button("🔧 Prepare Calculation", type="primary"):
     try:
-        from xespresso.gui.calculations import prepare_calculation_from_gui
+        from qtgui.calculations import prepare_calculation_from_gui
         
         # Use calculation module to prepare atoms and calculator
         st.info("📦 Using calculation module to prepare atoms and Espresso calculator...")
@@ -85,7 +85,7 @@ if st.button("🔧 Prepare Calculation", type="primary"):
 
 **Imports**:
 ```python
-from xespresso.gui.workflows import GUIWorkflow
+from qtgui.workflows import GUIWorkflow
 ```
 
 **Usage**:
@@ -100,7 +100,7 @@ from xespresso.gui.workflows import GUIWorkflow
 ```python
 if st.button("🔄 Build Workflow", type="primary"):
     try:
-        from xespresso.gui.workflows import GUIWorkflow
+        from qtgui.workflows import GUIWorkflow
         
         # Create workflow using workflow module
         st.info("📦 Creating workflow using workflow module...")
@@ -126,9 +126,9 @@ if st.button("🔄 Build Workflow", type="primary"):
 
 **Imports**:
 ```python
-from xespresso.gui.calculations import dry_run_calculation
-from xespresso.gui.calculations import prepare_calculation_from_gui
-from xespresso.gui.utils.selectors import render_workdir_browser, render_machine_selector
+from qtgui.calculations import dry_run_calculation
+from qtgui.calculations import prepare_calculation_from_gui
+from qtgui.utils.selectors import render_workdir_browser, render_machine_selector
 ```
 
 **Usage**:
@@ -139,7 +139,7 @@ from xespresso.gui.utils.selectors import render_workdir_browser, render_machine
 
 **Key Code (Dry Run)**:
 ```python
-from xespresso.gui.calculations import dry_run_calculation
+from qtgui.calculations import dry_run_calculation
 
 # Use calculation module for dry run
 with st.spinner("Generating input files..."):
@@ -148,7 +148,7 @@ with st.spinner("Generating input files..."):
 
 **Key Code (Run Calculation)**:
 ```python
-from xespresso.gui.calculations import prepare_calculation_from_gui
+    from qtgui.calculations import prepare_calculation_from_gui
 
 # Use calculation module to prepare
 with st.spinner(f"Preparing {config.get('calc_type', 'scf')} calculation..."):
@@ -194,7 +194,7 @@ These pages handle specific configuration tasks and don't need dedicated modules
 
 **Verification**:
 ```python
-from xespresso.gui.calculations import prepare_calculation_from_gui
+from qtgui.calculations import prepare_calculation_from_gui
 # ✅ Successfully imports and is callable
 ```
 
@@ -213,7 +213,7 @@ from xespresso.gui.calculations import prepare_calculation_from_gui
 
 **Verification**:
 ```python
-from xespresso.gui.workflows import GUIWorkflow
+from qtgui.workflows import GUIWorkflow
 # ✅ Successfully imports and is a proper class
 ```
 
@@ -234,7 +234,7 @@ from xespresso.gui.workflows import GUIWorkflow
 
 **Verification**:
 ```python
-from xespresso.gui.structures import (
+from qtgui.structures import (
     load_structure_from_file,
     load_structure_from_upload,
     export_structure

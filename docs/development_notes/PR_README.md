@@ -37,7 +37,7 @@ sudo pacman -S tk
 ```
 
 ### Usage
-1. Launch xespresso GUI: `xespresso-gui` or `python -m xespresso.gui`
+1. Launch xespresso GUI: `xespresso-gui` or `python -m qtgui`
 2. Look for "📂 Browse System Folders" button in sidebar
 3. Click to open native folder picker
 4. Select folder - it becomes your working directory

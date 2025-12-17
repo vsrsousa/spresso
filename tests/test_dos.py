@@ -22,6 +22,7 @@ def test_dos():
         occupations="smearing",
         degauss=0.03,
         kpts=(1, 1, 1),
+        queue={},
         debug=True,
     )
     atoms.calc = calc
@@ -40,6 +41,7 @@ def test_dos():
         prefix=calc.prefix,
         occupations="tetrahedra",
         kpts=(2, 2, 2),
+        queue={},
         debug=True,
     )
     nscf.run()
@@ -50,6 +52,7 @@ def test_dos():
         Emin=fe - 30,
         Emax=fe + 30,
         DeltaE=0.01,
+        queue={},
     )
     dos.run()
 

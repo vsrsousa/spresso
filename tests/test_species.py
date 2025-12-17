@@ -30,6 +30,7 @@ def test_spin(bulk_h):
         nspin=2,
         input_data={"input_ntyp": input_ntyp},
         kpts=(4, 4, 4),
+        queue={},
         debug=True,
     )
     atoms.calc = calc
@@ -75,6 +76,7 @@ def test_dft_u():
         label="calculations/scf/fe-afm",
         input_data=input_data,
         kpts=(4, 4, 4),
+        queue={},
         debug=True,
     )
     atoms.calc = calc

@@ -106,6 +106,7 @@ def test_espresso_calculator_works_with_codes_config():
             pseudopotentials={'Fe': 'Fe.upf'},
             input_data={'calculation': 'scf', 'ecutwfc': 40.0},
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # Should complete without error

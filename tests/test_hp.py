@@ -37,6 +37,7 @@ def test_hp():
         label="calculations/scf/fe-afm",
         input_data=input_data,
         kpts=(4, 4, 4),
+        queue={},
         debug=True,
     )
     atoms.calc = calc

@@ -20,6 +20,7 @@ def test_pp():
         occupations="smearing",
         degauss=0.03,
         kpts=(8, 8, 1),
+        queue={},
         debug=True,
     )
     atoms.calc = calc
@@ -38,6 +39,7 @@ def test_pp():
         prefix=calc.prefix,
         occupations="tetrahedra",
         kpts=(8, 8, 1),
+        queue={},
         debug=True,
     )
     nscf.run()
@@ -49,6 +51,7 @@ def test_pp():
         fileout="potential.cube",
         iflag=3,
         output_format=6,
+        queue={},
         debug=True,
     )
     pp.run()

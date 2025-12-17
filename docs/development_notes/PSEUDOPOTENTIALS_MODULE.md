@@ -37,7 +37,7 @@ config = create_pseudopotentials_config(
 
 ### Using the GUI
 
-1. Start the xespresso GUI: `streamlit run -m xespresso.gui`
+1. Start the xespresso GUI: `streamlit run -m qtgui`
 2. Check **"Show Configuration"** in the sidebar
 3. Navigate to **"🧪 Pseudopotentials Configuration"**
 4. Fill in the configuration form:

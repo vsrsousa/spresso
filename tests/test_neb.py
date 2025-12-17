@@ -46,6 +46,7 @@ def test_neb():
         label="calculations/relax/h3-initial",
         input_data=input_data,
         kpts=(1, 1, 1),
+        queue={},
         debug=True,
     )
     atoms.calc = calc

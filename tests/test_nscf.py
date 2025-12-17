@@ -20,6 +20,7 @@ def test_nscf():
         occupations="smearing",
         degauss=0.03,
         kpts=(1, 1, 1),
+        queue={},
         debug=True,
     )
     h2.calc = calc
@@ -35,6 +36,7 @@ def test_nscf():
         prefix=calc.prefix,
         occupations="tetrahedra",
         kpts=(2, 2, 2),
+        queue={},
         debug=True,
     )
     nscf.run()

@@ -39,7 +39,7 @@ except ImportError:
 
 # Import GUIWorkflow for creating workflow objects
 try:
-    from gui.workflows.base import GUIWorkflow
+    from qtgui.workflows.base import GUIWorkflow
     WORKFLOW_AVAILABLE = True
 except ImportError:
     WORKFLOW_AVAILABLE = False
@@ -718,7 +718,7 @@ class WorkflowBuilderPage(QWidget):
             QMessageBox.critical(
                 self,
                 "Workflow Module Not Available",
-                "The gui.workflows.base module is not available.\n\n"
+                "The qtgui.workflows.base module is not available.\n\n"
                 "Workflow functionality requires the GUIWorkflow class."
             )
             return

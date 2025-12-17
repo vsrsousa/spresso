@@ -46,7 +46,7 @@ def _prepare_calculation(self):
     self.session_state['workflow_config'] = config
     
     # CREATE CALCULATOR USING gui.calculations
-    from gui.calculations import prepare_calculation_from_gui
+    from qtgui.calculations import prepare_calculation_from_gui
     
     preparation_label = config.get("label", f"{config.get('calc_type', 'scf')}/{atoms.get_chemical_formula()}")
     

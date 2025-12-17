@@ -391,7 +391,7 @@ def save_machine(
             raise IOError(f"Failed to save machine: {e}")
 
 
-def list_machines(config_path: str = DEFAULT_CONFIG_PATH, machines_dir: str = DEFAULT_MACHINES_DIR) -> list[str]:
+def list_machines(config_path: str = DEFAULT_CONFIG_PATH, machines_dir: str = DEFAULT_MACHINES_DIR) -> list:
     """
     Returns a list of machine names defined in config files.
     

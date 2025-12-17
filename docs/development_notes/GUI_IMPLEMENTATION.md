@@ -82,7 +82,7 @@ See [GUI_QE_FEATURES.md](GUI_QE_FEATURES.md) for detailed documentation of the n
 ```
 xespresso/gui/
 ├── __init__.py           # Module initialization
-├── __main__.py           # Module launcher (python -m xespresso.gui)
+├── __main__.py           # Module launcher (python -m qtgui)
 ├── streamlit_app.py      # Main Streamlit application (800+ lines)
 └── README.md             # GUI-specific documentation
 ```
@@ -119,7 +119,7 @@ Install with `pip install spresso`, but import as `from xespresso import ...`
 xespresso-gui
 
 # Or using Python
-python -m xespresso.gui
+python -m qtgui
 
 # Or with Streamlit directly
 streamlit run xespresso/gui/streamlit_app.py

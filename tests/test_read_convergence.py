@@ -46,7 +46,7 @@ class TestReadConvergence:
                 f.write(pwo_content)
 
             # Create a minimal Espresso calculator instance
-            calc = Espresso(label=label_dir, debug=True)
+            calc = Espresso(label=label_dir, debug=True, queue={})
             
             # This should not raise an IndexError
             convergence, msg = calc.read_convergence()
@@ -71,7 +71,7 @@ class TestReadConvergence:
             with open(pwo_file, "w") as f:
                 f.write(pwo_content)
 
-            calc = Espresso(label=label_dir, debug=True)
+            calc = Espresso(label=label_dir, debug=True, queue={})
             convergence, msg = calc.read_convergence()
             
             assert convergence == 0
@@ -87,7 +87,7 @@ class TestReadConvergence:
             with open(pwo_file, "w") as f:
                 f.write("")
 
-            calc = Espresso(label=label_dir, debug=True)
+            calc = Espresso(label=label_dir, debug=True, queue={})
             convergence, msg = calc.read_convergence()
             
             # Should return error code for empty file
@@ -98,7 +98,7 @@ class TestReadConvergence:
         """Test when pwo file doesn't exist"""
         set_envs()
         with tempfile.TemporaryDirectory() as tmpdir:
-            calc = Espresso(label=os.path.join(tmpdir, "nonexistent"), debug=True)
+            calc = Espresso(label=os.path.join(tmpdir, "nonexistent"), debug=True, queue={})
             convergence, msg = calc.read_convergence()
             
             # Should return error code for missing file
@@ -120,7 +120,7 @@ class TestReadConvergence:
             with open(pwo_file, "w") as f:
                 f.write(pwo_content)
 
-            calc = Espresso(label=label_dir, debug=True)
+            calc = Espresso(label=label_dir, debug=True, queue={})
             convergence, msg = calc.read_convergence()
             
             # Should detect non-convergence
@@ -142,7 +142,7 @@ class TestReadConvergence:
             with open(pwo_file, "w") as f:
                 f.write(pwo_content)
 
-            calc = Espresso(label=label_dir, debug=True)
+            calc = Espresso(label=label_dir, debug=True, queue={})
             convergence, msg = calc.read_convergence()
             
             # Should detect CPU time exceeded
@@ -166,7 +166,7 @@ class TestReadConvergence:
             with open(pwo_file, "w") as f:
                 f.write(pwo_content)
 
-            calc = Espresso(label=label_dir, debug=True)
+            calc = Espresso(label=label_dir, debug=True, queue={})
             convergence, msg = calc.read_convergence()
             
             # Should return unknown error code

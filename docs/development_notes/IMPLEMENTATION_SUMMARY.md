@@ -193,7 +193,7 @@ Install with `pip install spresso`, but import as `from xespresso import ...`
 
 ### Using JMol Viewer
 ```python
-from xespresso.gui.utils.visualization import render_structure_viewer
+from qtgui.utils.visualization import render_structure_viewer
 from ase.build import bulk
 
 atoms = bulk('Fe', 'bcc', a=2.87)

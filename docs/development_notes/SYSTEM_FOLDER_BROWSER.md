@@ -44,7 +44,7 @@ If the button doesn't appear, it means tkinter is not available on your system (
 The functionality is implemented in `xespresso/gui/utils/directory_browser.py`:
 
 ```python
-from xespresso.gui.utils.directory_browser import render_directory_browser
+from qtgui.utils.directory_browser import render_directory_browser
 
 # Render the enhanced directory browser
 selected_path = render_directory_browser(
@@ -144,7 +144,7 @@ When tkinter is not available:
 
 ### Manual Testing
 
-1. Start the xespresso GUI: `xespresso-gui` or `python -m xespresso.gui`
+1. Start the xespresso GUI: `xespresso-gui` or `python -m qtgui`
 2. Look for the "📂 Browse System Folders" button in the sidebar
 3. Click the button to open the native folder picker
 4. Select a folder and verify it becomes the working directory
@@ -154,7 +154,7 @@ When tkinter is not available:
 The directory browser can be imported and tested:
 
 ```python
-from xespresso.gui.utils.directory_browser import (
+from qtgui.utils.directory_browser import (
     render_directory_browser,
     open_folder_dialog,
     TKINTER_AVAILABLE

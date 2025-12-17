@@ -87,6 +87,7 @@ def test_graphene_scf(graphene_monolayer):
         occupations="smearing",
         degauss=0.03,
         kpts=(4, 4, 1),
+        queue={},
         debug=True,
     )
     
@@ -124,6 +125,7 @@ def test_graphene_relax(graphene_monolayer):
         calculation="relax",
         ecutwfc=30,
         kpts=(4, 4, 1),
+        queue={},
         debug=True,
     )
     

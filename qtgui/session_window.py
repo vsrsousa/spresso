@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 
 from .session_state import SessionState
+from .session import controllers as session_controllers
 from .ui_components import create_sidebar, setup_menu, setup_toolbar, setup_statusbar
 from .ui_components.window_focus import apply_focus_decorator
 
@@ -238,33 +239,18 @@ class MainWindow(QMainWindow):
             dlg.show_upload_tab()
             return True
         except Exception:
-            # Fallback: behave as before
-            db_id = None
-            try:
-                db_id = self.session_state.add_structure_file_to_db(file_path)
-            except Exception:
-                db_id = None
-            if not db_id:
-                ok = self.session_state.set_structure_from_file(file_path)
-                if ok:
-                    try:
-                        self._update_structure_label()
-                    except Exception:
-                        pass
-                else:
-                    QMessageBox.warning(self, "Error", "Could not set structure for this session (maybe it is locked)")
-                return ok
-            ok2 = self.session_state.set_structure_from_database(db_id)
-            if ok2:
+            # Fallback: behave as before using non-GUI controller helpers
+            db_id, loaded, msg = session_controllers.add_structure_file_and_load(self.session_state, file_path)
+            if loaded:
                 try:
                     self._update_structure_label()
                 except Exception:
                     pass
-                QMessageBox.information(self, "Structure Saved", f"Structure saved to DB with ID {db_id} and loaded into session.")
+                if db_id:
+                    QMessageBox.information(self, "Structure Saved", f"Structure saved to DB with ID {db_id} and loaded into session.")
                 return True
             else:
-                msg = self.session_state.get_last_error_message() or "Could not load saved structure from DB"
-                QMessageBox.warning(self, "Error", msg)
+                QMessageBox.warning(self, "Error", msg or "Could not set structure for this session (maybe it is locked)")
                 return False
 
     def _choose_structure_db(self):
@@ -298,10 +284,7 @@ class MainWindow(QMainWindow):
         except Exception:
             # fallback to previous simple DB selection if manager unavailable
             try:
-                from ase.db import connect as ase_db_connect
-                db_path = self.session_state.get('structure_db_path') or None
-                db = ase_db_connect(db_path or DEFAULT_STRUCTURES_DB_PATH)
-                rows = list(db.select())
+                rows = session_controllers.list_db_rows(self.session_state.get('structure_db_path') or None)
             except Exception as e:
                 QMessageBox.warning(self, "DB Error", f"Could not open structures DB: {e}")
                 return False
@@ -638,6 +621,36 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, 'pages') and 0 <= index < len(self.pages):
                 page = self.pages[index]
+                if hasattr(page, 'refresh'):
+                    try:
+                        page.refresh()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _on_session_changed(self):
+        """Handle UI updates when the current session changes.
+
+        Tests call this hook directly to force the UI to refresh labels
+        after programmatic session switches. Keep implementation minimal
+        and robust for headless test runs.
+        """
+        try:
+            # Update session name label and working directory display
+            try:
+                self._update_session_name_label()
+            except Exception:
+                pass
+            try:
+                wd = self.session_state.get('working_directory', os.path.expanduser("~"))
+                if hasattr(self, 'workdir_label') and self.workdir_label is not None:
+                    self.workdir_label.setText(wd)
+            except Exception:
+                pass
+
+            # Refresh pages to reflect new session state (if they implement refresh)
+            for page in getattr(self, 'pages', []):
                 if hasattr(page, 'refresh'):
                     try:
                         page.refresh()

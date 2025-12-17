@@ -50,7 +50,7 @@ class CalculationPreparation:
 ```python
 # base.py
 from xespresso import Espresso  # ✓ Imports Espresso from xespresso
-from xespresso.gui.calculations import prepare_calculation_from_gui
+from qtgui.calculations import prepare_calculation_from_gui  # Line 11 ✓
 
 class GUIWorkflow:
     def add_calculation(self, name, calc_config, atoms=None):
@@ -126,11 +126,11 @@ self.calculator = Espresso(**calc_params)  # Line 126 ✓
 
 ### Workflow Module
 ```bash
-$ grep "from xespresso import Espresso" xespresso/gui/workflows/base.py
+$ grep "from xespresso import Espresso" qtgui/workflows/base.py
 from xespresso import Espresso  # Line 10 ✓
 
-$ grep "prepare_calculation_from_gui" xespresso/gui/workflows/base.py
-from xespresso.gui.calculations import prepare_calculation_from_gui  # Line 11 ✓
+$ grep "prepare_calculation_from_gui" qtgui/workflows/base.py
+from qtgui.calculations import prepare_calculation_from_gui  # Line 11 ✓
 calc_atoms, calculator = prepare_calculation_from_gui(...)  # Line 77 ✓
 ```
 

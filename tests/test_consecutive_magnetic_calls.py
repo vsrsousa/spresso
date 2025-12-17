@@ -62,6 +62,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # Create directory and write asei file to simulate a completed calculation
@@ -82,6 +83,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # check_state should return False (no need to rerun)
@@ -118,6 +120,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # Create directory and write asei file to simulate a completed calculation
@@ -136,6 +139,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # check_state should return True (needs rerun due to changed magnetic moment)
@@ -169,6 +173,7 @@ class TestConsecutiveMagneticCalls:
             pseudopotentials=pseudopotentials,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # Write asei file to simulate a completed non-magnetic calculation
@@ -196,6 +201,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # check_state should return True (needs rerun due to added magnetic setup)
@@ -240,6 +246,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # Write asei file to simulate a completed magnetic calculation
@@ -257,6 +264,7 @@ class TestConsecutiveMagneticCalls:
             pseudopotentials={'Fe': 'Fe.pbe-spn-rrkjus_psl.1.0.0.UPF'},
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # check_state should return True (needs rerun due to removed magnetic setup)
@@ -298,6 +306,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # Write asei file
@@ -319,6 +328,7 @@ class TestConsecutiveMagneticCalls:
             nspin=2,
             ecutwfc=30,
             kpts=(2, 2, 2),
+            queue={},
         )
         
         # check_state should return True (Fe magnetic moments changed)

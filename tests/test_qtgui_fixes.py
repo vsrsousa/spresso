@@ -69,6 +69,7 @@ def test_kpoints_mutually_exclusive():
             pseudopotentials={'Fe': 'Fe.upf'},
             input_data={'calculation': 'scf', 'ecutwfc': 40.0},
             kpts=expected_kpts,  # After fix, kspacing is converted to kpts
+            queue={},
         )
         
         # Verify kpts is set correctly
@@ -80,6 +81,7 @@ def test_kpoints_mutually_exclusive():
             pseudopotentials={'Fe': 'Fe.upf'},
             input_data={'calculation': 'scf', 'ecutwfc': 40.0},
             kpts=(4, 4, 4),
+            queue={},
         )
         
         # Verify kpts is set
@@ -90,6 +92,7 @@ def test_kpoints_mutually_exclusive():
             label=label + '3',
             pseudopotentials={'Fe': 'Fe.upf'},
             input_data={'calculation': 'scf', 'ecutwfc': 40.0},
+            queue={},
         )
         
         # Should have default kpts

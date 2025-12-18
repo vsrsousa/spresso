@@ -159,6 +159,7 @@ class SessionManagerWindow(QMainWindow):
         self.manager_state = SessionState()
         self._config_dialog = None
         self._job_monitor = None
+        self._provenance_browser = None
         self._session_windows = {}
 
         self._setup_ui()
@@ -265,6 +266,11 @@ class SessionManagerWindow(QMainWindow):
         config_action.setShortcut("Ctrl+,")
         config_action.triggered.connect(self._open_config_dialog)
         tools_menu.addAction(config_action)
+
+        prov_action = QAction("Provenance Browser...", self)
+        prov_action.setShortcut("Ctrl+P")
+        prov_action.triggered.connect(self._open_provenance_browser)
+        tools_menu.addAction(prov_action)
 
         struct_action = QAction("Structure Manager...", self)
         struct_action.triggered.connect(self._open_structure_manager)
@@ -466,6 +472,10 @@ class SessionManagerWindow(QMainWindow):
         if self._config_dialog is None:
             # Create without parent so it behaves independently
             self._config_dialog = ConfigurationDialog(self.manager_state, parent=None)
+            try:
+                self._config_dialog.configuration_changed.connect(self._on_configuration_changed)
+            except Exception:
+                pass
         else:
             try:
                 if self._config_dialog.parent() is not None:
@@ -503,6 +513,59 @@ class SessionManagerWindow(QMainWindow):
         monitor.show()
         monitor.raise_()
         monitor.activateWindow()
+
+    def _get_provenance_browser(self):
+        # Create a top-level provenance browser window (independent)
+        from qtgui.pages.workflow_tasks.provenance_panel import ProvenancePanel
+
+        if self._provenance_browser is None:
+            try:
+                win = QMainWindow()
+                # pass configured provenance db path from manager_state if present
+                try:
+                    db_path = self.manager_state.get('provenance_db_path')
+                except Exception:
+                    db_path = None
+                panel = ProvenancePanel(parent=None, db_path=db_path)
+                win.setCentralWidget(panel)
+                win.setWindowTitle("Provenance Browser")
+                win.resize(700, 500)
+                self._provenance_browser = win
+            except Exception:
+                # Fall back to a simple widget if QMainWindow not available
+                try:
+                    panel = ProvenancePanel(parent=None)
+                    self._provenance_browser = panel
+                except Exception:
+                    self._provenance_browser = None
+        return self._provenance_browser
+
+    def _on_configuration_changed(self):
+        # Close/reset an open provenance browser so it will be re-created
+        # with the updated DB path on next open.
+        try:
+            if self._provenance_browser is not None:
+                try:
+                    self._provenance_browser.close()
+                except Exception:
+                    pass
+                self._provenance_browser = None
+        except Exception:
+            pass
+
+    def _open_provenance_browser(self):
+        pb = self._get_provenance_browser()
+        if not pb:
+            QMessageBox.warning(self, "Error", "Could not open Provenance Browser")
+            return
+        try:
+            pb.show()
+            if hasattr(pb, 'raise_'):
+                pb.raise_()
+            if hasattr(pb, 'activateWindow'):
+                pb.activateWindow()
+        except Exception:
+            pass
 
     def _open_structure_manager(self):
         try:

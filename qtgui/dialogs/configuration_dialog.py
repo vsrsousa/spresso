@@ -85,6 +85,63 @@ class ConfigurationDialog(QDialog):
         self.tab_widget.addTab(self.pseudopotentials_page, "🧪 Pseudopotentials")
         
         layout.addWidget(self.tab_widget, 1)  # Stretch factor 1 to take available space
+
+        # Provenance configuration tab
+        prov_widget = QWidget()
+        prov_layout = QVBoxLayout(prov_widget)
+        prov_layout.addWidget(QLabel("Provenance database path:"))
+        from PySide6.QtWidgets import QLineEdit, QHBoxLayout, QFileDialog
+
+        self._prov_path_edit = QLineEdit()
+        self._prov_browse = QPushButton("Browse...")
+        hl = QHBoxLayout()
+        hl.addWidget(self._prov_path_edit)
+        hl.addWidget(self._prov_browse)
+        prov_layout.addLayout(hl)
+
+        # Populate current value from session_state if available
+        try:
+            current = self.session_state.get('provenance_db_path', '')
+            if current:
+                self._prov_path_edit.setText(current)
+            else:
+                # Prefill with the default provenance DB path (respects env var)
+                try:
+                    from xespresso.provenance import ProvenanceDB
+
+                    default = ProvenanceDB.get_default().path
+                    if default:
+                        self._prov_path_edit.setText(str(default))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        def _browse_prov():
+            start = self.session_state.get('provenance_db_path') or self.session_state.get('working_directory') or ''
+            path, _ = QFileDialog.getSaveFileName(self, "Provenance DB File", start, "JSON files (*.json);;All Files (*)")
+            if path:
+                self._prov_path_edit.setText(path)
+
+        self._prov_browse.clicked.connect(_browse_prov)
+
+        # Apply button for provenance path
+        apply_btn = QPushButton("Apply Provenance Path")
+        prov_layout.addWidget(apply_btn)
+
+        def _apply_prov():
+            val = self._prov_path_edit.text().strip()
+            if val:
+                try:
+                    self.session_state['provenance_db_path'] = val
+                except Exception:
+                    pass
+            # also emit configuration_changed so other UI can react
+            self.configuration_changed.emit()
+
+        apply_btn.clicked.connect(_apply_prov)
+
+        self.tab_widget.addTab(prov_widget, "📚 Provenance")
         
         # Button row
         button_layout = QHBoxLayout()

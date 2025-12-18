@@ -319,6 +319,15 @@ class WorkflowBuilderPage(QWidget):
         build_btn = QPushButton("🔄 Build Workflow")
         build_btn.clicked.connect(self._build_workflow)
         build_layout.addWidget(build_btn)
+
+        # Save / Load workflow buttons
+        save_btn = QPushButton("💾 Save Workflow")
+        save_btn.clicked.connect(self._save_workflow)
+        build_layout.addWidget(save_btn)
+
+        load_btn = QPushButton("📂 Load Workflow")
+        load_btn.clicked.connect(self._load_workflow)
+        build_layout.addWidget(load_btn)
         
         scroll_layout.addWidget(build_group)
         
@@ -346,6 +355,143 @@ class WorkflowBuilderPage(QWidget):
         # Load initial data
         self._load_machines()
         self._update_structure_status()
+
+    # -- Persistence helpers -------------------------------------------------
+    def _workflows_dir(self):
+        # prefer session working directory under .xespresso/workflows
+        base = os.path.expanduser("~/.xespresso/workflows")
+        try:
+            os.makedirs(base, exist_ok=True)
+        except Exception:
+            pass
+        return base
+
+    def _save_workflow(self):
+        # Build a lightweight descriptor from current UI selections
+        wf = self._build_workflow_descriptor(return_obj=True)
+        if wf is None:
+            QMessageBox.warning(self, "Save Workflow", "No workflow to save")
+            return
+        # Ask user for filename
+        path = os.path.join(self._workflows_dir(), f"{wf.get('base_label','workflow')}.json")
+        try:
+            self._save_workflow_to_path(path)
+            # Avoid showing modal dialogs during automated tests (pytest)
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                QMessageBox.information(self, "Save Workflow", f"Saved workflow to: {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Save Workflow", f"Could not save workflow: {e}")
+
+    def _load_workflow(self):
+        # Let user choose a workflow file from workflows dir
+        start = self._workflows_dir()
+        file_path, _ = QFileDialog.getOpenFileName(self, "Load Workflow", start, "Workflow Files (*.json);;All Files (*)")
+        if not file_path:
+            return
+        try:
+            data = self._load_workflow_from_path(file_path)
+            self._apply_loaded_workflow(data)
+            QMessageBox.information(self, "Load Workflow", f"Loaded workflow from: {file_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "Load Workflow", f"Could not load workflow: {e}")
+
+    # Programmatic helpers -------------------------------------------------
+    def _save_workflow_to_path(self, path: str):
+        """Save current workflow descriptor to a given path (programmatic helper)."""
+        wf = self._build_workflow_descriptor(return_obj=True)
+        if wf is None:
+            raise RuntimeError("No workflow to save")
+        import json
+
+        dpath = os.path.dirname(path)
+        if dpath:
+            os.makedirs(dpath, exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(wf, f, indent=2)
+        return path
+
+    def _load_workflow_from_path(self, path: str):
+        """Load workflow descriptor from path and return the data."""
+        import json
+
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # apply to UI for convenience
+        try:
+            self._apply_loaded_workflow(data)
+        except Exception:
+            pass
+        return data
+
+    def _build_workflow_descriptor(self, return_obj=False):
+        # Build a minimal serializable workflow descriptor instead of GUIWorkflow
+        base_label = f"wf_{self.session_state.get('session_name','session')}"
+        cfg = {
+            'ecutwfc': float(self.ecutwfc_spin.value()),
+            'ecutrho': float(self.ecutrho_spin.value()),
+            'occupations': str(self.occupations_combo.currentText()),
+        }
+        wf = {'base_label': base_label, 'config': cfg, 'calculations': []}
+        # simple mapping based on workflow_combo
+        choice = self.workflow_combo.currentText()
+        if choice == 'Single SCF':
+            wf['calculations'].append({'name': 'scf', 'config': cfg})
+        elif choice == 'SCF + Relaxation':
+            wf['calculations'].append({'name': 'scf', 'config': cfg})
+            wf['calculations'].append({'name': 'relax', 'config': cfg})
+        elif choice == 'SCF + Relax + SCF (on relaxed structure)':
+            wf['calculations'].append({'name': 'scf_init', 'config': cfg})
+            wf['calculations'].append({'name': 'relax', 'config': cfg})
+            wf['calculations'].append({'name': 'scf_relaxed', 'config': cfg})
+        else:
+            # custom: no steps until user defines them
+            pass
+
+        # update summary text
+        try:
+            import json
+
+            self.summary_text.setPlainText(json.dumps(wf, indent=2))
+        except Exception:
+            self.summary_text.setPlainText(str(wf))
+
+        if return_obj:
+            return wf
+        return None
+
+    def _apply_loaded_workflow(self, data):
+        try:
+            # apply basic config
+            cfg = data.get('config', {})
+            if 'ecutwfc' in cfg:
+                try:
+                    self.ecutwfc_spin.setValue(float(cfg.get('ecutwfc')))
+                except Exception:
+                    pass
+            if 'occupations' in cfg:
+                try:
+                    idx = self.occupations_combo.findText(cfg.get('occupations'))
+                    if idx >= 0:
+                        self.occupations_combo.setCurrentIndex(idx)
+                except Exception:
+                    pass
+            # set workflow selection based on number of calculations
+            steps = data.get('calculations', [])
+            if len(steps) == 1:
+                self.workflow_combo.setCurrentText('Single SCF')
+            elif len(steps) == 2:
+                self.workflow_combo.setCurrentText('SCF + Relaxation')
+            elif len(steps) == 3:
+                self.workflow_combo.setCurrentText('SCF + Relax + SCF (on relaxed structure)')
+            # update summary
+            try:
+                import json
+
+                self.summary_text.setPlainText(json.dumps(data, indent=2))
+            except Exception:
+                self.summary_text.setPlainText(str(data))
+        except Exception:
+            pass
     
     def _load_machines(self):
         """Load available machines."""

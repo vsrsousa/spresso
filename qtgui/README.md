@@ -49,6 +49,7 @@ python -m qtgui --workspace # Open a single workflow window directly
 - **Working Directory**: Browse and set working directory for calculations
 - **Toolbar**: Quick access to Configuration and Session management
 - **Configuration Dialog**: Non-blocking dialog for Machine, Codes, and Pseudopotentials configuration
+ - **Provenance Browser**: Inspect stored calculation provenance across sessions. Open via Session Manager → Tools → Provenance Browser or use Ctrl+P.
 
 ## Installation
 
@@ -155,6 +156,21 @@ The simplified version avoids the complex state management that can cause signal
 
 ### Version 1.1.0
 - Added non-blocking Configuration Dialog
+ - Added provenance configuration: set the provenance DB path via Configuration Dialog → Provenance tab
+
+Provenance usage
+----------------
+
+- Open the Session Manager (default on startup) and choose Tools → Provenance Browser (or press Ctrl+P).
+- The Provenance Browser is session-independent: it queries the global provenance database file.
+- Configure the provenance database path via the Configuration Dialog (Ctrl+,) → Provenance tab. Set the file path and click "Apply Provenance Path".
+- Workflows and tasks record provenance snapshots into the directory configured via task context (typically `.provenance` in the session working directory). To change the global provenance DB location, set the value in the Configuration Dialog or export the `XESPRESSO_PROVENANCE_DB` environment variable before launching the GUI.
+
+Notes
+-----
+
+- The provenance DB defaults to `~/.xespresso/provenance.db.json` if no configuration or environment variable is provided.
+- Tasks and the Provenance Browser use a cached `ProvenanceDB` instance; changing the configuration via the dialog emits a `configuration_changed` signal — UI components listening can refresh their view.
 - Improved SessionState with multiple session support
 - Added session persistence (save/load to disk)
 

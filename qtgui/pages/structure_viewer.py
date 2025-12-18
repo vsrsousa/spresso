@@ -30,6 +30,8 @@ from ase import Atoms
 from ase.build import bulk, molecule
 from ase.visualize import view as ase_view
 from qtgui.data.element_colors import get_default_element_colors, DEFAULT_ELEMENT_COLORS
+# provenance support (import lazily in methods to keep startup light)
+from xespresso.provenance import ProvenanceDB
 
 import matplotlib
 # Only set backend if not already set to avoid conflicts
@@ -422,7 +424,42 @@ then view them in the "View Structure" tab.</p>
         scroll_area.setWidget(scroll_widget)
         db_layout.addWidget(scroll_area)
         
+        self.db_tab = db_tab
         self.tabs.addTab(db_tab, "📚 ASE Database")
+
+    def open_db_and_select(self, db_file: str, row_id: int) -> bool:
+        """Open the ASE DB tab, refresh the list from `db_file`, and select `row_id`.
+
+        Returns True if the row was found and selected, False otherwise.
+        """
+        if not ASE_DB_AVAILABLE:
+            return False
+
+        try:
+            if not db_file:
+                return False
+            # set db path and refresh
+            self.db_path_edit.setText(db_file)
+            self._refresh_db_list()
+
+            # switch to database tab
+            if getattr(self, 'tabs', None) is not None and getattr(self, 'db_tab', None) is not None:
+                try:
+                    self.tabs.setCurrentWidget(self.db_tab)
+                except Exception:
+                    pass
+
+            # search table for row_id
+            rid = str(int(row_id))
+            for r in range(self.db_structures_table.rowCount()):
+                item = self.db_structures_table.item(r, 0)
+                if item and item.text() == rid:
+                    self.db_structures_table.selectRow(r)
+                    self.db_structures_table.setCurrentCell(r, 0)
+                    return True
+            return False
+        except Exception:
+            return False
     
     def _create_view_tab(self):
         """Create the view structure tab (visualization)."""
@@ -556,6 +593,18 @@ then view them in the "View Structure" tab.</p>
         info_layout.addWidget(self.info_text)
         
         scroll_layout.addWidget(info_group)
+
+        # Provenance quick access
+        prov_group = QGroupBox("📚 Provenance")
+        prov_layout = QHBoxLayout(prov_group)
+        self.provenance_count_label = QLabel("No provenance records")
+        prov_layout.addWidget(self.provenance_count_label)
+        self.provenance_btn = QPushButton("Open Provenance")
+        self.provenance_btn.setToolTip("Open provenance browser for this structure")
+        self.provenance_btn.clicked.connect(lambda: self._open_provenance_for_atoms(self.session_state.get('current_structure')))
+        prov_layout.addWidget(self.provenance_btn)
+        prov_layout.addStretch()
+        scroll_layout.addWidget(prov_group)
         
         # Export Section
         export_group = QGroupBox("💾 Export Structure")
@@ -690,8 +739,49 @@ then view them in the "View Structure" tab.</p>
             
             # Update visualization in view tab
             self._refresh_visualization()
+            # Update provenance UI for the loaded atoms
+            try:
+                self._update_provenance_ui(atoms)
+            except Exception:
+                pass
         finally:
             self._loading = False
+
+    def _update_provenance_ui(self, atoms):
+        """Query the provenance DB and update provenance UI elements."""
+        try:
+            if atoms is None:
+                self.provenance_count_label.setText("No provenance records")
+                return
+            pdb = ProvenanceDB.get_default()
+            recs = pdb.get_records(atoms)
+            count = len(recs)
+            if count == 0:
+                self.provenance_count_label.setText("No provenance records")
+            else:
+                self.provenance_count_label.setText(f"{count} record(s) available")
+        except Exception:
+            try:
+                self.provenance_count_label.setText("Provenance unavailable")
+            except Exception:
+                pass
+
+    def _open_provenance_for_atoms(self, atoms):
+        """Open a ProvenancePanel and update it for the given atoms."""
+        try:
+            if atoms is None:
+                QMessageBox.warning(self, "Provenance", "No structure loaded to show provenance for")
+                return
+            # import lazily to avoid startup issues
+            from qtgui.pages.workflow_tasks.provenance_panel import ProvenancePanel
+            panel = ProvenancePanel(parent=self)
+            panel.update_for_atoms(atoms)
+            try:
+                panel.show()
+            except Exception:
+                pass
+        except Exception:
+            pass
     
     def _update_structure_info(self, atoms):
         """Update structure information display."""
@@ -1267,6 +1357,14 @@ then view them in the "View Structure" tab.</p>
 
             # Return the new row id when available
             try:
+                # If we obtained a row id, link existing provenance records
+                try:
+                    if row_id is not None:
+                        from xespresso.provenance import ProvenanceDB
+                        ProvenanceDB.get_default().link_structure_to_db(atoms, int(row_id))
+                except Exception:
+                    pass
+
                 return int(row_id) if row_id is not None else None
             except Exception:
                 return None

@@ -76,6 +76,7 @@ class MainWindow(QMainWindow):
 
         # Configuration dialog (created on demand)
         self._config_dialog = None
+        self._open_prov_btn = None
 
         # Structure label and lock state updater
         self.structure_label = None
@@ -90,6 +91,11 @@ class MainWindow(QMainWindow):
         setup_menu(self)
         setup_toolbar(self)
         setup_statusbar(self)
+        # add per-session provenance toolbar button (if toolbar exists)
+        try:
+            self._add_provenance_toolbar_button()
+        except Exception:
+            pass
 
         # Build sidebar widget using helper and create pages/content stack
         self.sidebar = create_sidebar(self)
@@ -565,6 +571,64 @@ class MainWindow(QMainWindow):
                     pass
         try:
             self.statusbar.showMessage("Configuration updated")
+        except Exception:
+            pass
+
+    def _add_provenance_toolbar_button(self):
+        try:
+            from PySide6.QtWidgets import QPushButton
+            btn = QPushButton("Provenance")
+            btn.setToolTip("Open Provenance Browser for current structure")
+            btn.clicked.connect(self._open_provenance_for_current)
+            # add to existing toolbar if available
+            try:
+                tb = getattr(self, 'toolbar', None)
+                if tb is not None and hasattr(tb, 'addWidget'):
+                    tb.addWidget(btn)
+            except Exception:
+                pass
+            self._open_prov_btn = btn
+        except Exception:
+            pass
+
+    def _open_provenance_for_current(self):
+        try:
+            atoms = self.session_state.get('current_structure')
+            manager = getattr(self, '_manager', None)
+            if manager is None:
+                # fallback: open a local provenance panel if manager not present
+                try:
+                    from qtgui.pages.workflow_tasks.provenance_panel import ProvenancePanel
+                    win = None
+                    if hasattr(self, 'centralWidget'):
+                        win = self
+                    panel = ProvenancePanel(parent=self)
+                    if atoms is not None and hasattr(panel, 'update_for_atoms'):
+                        panel.update_for_atoms(atoms)
+                    # attempt to show as a dialog-like widget
+                    try:
+                        panel.show()
+                    except Exception:
+                        pass
+                    return
+                except Exception:
+                    return
+
+            # Use manager's provenance browser so it's shared globally
+            try:
+                pb = manager._get_provenance_browser()
+                if pb is None:
+                    return
+                # If centralWidget is a ProvenancePanel, update it
+                try:
+                    panel = pb.centralWidget()
+                    if atoms is not None and hasattr(panel, 'update_for_atoms'):
+                        panel.update_for_atoms(atoms)
+                except Exception:
+                    pass
+                manager._open_provenance_browser()
+            except Exception:
+                pass
         except Exception:
             pass
 

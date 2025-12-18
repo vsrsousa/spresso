@@ -309,19 +309,26 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         magnetic_info.setWordWrap(True)
         magnetic_layout.addWidget(magnetic_info)
         
-        # Preset selector
+        # Preset selector (wrapped in a widget so we can show/hide it with the group)
         preset_layout = QHBoxLayout()
         preset_layout.addWidget(QLabel("Preset:"))
         self.magnetic_preset_combo = QComboBox()
         self.magnetic_preset_combo.addItems(["Custom", "Ferromagnetic", "Antiferromagnetic"])
         self.magnetic_preset_combo.currentTextChanged.connect(self._on_magnetic_preset_changed)
         preset_layout.addWidget(self.magnetic_preset_combo)
-        magnetic_layout.addLayout(preset_layout)
+        self.magnetic_preset_widget = QWidget()
+        self.magnetic_preset_widget.setLayout(preset_layout)
+        self.magnetic_preset_widget.setVisible(False)
+        magnetic_layout.addWidget(self.magnetic_preset_widget)
         
-        # Container for per-element magnetic inputs
+        # Container for per-element magnetic inputs (hidden until enabled)
         self.magnetic_container = QWidget()
         self.magnetic_container_layout = QFormLayout(self.magnetic_container)
+        self.magnetic_container.setVisible(False)
         magnetic_layout.addWidget(self.magnetic_container)
+
+        # Show/hide magnetic controls when the group checkbox is toggled
+        self.magnetic_group.toggled.connect(lambda checked: self._on_magnetic_group_toggled(checked))
         
         scroll_layout.addWidget(self.magnetic_group)
         
@@ -339,18 +346,25 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         hubbard_info.setWordWrap(True)
         hubbard_layout.addWidget(hubbard_info)
         
-        # Hubbard format selector
+        # Hubbard format selector (wrapped so we can show/hide with the group)
         format_layout = QHBoxLayout()
         format_layout.addWidget(QLabel("Format:"))
         self.hubbard_format_combo = QComboBox()
         self.hubbard_format_combo.addItems(["New (QE >= 7.0)", "Old (QE < 7.0)"])
         format_layout.addWidget(self.hubbard_format_combo)
-        hubbard_layout.addLayout(format_layout)
+        self.hubbard_format_widget = QWidget()
+        self.hubbard_format_widget.setLayout(format_layout)
+        self.hubbard_format_widget.setVisible(False)
+        hubbard_layout.addWidget(self.hubbard_format_widget)
         
-        # Container for per-element Hubbard U inputs
+        # Container for per-element Hubbard U inputs (hidden until enabled)
         self.hubbard_container = QWidget()
         self.hubbard_container_layout = QFormLayout(self.hubbard_container)
+        self.hubbard_container.setVisible(False)
         hubbard_layout.addWidget(self.hubbard_container)
+
+        # Show/hide hubbard controls when the group checkbox is toggled
+        self.hubbard_group.toggled.connect(lambda checked: self._on_hubbard_group_toggled(checked))
         
         scroll_layout.addWidget(self.hubbard_group)
         
@@ -681,6 +695,17 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             self.hubbard_edits[element] = spin
             self.hubbard_orbital_edits[element] = orbital_combo
             self.hubbard_container_layout.addRow(f"{element}:", container)
+
+    def _on_hubbard_group_toggled(self, checked):
+        """Show or hide hubbard controls when the hubbard group is toggled."""
+        try:
+            self.hubbard_format_widget.setVisible(checked)
+        except Exception:
+            pass
+        try:
+            self.hubbard_container.setVisible(checked)
+        except Exception:
+            pass
     
     def _get_common_orbitals_for_element(self, element):
         """Get common orbital choices for an element.
@@ -749,6 +774,18 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                     spin.setValue(-PREDEFINED_MAGNETIC_MOMENTS[element])
             else:
                 spin.setValue(0.0)
+
+    def _on_magnetic_group_toggled(self, checked):
+        """Show or hide magnetic controls when the magnetic group is toggled."""
+        # Show preset selector and per-element inputs directly under the group
+        try:
+            self.magnetic_preset_widget.setVisible(checked)
+        except Exception:
+            pass
+        try:
+            self.magnetic_container.setVisible(checked)
+        except Exception:
+            pass
     
     def _load_modules_from_codes(self, config):
         """Load modules from codes configuration.

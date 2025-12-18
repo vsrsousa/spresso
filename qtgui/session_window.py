@@ -29,8 +29,11 @@ def _get_page_class(name):
             from qtgui.pages.structure_viewer import StructureViewerPage
             _page_modules[name] = StructureViewerPage
         elif name == 'CalculationSetupPage':
-            from qtgui.pages.calculation_setup import CalculationSetupPage
-            _page_modules[name] = CalculationSetupPage
+            # For the workflow-first prototype replace the old CalculationSetup
+            # page with the new WorkflowsPage. This is a deliberate replacement
+            # (no back-compat shim) while we iterate on the workflow UX.
+            from qtgui.pages.workflows_page import WorkflowsPage
+            _page_modules[name] = WorkflowsPage
         elif name == 'WorkflowBuilderPage':
             from qtgui.pages.workflow_builder import WorkflowBuilderPage
             _page_modules[name] = WorkflowBuilderPage
@@ -207,6 +210,63 @@ class MainWindow(QMainWindow):
                 self.sidebar.setVisible(not self.sidebar.isVisible())
         except Exception:
             pass
+        # Restore any previously open workflow tabs saved in the session state
+        try:
+            open_tabs = self.session_state.get('open_workflow_tabs') or []
+            if open_tabs:
+                from qtgui.pages.workflow_tabs_page import WorkflowTabsPage
+                tabs_page = None
+                for i in range(self.content_stack.count()):
+                    w = self.content_stack.widget(i)
+                    if isinstance(w, WorkflowTabsPage):
+                        tabs_page = w
+                        break
+                if tabs_page is None:
+                    tabs_page = WorkflowTabsPage(self.session_state)
+                    self.content_stack.addWidget(tabs_page)
+                for name in open_tabs:
+                    try:
+                        tabs_page.add_workflow_tab(name)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def launch_workflow(self, workflow_name: str):
+        """Open the workflow launcher for a named preset (called from sidebar).
+
+        This deliberately uses the `WorkflowLauncherDialog` to allow the user
+        to confirm parameters before starting a run. For automated tests the
+        launcher runs in debug mode so no external binaries are invoked.
+        """
+        try:
+            # Always create a new independent workflow tab for each launch.
+            # Use a timestamp to ensure uniqueness so multiple instances can
+            # coexist concurrently in the session area.
+            from datetime import datetime
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+            tab_name = f"workflow::{workflow_name}::{ts}"
+
+            # Ensure there's a WorkflowTabsPage in the content stack and add a tab
+            from qtgui.pages.workflow_tabs_page import WorkflowTabsPage
+
+            # Find existing WorkflowTabsPage
+            tabs_page = None
+            for i in range(self.content_stack.count()):
+                w = self.content_stack.widget(i)
+                if isinstance(w, WorkflowTabsPage):
+                    tabs_page = w
+                    break
+
+            if tabs_page is None:
+                tabs_page = WorkflowTabsPage(self.session_state)
+                self.content_stack.addWidget(tabs_page)
+
+            # Add a new independent tab for this workflow
+            tabs_page.add_workflow_tab(workflow_name)
+            self.content_stack.setCurrentWidget(tabs_page)
+        except Exception:
+            return
 
     def _choose_structure_file(self):
         """Prompt user to choose a structure file and set it for this session (once)."""

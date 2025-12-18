@@ -156,18 +156,37 @@ def create_sidebar(main_window):
     layout.addWidget(workdir_group)
 
     # Workflow navigation
-    workflow_group = QGroupBox("🔬 Workflow")
+    workflow_group = QGroupBox("🔬 Workflows")
     workflow_layout = QVBoxLayout(workflow_group)
     main_window.nav_list = QListWidget()
-    nav_items = [
-        "📊 Calculation Setup",
-        "🔄 Workflow Builder",
-        "🚀 Job Submission",
-        "📈 Results & Post-Processing"
+    # Show independent workflow presets directly in the sidebar. Selecting
+    # an item will launch the chosen workflow (no Calculation Setup page).
+    presets = [
+        "SCF",
+        "Relax",
+        "SCF+Relax",
+        "Convergence Test",
+        "Geometry Optimization",
+        "NEB",
+        "Post-Processing",
     ]
-    for item in nav_items:
-        main_window.nav_list.addItem(QListWidgetItem(item))
-    main_window.nav_list.currentRowChanged.connect(main_window._on_nav_changed)
+    for p in presets:
+        main_window.nav_list.addItem(QListWidgetItem(p))
+    # Connect navigation changes to the session window handler if available
+    try:
+        # Use currentRowChanged so programmatic changes trigger the handler
+        main_window.nav_list.currentRowChanged.connect(getattr(main_window, '_on_nav_changed', lambda idx: None))
+    except Exception:
+        pass
+    # When a preset is activated, call the session window launcher directly.
+    def _on_preset_activated(item):
+        try:
+            name = item.text()
+            getattr(main_window, 'launch_workflow', lambda n: None)(name)
+        except Exception:
+            pass
+
+    main_window.nav_list.itemActivated.connect(_on_preset_activated)
     workflow_layout.addWidget(main_window.nav_list)
     layout.addWidget(workflow_group)
 

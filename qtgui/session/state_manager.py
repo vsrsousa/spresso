@@ -33,6 +33,7 @@ class SessionState:
     ALLOWED_SESSION_KEYS = {
         'current_structure', 'current_machine', 'current_machine_name',
         'current_codes', 'selected_code_version', 'workflow_config',
+        'workflow_tabs_config', 'open_workflow_tabs', 'workflow_runs',
         'working_directory', 'session_name', 'session_created',
         'session_modified', 'calc_machine', 'selected_machine',
         'selected_qe_version', 'structure_source', 'workflow_machine',

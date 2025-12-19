@@ -4,7 +4,7 @@ from typing import Dict, Iterable
 
 from qtpy.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit, QComboBox,
-    QPushButton, QGroupBox, QFormLayout, QDoubleSpinBox, QPlainTextEdit
+    QPushButton, QGroupBox, QFormLayout, QDoubleSpinBox, QPlainTextEdit, QDialog
 )
 from qtpy.QtCore import Signal
 
@@ -106,7 +106,17 @@ class CalculationConfigWidget(QWidget):
         self.machine_combo = QComboBox()
         self.machine_combo.setEditable(True)
         self.machine_combo.currentTextChanged.connect(self._on_machine_changed)
-        env_layout.addRow('Machine:', self.machine_combo)
+        # Machine row: include short info label and a Configure button
+        mrow = QHBoxLayout()
+        mrow.addWidget(self.machine_combo, 1)
+        self.machine_info_label = QLabel("")
+        self.machine_info_label.setStyleSheet("color: #555; font-size: 11px;")
+        mrow.addWidget(self.machine_info_label)
+        cfg_btn = QPushButton("Configure...")
+        cfg_btn.setFixedWidth(110)
+        cfg_btn.clicked.connect(self._open_machine_config_dialog)
+        mrow.addWidget(cfg_btn)
+        env_layout.addRow('Machine:', mrow)
 
         self.version_combo = QComboBox()
         self.version_combo.currentTextChanged.connect(self._on_version_changed)
@@ -592,6 +602,27 @@ class CalculationConfigWidget(QWidget):
                     self.code_combo.addItem(code_name)
         except Exception:
             logger.debug('Failed to update codes for version', exc_info=True)
+
+    def _open_machine_config_dialog(self):
+        """Open the MachineConfigPage in a dialog so users can create/edit machines."""
+        try:
+            from qtgui.pages.machine_config import MachineConfigPage
+        except Exception:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Machine Configuration")
+        layout = QVBoxLayout(dlg)
+        page = MachineConfigPage(self.session)
+        layout.addWidget(page)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dlg.accept)
+        layout.addWidget(close_btn)
+        dlg.exec_()
+        # reload machine list/info after possible edits
+        try:
+            self._load_machines()
+        except Exception:
+            logger.debug('Failed to reload machines after dialog', exc_info=True)
 
     def update_for_structure(self, atoms):
         if atoms is None:

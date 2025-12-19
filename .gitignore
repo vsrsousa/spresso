@@ -143,3 +143,10 @@ job_file
 *.pwo
 *.asei
 *.save/
+.DS_Store
+# Ignore transient test artifact folders
+r1_label/
+t1_label/
+t_save_label/
+Co4Gd2/
+test/

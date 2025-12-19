@@ -5,13 +5,13 @@ This module contains the session workspace window so the session
 manager and session window responsibilities are separated.
 """
 import os
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QLabel, QFileDialog, QMessageBox, QSplitter,
     QInputDialog, QLineEdit
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QAction
 
 from .session_state import SessionState
 from .session import controllers as session_controllers
@@ -354,7 +354,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.warning(self, "DB Error", f"Could not open structures DB: {e}")
                 return False
-            from PySide6.QtWidgets import QDialog, QVBoxLayout, QListWidget, QPushButton, QHBoxLayout
+            from qtpy.QtWidgets import QDialog, QVBoxLayout, QListWidget, QPushButton, QHBoxLayout
             dlg = QDialog(self)
             dlg.setWindowTitle("Select Structure from DB")
             dlg.setMinimumSize(400, 300)
@@ -636,7 +636,7 @@ class MainWindow(QMainWindow):
 
     def _add_provenance_toolbar_button(self):
         try:
-            from PySide6.QtWidgets import QPushButton
+            from qtpy.QtWidgets import QPushButton
             btn = QPushButton("Provenance")
             btn.setToolTip("Open Provenance Browser for current structure")
             btn.clicked.connect(self._open_provenance_for_current)
@@ -878,7 +878,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-            from PySide6.QtWidgets import QApplication
+            from qtpy.QtWidgets import QApplication
             QApplication.processEvents()
 
             for page in self.pages:

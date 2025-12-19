@@ -1,5 +1,5 @@
 """Statusbar helper."""
-from PySide6.QtWidgets import QStatusBar
+from qtpy.QtWidgets import QStatusBar
 
 
 def setup_statusbar(main_window):

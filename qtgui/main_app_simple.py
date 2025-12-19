@@ -11,7 +11,7 @@ This is a streamlined version that uses standard Qt patterns:
 import sys
 import os
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QLabel, QPushButton, QFileDialog, QMessageBox,
     QStatusBar, QMenuBar, QMenu, QToolBar, QGroupBox, QFormLayout,
@@ -19,8 +19,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QAction
 
 
 class SimpleSessionState:

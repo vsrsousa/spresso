@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import List
 
 try:
-    from PySide6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QPushButton, QTextEdit, QFileDialog
+    from qtpy.QtWidgets import QWidget, QVBoxLayout, QListWidget, QPushButton, QTextEdit, QFileDialog
 except Exception:
     # If Qt isn't available in this environment, provide a noop placeholder
     QWidget = object

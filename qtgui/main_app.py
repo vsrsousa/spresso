@@ -17,15 +17,15 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    from PySide6.QtWidgets import (
+    from qtpy.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
         QStackedWidget, QListWidget, QListWidgetItem, QLabel, QGroupBox,
         QFileDialog, QMessageBox, QSplitter, QFrame, QPushButton,
         QStatusBar, QMenuBar, QMenu, QToolBar, QComboBox,
         QInputDialog, QLineEdit, QSizePolicy
     )
-    from PySide6.QtCore import Qt, QSize, Signal
-    from PySide6.QtGui import QIcon, QFont, QAction, QScreen
+    from qtpy.QtCore import Qt, QSize, Signal
+    from qtpy.QtGui import QIcon, QFont, QAction, QScreen
     _HAS_QT = True
 except Exception:
     # Allow importing this module in headless/test environments where
@@ -468,7 +468,7 @@ class SessionManagerWindow(QMainWindow):
     def _open_config_dialog(self):
         from qtgui.dialogs import ConfigurationDialog
         # Ensure the configuration dialog is a top-level independent window
-        from PySide6.QtCore import Qt as _QtFlags
+        from qtpy.QtCore import Qt as _QtFlags
         if self._config_dialog is None:
             # Create without parent so it behaves independently
             self._config_dialog = ConfigurationDialog(self.manager_state, parent=None)

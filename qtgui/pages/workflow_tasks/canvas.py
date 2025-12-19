@@ -1,5 +1,5 @@
 try:
-    from PySide6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QPushButton
+    from qtpy.QtWidgets import QWidget, QVBoxLayout, QListWidget, QPushButton
 except Exception:
     QWidget = object
 

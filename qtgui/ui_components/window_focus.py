@@ -1,7 +1,7 @@
-from PySide6.QtCore import QObject, QEvent
-from PySide6.QtCore import QObject, QEvent
-from PySide6.QtWidgets import QGraphicsDropShadowEffect
-from PySide6.QtGui import QColor
+from qtpy.QtCore import QObject, QEvent
+from qtpy.QtCore import QObject, QEvent
+from qtpy.QtWidgets import QGraphicsDropShadowEffect
+from qtpy.QtGui import QColor
 
 
 class WindowFocusDecorator(QObject):
@@ -52,7 +52,7 @@ class WindowFocusDecorator(QObject):
 
 
 def apply_focus_decorator(widget, active_color=None):
-    from PySide6.QtGui import QColor
+    from qtpy.QtGui import QColor
     color = QColor(37, 99, 235, 200) if active_color is None else active_color
     decorator = WindowFocusDecorator(widget, active_color=color)
     widget.installEventFilter(decorator)

@@ -1,7 +1,7 @@
 """Toolbar helper."""
-from PySide6.QtWidgets import QToolBar, QWidget
-from PySide6.QtWidgets import QSizePolicy
-from PySide6.QtGui import QAction
+from qtpy.QtWidgets import QToolBar, QWidget
+from qtpy.QtWidgets import QSizePolicy
+from qtpy.QtGui import QAction
 
 
 def setup_toolbar(main_window):

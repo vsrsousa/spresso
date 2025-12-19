@@ -11,13 +11,13 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QLabel, QMessageBox, QHeaderView, QWidget,
     QTextEdit
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QThread
-from PySide6.QtGui import QColor
+from qtpy.QtCore import Qt, Signal, QTimer, QThread
+from qtpy.QtGui import QColor
 
 
 class JobStatusWorker(QThread):
@@ -48,23 +48,21 @@ class JobStatusWorker(QThread):
         try:
             # Import here to avoid circular dependencies
             from xespresso.schedulers.remote_connection import RemoteConnection
-            
+
             # Create remote connection
             remote = RemoteConnection(queue)
-            
-            # Check status based on scheduler type
             if scheduler == 'slurm':
                 # Check SLURM job status
                 cmd = f"squeue -j {job_id} -h -o '%T' 2>/dev/null || echo 'NOT_FOUND'"
                 result = remote.run_command(cmd)
                 status_output = result.strip()
-                
+
                 if status_output == 'NOT_FOUND' or not status_output:
                     # Job not in queue, check if completed
                     cmd_history = f"sacct -j {job_id} -n -o State -X 2>/dev/null | head -1"
                     result_history = remote.run_command(cmd_history)
                     history_status = result_history.strip()
-                    
+
                     if 'COMPLETED' in history_status:
                         new_status = 'completed'
                     elif 'FAILED' in history_status or 'CANCELLED' in history_status:
@@ -79,13 +77,13 @@ class JobStatusWorker(QThread):
                     new_status = 'completed'
                 else:
                     new_status = 'unknown'
-                    
+
             elif scheduler == 'direct':
                 # Check process status using PID
                 pid = job_id.replace('PID:', '') if 'PID:' in str(job_id) else job_id
                 cmd = f"ps -p {pid} -o state= 2>/dev/null || echo 'NOT_FOUND'"
                 result = remote.run_command(cmd)
-                
+
                 if 'NOT_FOUND' in result or not result.strip():
                     # Process not found, assume completed
                     new_status = 'completed'
@@ -93,7 +91,7 @@ class JobStatusWorker(QThread):
                     new_status = 'running'
             else:
                 new_status = 'unknown'
-            
+
             remote.disconnect()
             self.status_updated.emit(self.row, new_status, '')
             

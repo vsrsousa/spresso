@@ -7,11 +7,11 @@ The dialog doesn't block the main application and allows users to configure
 while still interacting with the main window.
 """
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton,
-    QLabel, QWidget
+    QLabel, QWidget, QLineEdit, QFileDialog
 )
-from PySide6.QtCore import Qt, Signal
+from qtpy.QtCore import Qt, Signal
 
 
 class ConfigurationDialog(QDialog):
@@ -90,7 +90,7 @@ class ConfigurationDialog(QDialog):
         prov_widget = QWidget()
         prov_layout = QVBoxLayout(prov_widget)
         prov_layout.addWidget(QLabel("Provenance database path:"))
-        from PySide6.QtWidgets import QLineEdit, QHBoxLayout, QFileDialog
+        from qtpy.QtWidgets import QLineEdit, QHBoxLayout, QFileDialog
 
         self._prov_path_edit = QLineEdit()
         self._prov_browse = QPushButton("Browse...")

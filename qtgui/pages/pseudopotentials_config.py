@@ -10,13 +10,13 @@ allowing users to:
 
 import os
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTableWidget, QTableWidgetItem,
-    QHeaderView, QFileDialog, QTextEdit, QCheckBox
+    QHeaderView, QFileDialog, QTextEdit, QCheckBox, QListWidget
 )
-from PySide6.QtCore import Qt
+from qtpy.QtCore import Qt
 
 try:
     from xespresso.machines.config.loader import (

@@ -6,7 +6,7 @@ This module provides reusable components for ASE database operations.
 
 import os
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QGroupBox, QFormLayout, QMessageBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog

@@ -43,6 +43,8 @@ setup(
         "pyyaml>=5.4.0",
         "jsonschema>=3.2.0",
         "tabulate>=0.8.9",
+        "PySide6>=6.5.0",
+        "qtpy>=2.3",
     ],
     extras_require={
         "ssh": ["paramiko>=2.12.0"],  # Optional SSH functionality

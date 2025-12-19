@@ -6,8 +6,8 @@ an independent structure manager (Upload / Build / DB / View). The dialog
 emits `structure_selected(int)` when the user chooses a structure to use in a
 session (i.e. selects or saves a structure to the ASE DB and clicks "Use in session").
 """
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton
-from PySide6.QtCore import Signal
+from qtpy.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton
+from qtpy.QtCore import Signal
 
 from qtgui.pages.structure_viewer import StructureViewerPage
 from qtgui.session_state import SessionState
@@ -176,12 +176,12 @@ class StructureManagerDialog(QDialog):
         # As a last-resort, if current_structure exists but couldn't be saved, notify user
         try:
             if self.page.session_state.get('current_structure') is not None:
-                from PySide6.QtWidgets import QMessageBox
+                from qtpy.QtWidgets import QMessageBox
                 QMessageBox.information(self, "Info", "Structure is loaded in the manager but could not be saved to DB. Use the ASE Database tab to save it manually.")
                 return
         except Exception:
             pass
 
         # Nothing to do
-        from PySide6.QtWidgets import QMessageBox
+        from qtpy.QtWidgets import QMessageBox
         QMessageBox.warning(self, "No Structure", "No structure available to use in session.")

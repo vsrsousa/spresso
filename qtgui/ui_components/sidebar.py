@@ -1,10 +1,10 @@
 """Sidebar UI helper."""
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QWidget, QComboBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QFont
 
 
 def create_sidebar(main_window):

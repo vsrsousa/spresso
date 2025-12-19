@@ -1,5 +1,5 @@
 try:
-    from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton
+    from qtpy.QtWidgets import QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton
 except Exception:
     QWidget = object
 
@@ -41,29 +41,4 @@ class TaskEditor(QWidget):
             task.params['label'] = self.label_edit.text()
         except Exception:
             pass
-try:
-    from PySide6.QtWidgets import QWidget, QFormLayout, QLineEdit, QPushButton
-except Exception:
-    QWidget = object
 
-class TaskEditor(QWidget):
-    """Minimal task editor placeholder.
-
-    Allows editing of a task name and label in a tiny form. Meant as a
-    starting point for the GUI integration; it intentionally keeps logic
-    minimal so unit tests and imports won't require a running Qt event loop.
-    """
-
-    def __init__(self, parent=None):
-        if hasattr(self.__class__, "__mro__"):
-            super().__init__(parent)
-            self.layout = QFormLayout()
-            self.name_field = QLineEdit()
-            self.label_field = QLineEdit()
-            self.save_btn = QPushButton("Save")
-            self.layout.addRow("Name", self.name_field)
-            self.layout.addRow("Label", self.label_field)
-            self.layout.addRow(self.save_btn)
-            self.setLayout(self.layout)
-        else:
-            pass

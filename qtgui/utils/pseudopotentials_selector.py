@@ -7,12 +7,12 @@ from configured libraries, similar to the Streamlit version.
 
 import os
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PySide6.QtCore import Qt
+from qtpy.QtCore import Qt
 
 try:
     from xespresso.pseudopotentials import (

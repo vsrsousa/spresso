@@ -13,7 +13,7 @@ The page is organized into tabs:
 
 import os
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTableWidget, QTableWidgetItem,
@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QSlider, QRadioButton, QButtonGroup,
     QDialog, QDialogButtonBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor
 
 # Required imports - these are always available as they're in requirements.txt
 from ase import io as ase_io
@@ -1034,8 +1034,8 @@ then view them in the "View Structure" tab.</p>
 
     def _open_element_color_dialog(self):
         """Open a dialog allowing the user to pick colors per element present in the structure."""
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton
-        from PySide6.QtWidgets import QLabel, QWidget
+        from qtpy.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton
+        from qtpy.QtWidgets import QLabel, QWidget
 
         # Determine elements to show: use current structure if available
         atoms = self.session_state.get('current_structure') if hasattr(self.session_state, 'get') else None
@@ -1067,8 +1067,8 @@ then view them in the "View Structure" tab.</p>
             b.setFixedWidth(80)
             def make_handler(sym, button):
                 def handler():
-                    from PySide6.QtWidgets import QColorDialog
-                    from PySide6.QtGui import QColor
+                    from qtpy.QtWidgets import QColorDialog
+                    from qtpy.QtGui import QColor
                     cur = elem_colors.get(sym) or '#808080'
                     q = QColor(cur)
                     res = QColorDialog.getColor(q, self, f"Choose color for {sym}")

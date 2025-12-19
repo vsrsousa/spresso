@@ -8,14 +8,14 @@ import os
 import json
 import traceback
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QDoubleSpinBox,
     QSpinBox, QCheckBox, QTextEdit, QRadioButton, QButtonGroup
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPalette, QColor
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QPalette, QColor
 
 from qtgui.utils import ASE_ESPRESSO_COMMAND_TEMPLATE
 

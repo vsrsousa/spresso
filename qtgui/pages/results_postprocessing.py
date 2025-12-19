@@ -7,14 +7,14 @@ This page displays calculation results and provides post-processing tools.
 import os
 import re
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QTextEdit,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QFileDialog
+    QFileDialog, QListWidget
 )
-from PySide6.QtCore import Qt
+from qtpy.QtCore import Qt
 
 # Unit conversion constants
 # Energy: 1 Rydberg = 13.605693122994 eV (CODATA 2018)

@@ -7,7 +7,7 @@ This page handles file browsing, dry run, and job submission.
 import os
 import logging
 
-from PySide6.QtWidgets import (
+from qtpy.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QApplication,
 )
-from PySide6.QtCore import Qt
+from qtpy.QtCore import Qt
 
 from qtgui.utils import (
     validate_path_under_base,

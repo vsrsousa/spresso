@@ -1,5 +1,5 @@
 """Menu bar helper."""
-from PySide6.QtGui import QAction
+from qtpy.QtGui import QAction
 
 
 def setup_menu(main_window):

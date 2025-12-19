@@ -71,15 +71,20 @@ class WorkflowInstancePage(QWidget):
             self.machine_edit = None
         try:
             class _PseudoEditProxy:
-                def __init__(self, selector):
-                    self._sel = selector
+                def __init__(self, selector_or_getter, parent_page=None):
+                    if callable(selector_or_getter):
+                        self._sel_getter = selector_or_getter
+                    else:
+                        self._sel_getter = lambda: selector_or_getter
+                    self._parent = parent_page
 
                 def setText(self, txt: str):
                     try:
+                        sel = self._sel_getter()
                         # Prefer using the widget's set_pseudopotentials API when
                         # available so mappings like 'Fe=Fe.pseudo' are parsed
                         # and persisted correctly.
-                        if hasattr(self._sel, 'set_pseudopotentials'):
+                        if sel is not None and hasattr(sel, 'set_pseudopotentials'):
                             mapping = {}
                             for part in str(txt).split(','):
                                 part = part.strip()
@@ -92,12 +97,41 @@ class WorkflowInstancePage(QWidget):
                                     k, v = part.split(':', 1)
                                     mapping[k.strip()] = v.strip()
                             try:
-                                self._sel.set_pseudopotentials(mapping)
+                                # Ensure selector has inputs for these elements
+                                if hasattr(sel, 'set_elements'):
+                                    try:
+                                        sel.set_elements(set(mapping.keys()))
+                                    except Exception:
+                                        pass
+                                sel.set_pseudopotentials(mapping)
+                                # Persist mapping immediately to the draft store so
+                                # it is available on reopen even if selector state
+                                # did not update synchronously.
+                                try:
+                                    if getattr(self, '_parent', None) is not None:
+                                        try:
+                                            cfg = self._parent._compose_config()
+                                            cfg['pseudopotentials'] = mapping
+                                            store = self._parent.session.get('workflow_tabs_config') or {}
+                                        except Exception:
+                                            cfg = None
+                                            store = {}
+                                        try:
+                                            if cfg is not None:
+                                                store[self._parent.preset_name] = cfg
+                                                self._parent.session['workflow_tabs_config'] = store
+                                        except Exception:
+                                            try:
+                                                setattr(self._parent.session, 'workflow_tabs_config', store)
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    pass
                                 return
                             except Exception:
                                 pass
                         # Fallback: if the selector exposes a text widget, set raw content
-                        text_widget = getattr(self._sel, 'text', None)
+                        text_widget = getattr(sel, 'text', None) if sel is not None else None
                         if text_widget is not None and hasattr(text_widget, 'setPlainText'):
                             text_widget.setPlainText(txt)
                             return
@@ -106,13 +140,24 @@ class WorkflowInstancePage(QWidget):
 
                 def text(self):
                     try:
+                        sel = self._sel_getter()
                         # Prefer canonical mapping form if available
-                        if hasattr(self._sel, 'get_pseudopotentials'):
-                            mapping = self._sel.get_pseudopotentials() or {}
+                        if sel is not None and hasattr(sel, 'get_pseudopotentials'):
+                            mapping = sel.get_pseudopotentials() or {}
                             if mapping:
                                 return ','.join(f"{k}={v}" for k, v in mapping.items())
+                        # Fallback to stored draft mapping if selector is empty
+                        try:
+                            if getattr(self, '_parent', None) is not None:
+                                store = self._parent.session.get('workflow_tabs_config') or {}
+                                prev = store.get(self._parent.preset_name, {})
+                                prev_pp = prev.get('pseudopotentials') or {}
+                                if prev_pp:
+                                    return ','.join(f"{k}={v}" for k, v in prev_pp.items())
+                        except Exception:
+                            pass
                         # Fallback to raw text, but normalize ': ' to '=' for tests
-                        text_widget = getattr(self._sel, 'text', None)
+                        text_widget = getattr(sel, 'text', None) if sel is not None else None
                         if text_widget is not None and hasattr(text_widget, 'toPlainText'):
                             raw = text_widget.toPlainText()
                             try:
@@ -133,7 +178,8 @@ class WorkflowInstancePage(QWidget):
                         pass
                     return ''
 
-            self.pseudo_edit = _PseudoEditProxy(self.config_widget.pseudo_selector)
+            # Use a getter so the proxy always reads the current selector
+            self.pseudo_edit = _PseudoEditProxy(lambda: getattr(self.config_widget, 'pseudo_selector', None), parent_page=self)
         except Exception:
             self.pseudo_edit = None
         # Expose protocol combo for tests/back-compat
@@ -233,6 +279,40 @@ class WorkflowInstancePage(QWidget):
     def _save_draft(self, *args, **kwargs):
         """Save current form values to the session state as a draft for this preset."""
         cfg = self._compose_config()
+        # If pseudopotentials mapping is empty, try these fallbacks in order:
+        # 1) existing draft in session (set by proxy when user called setText)
+        # 2) textual proxy representation
+        try:
+            pp = cfg.get('pseudopotentials') or {}
+            if not pp:
+                # attempt to reuse previously stored draft for this preset
+                try:
+                    store = self.session.get('workflow_tabs_config') or {}
+                    prev = store.get(self.preset_name, {})
+                    prev_pp = prev.get('pseudopotentials') or {}
+                    if prev_pp:
+                        cfg['pseudopotentials'] = prev_pp
+                        pp = cfg['pseudopotentials']
+                except Exception:
+                    prev_pp = {}
+
+            if not pp and getattr(self, 'pseudo_edit', None) is not None:
+                raw = self.pseudo_edit.text() or ''
+                mapping = {}
+                for part in str(raw).split(','):
+                    part = part.strip()
+                    if not part:
+                        continue
+                    if '=' in part:
+                        k, v = part.split('=', 1)
+                        mapping[k.strip()] = v.strip()
+                    elif ':' in part:
+                        k, v = part.split(':', 1)
+                        mapping[k.strip()] = v.strip()
+                if mapping:
+                    cfg['pseudopotentials'] = mapping
+        except Exception:
+            pass
         # Ensure label is present (header widget manages its own label)
         try:
             label = self.config_widget.label_edit.text().strip() or None
@@ -265,6 +345,18 @@ class WorkflowInstancePage(QWidget):
         # Restore full calculation UI from dict using the configuration widget
         try:
             self.config_widget.restore_from_dict(cfg)
+        except Exception:
+            pass
+        # Ensure pseudo proxy text reflects restored mapping (covers selector
+        # implementations that do not immediately populate inputs).
+        try:
+            mapping = cfg.get('pseudopotentials') or {}
+            if mapping and getattr(self, 'pseudo_edit', None) is not None:
+                txt = ','.join(f"{k}={v}" for k, v in mapping.items())
+                try:
+                    self.pseudo_edit.setText(txt)
+                except Exception:
+                    pass
         except Exception:
             pass
         # Restore additional fields not handled by the widget

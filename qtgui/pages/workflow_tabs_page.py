@@ -17,6 +17,11 @@ class WorkflowTabsPage(QWidget):
         # allow users to close workflow tabs
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
+        # ensure we refresh structure-dependent inputs when switching tabs
+        try:
+            self.tabs.currentChanged.connect(self._on_tab_changed)
+        except Exception:
+            pass
         layout.addWidget(self.tabs)
 
     def add_workflow_tab(self, preset_name: str):
@@ -35,6 +40,15 @@ class WorkflowTabsPage(QWidget):
         title = preset_name
         idx = self.tabs.addTab(page, title)
         self.tabs.setCurrentIndex(idx)
+        # ensure the newly created page reflects the current session structure
+        try:
+            atoms = self.session.get('current_structure')
+            try:
+                page.config_widget.update_for_structure(atoms)
+            except Exception:
+                pass
+        except Exception:
+            pass
         # persist current open tabs into the session state
         try:
             self._save_open_tabs()

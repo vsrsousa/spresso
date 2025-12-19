@@ -12,7 +12,7 @@ from qtpy.QtWidgets import (
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, Signal
 
 try:
     from xespresso.pseudopotentials import (
@@ -40,6 +40,9 @@ class PseudopotentialsSelectorWidget(QWidget):
         self.elements = set()
         self.pseudo_edits = {}
         self._setup_ui()
+
+    # Signal emitted whenever the selector content changes (pseudopotentials or config)
+    changed = Signal()
     
     def _setup_ui(self):
         """Setup the user interface."""
@@ -57,6 +60,7 @@ class PseudopotentialsSelectorWidget(QWidget):
             
             self.config_combo = QComboBox()
             self.config_combo.currentTextChanged.connect(self._on_config_changed)
+            self.config_combo.currentTextChanged.connect(lambda *a: self.changed.emit())
             config_layout.addWidget(self.config_combo, 1)
             
             refresh_btn = QPushButton("🔄")
@@ -194,6 +198,7 @@ class PseudopotentialsSelectorWidget(QWidget):
         
         for element in sorted(self.elements):
             edit = QLineEdit()
+            edit.textChanged.connect(lambda *a: self.changed.emit())
             edit.setPlaceholderText(f"e.g., {element}.UPF or {element}.pbe-n-kjpaw_psl.1.0.0.UPF")
             self.pseudo_edits[element] = edit
             self.manual_layout.addRow(f"{element}:", edit)
@@ -214,6 +219,7 @@ class PseudopotentialsSelectorWidget(QWidget):
         missing = []
         for element in sorted(self.elements):
             edit = QLineEdit()
+            edit.textChanged.connect(lambda *a: self.changed.emit())
             
             if element in pseudo_dict:
                 edit.setText(pseudo_dict[element])

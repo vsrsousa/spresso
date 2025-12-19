@@ -37,7 +37,7 @@ def test_tasks_respect_context_prov_db(monkeypatch, tmp_path):
     ProvenanceDB._DEFAULT = None
 
     atoms = Atoms("H2", positions=[[0, 0, 0], [0, 0, 0.74]])
-    task = ScfTask(name="t1", params={"label": "test"}, inputs={"atoms": atoms})
+    task = ScfTask(name="t1", params={"label": str(tmp_path / "test")}, inputs={"atoms": atoms})
     db_path = str(tmp_path / "prov.json")
     prov_dir = str(tmp_path / ".prov")
     runner = WorkflowRunner(tasks=[task], context={"debug": True, "provenance_dir": prov_dir, "provenance_db_path": db_path})

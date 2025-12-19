@@ -203,6 +203,12 @@ class CalculationConfigWidget(QWidget):
                 idx = self.machine_combo.findText(cur)
                 if idx >= 0:
                     self.machine_combo.setCurrentIndex(idx)
+            # ensure codes/versions are loaded for the current machine
+            try:
+                if cur:
+                    self._on_machine_changed(cur)
+            except Exception:
+                logger.debug('Failed to initialize machine codes', exc_info=True)
         except Exception:
             logger.debug('Failed to load machines', exc_info=True)
 
@@ -243,6 +249,13 @@ class CalculationConfigWidget(QWidget):
                 if codes and getattr(codes, 'get_all_codes', None):
                     for code_name in codes.get_all_codes(version=version).keys():
                         self.code_combo.addItem(code_name)
+                    # Try to select 'pw' by default if present
+                    try:
+                        idx = self.code_combo.findText('pw')
+                        if idx >= 0:
+                            self.code_combo.setCurrentIndex(idx)
+                    except Exception:
+                        pass
             finally:
                 self.code_combo.blockSignals(False)
             self.changed.emit()

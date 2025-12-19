@@ -22,3 +22,14 @@ def graphene_monolayer():
     # Set all directions as periodic
     atoms.pbc = [True, True, True]
     return atoms
+
+
+@pytest.fixture(autouse=True)
+def chdir_tmp_path(tmp_path, monkeypatch):
+    """Automatically chdir each test to a fresh temporary directory.
+
+    This prevents tests from creating folders in the repository root and
+    ensures filesystem side-effects are isolated per-test.
+    """
+    monkeypatch.chdir(tmp_path)
+    yield

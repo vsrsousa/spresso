@@ -496,6 +496,10 @@ class CalculationConfigWidget(QWidget):
         self.machine_combo.currentTextChanged.connect(lambda v: self.changed.emit())
         env_layout.addRow('Machine:', self.machine_combo)
 
+        # Machine short info (type/scheduler)
+        self.machine_info_label = QLabel("")
+        env_layout.addRow(self.machine_info_label)
+
         self.version_combo = QComboBox()
         self.version_combo.currentTextChanged.connect(lambda v: self.changed.emit())
         env_layout.addRow('QE Version:', self.version_combo)
@@ -587,21 +591,62 @@ class CalculationConfigWidget(QWidget):
         except Exception:
             logger.debug('Failed to load machines', exc_info=True)
 
+    def _load_codes(self, machine_name):
+        """Load codes/versions for a given machine (mirrors CalculationSetupPage)."""
+        if not XESPRESSO_AVAILABLE:
+            return
+        self.version_combo.blockSignals(True)
+        self.code_combo.blockSignals(True)
+        try:
+            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
+            self.version_combo.clear()
+            self.code_combo.clear()
+            if codes and getattr(codes, 'has_any_codes', None) and codes.has_any_codes():
+                versions = codes.list_versions()
+                if versions:
+                    for version in versions:
+                        self.version_combo.addItem(version)
+                else:
+                    all_codes = codes.get_all_codes()
+                    for code_name in all_codes.keys():
+                        self.code_combo.addItem(code_name)
+        except Exception:
+            logger.debug('Failed to load codes', exc_info=True)
+        finally:
+            self.version_combo.blockSignals(False)
+            self.code_combo.blockSignals(False)
+        # trigger handler for first version if present
+        if self.version_combo.count() > 0:
+            try:
+                self._on_version_changed(self.version_combo.currentText())
+            except Exception:
+                pass
+
     def _on_machine_changed(self, machine_name):
         if not machine_name or not XESPRESSO_AVAILABLE:
             return
         try:
-            codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, verbose=False)
-            self.version_combo.clear(); self.code_combo.clear()
-            if codes and getattr(codes, 'versions', None):
-                for v in codes.list_versions():
-                    self.version_combo.addItem(v)
-            else:
-                all_codes = codes.get_all_codes() if codes else {}
-                for cname in all_codes.keys():
-                    self.code_combo.addItem(cname)
+            # try to load a machine object and populate short info
+            try:
+                machine = load_machine(DEFAULT_CONFIG_PATH, machine_name, DEFAULT_MACHINES_DIR, return_object=True)
+                try:
+                    self.session['calc_machine'] = machine
+                    self.session['selected_machine'] = machine_name
+                except Exception:
+                    pass
+                info = f"Type: {getattr(machine, 'execution', '')}"
+                if getattr(machine, 'scheduler', None):
+                    info += f", Scheduler: {machine.scheduler}"
+                self.machine_info_label.setText(info)
+            except Exception:
+                self.machine_info_label.setText("")
+            # load codes/versions for this machine
+            try:
+                self._load_codes(machine_name)
+            except Exception:
+                logger.debug('Failed to load codes for machine', exc_info=True)
         except Exception:
-            logger.debug('Failed to load codes for machine', exc_info=True)
+            logger.debug('Failed to handle machine change', exc_info=True)
 
     def _on_version_changed(self, version):
         if not version or not XESPRESSO_AVAILABLE:

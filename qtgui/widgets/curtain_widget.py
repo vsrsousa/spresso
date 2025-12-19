@@ -1,5 +1,6 @@
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QToolButton, QLabel, QFrame
 from qtpy.QtCore import Qt
+from qtpy.QtGui import QFont
 
 
 class CurtainWidget(QWidget):
@@ -14,6 +15,7 @@ class CurtainWidget(QWidget):
     def __init__(self, title: str = '', parent=None, expanded: bool = True):
         super().__init__(parent)
         self._expanded = bool(expanded)
+        # simple curtain: toggle then title label
 
         self.main = QVBoxLayout(self)
         self.main.setContentsMargins(0, 0, 0, 0)
@@ -28,18 +30,25 @@ class CurtainWidget(QWidget):
         self.toggle.setArrowType(Qt.DownArrow if self._expanded else Qt.RightArrow)
         self.toggle.clicked.connect(self._on_toggled)
 
-        self.title = QLabel(str(title))
-        self.title.setObjectName('curtainTitle')
+        # Title label placed beside the toggle (compact, consistent placement)
+        display = str(title)
+        self.title_label = QLabel(display)
+        self.title_label.setObjectName('curtainHeader')
+        try:
+            f = self.title_label.font()
+            f.setBold(True)
+            self.title_label.setFont(f)
+        except Exception:
+            pass
 
-        header.addWidget(self.toggle, 0, Qt.AlignLeft)
-        header.addWidget(self.title, 1, Qt.AlignLeft)
+        # No icon label: only show the title text beside the toggle
+        self.icon_label = None
+
+        # Place the toggle at the left, then title, with stretch to the right.
+        header.addWidget(self.toggle)
+        header.addWidget(self.title_label)
         header.addStretch()
-
-        header_widget = QWidget()
-        header_widget.setLayout(header)
-        header_widget.setObjectName('curtainHeader')
-
-        self.main.addWidget(header_widget)
+        self.main.addLayout(header)
 
         # Content area
         self.content = QFrame()
@@ -59,4 +68,11 @@ class CurtainWidget(QWidget):
         self.content.setVisible(self._expanded)
 
     def setTitle(self, title: str):
-        self.title.setText(str(title))
+        try:
+            self.title_label.setText(str(title))
+        except Exception:
+            pass
+
+    def setIcon(self, icon: str):
+        # Icon support removed; no-op kept for API compatibility.
+        return

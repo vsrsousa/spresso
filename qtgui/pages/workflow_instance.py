@@ -13,6 +13,10 @@ from qtgui.calculations.preparation import prepare_calculation_from_gui
 class WorkflowInstancePage(QWidget):
     """A session tab for configuring and running a workflow instance."""
 
+    # Signals for thread-safe GUI updates from worker threads
+    status_changed = Signal(str)
+    log_signal = Signal(str)
+
     def __init__(self, session_state, preset_name: str, parent=None):
         super().__init__(parent)
         self.session = session_state
@@ -36,6 +40,9 @@ class WorkflowInstancePage(QWidget):
             self.config_widget.changed.connect(self._save_draft)
         except Exception:
             pass
+
+        # (signals are class attributes; connections to widgets happen below
+        # after those widgets are created)
 
         # Provide a simple compatibility proxy named `machine_edit` so tests
         # and older UI code can set the machine via `setText()` on the page.
@@ -241,6 +248,16 @@ class WorkflowInstancePage(QWidget):
         self.log.setReadOnly(True)
         layout.addWidget(self.log)
 
+        # Connect thread-safe signals to UI updaters
+        try:
+            self.status_changed.connect(self.status.setText)
+        except Exception:
+            pass
+        try:
+            self.log_signal.connect(self._append_log)
+        except Exception:
+            pass
+
     def _append_log(self, text: str):
         self.log.append(text)
 
@@ -420,17 +437,17 @@ class WorkflowInstancePage(QWidget):
 
         def _worker():
             try:
-                self.status.setText("Running")
+                self.status_changed.emit("Running")
             except Exception:
                 pass
             results = runner.run_all()
             try:
-                self.status.setText("Finished")
+                self.status_changed.emit("Finished")
             except Exception:
                 pass
             for r in results:
                 try:
-                    self._append_log(str(r))
+                    self.log_signal.emit(str(r))
                 except Exception:
                     pass
             # store run summary in session
@@ -481,7 +498,7 @@ class WorkflowInstancePage(QWidget):
 
         def _prepare_worker():
             try:
-                self.status.setText("Preparing")
+                self.status_changed.emit("Preparing")
             except Exception:
                 pass
             try:
@@ -510,15 +527,21 @@ class WorkflowInstancePage(QWidget):
                     except Exception:
                         pass
 
-                self._append_log(f"Prepared calculation '{label}' successfully")
                 try:
-                    self.status.setText("Prepared")
+                    self.log_signal.emit(f"Prepared calculation '{label}' successfully")
+                except Exception:
+                    pass
+                try:
+                    self.status_changed.emit("Prepared")
                 except Exception:
                     pass
             except Exception as e:
-                self._append_log(f"Failed to prepare calculation: {e}")
                 try:
-                    self.status.setText("Prepare Failed")
+                    self.log_signal.emit(f"Failed to prepare calculation: {e}")
+                except Exception:
+                    pass
+                try:
+                    self.status_changed.emit("Prepare Failed")
                 except Exception:
                     pass
 

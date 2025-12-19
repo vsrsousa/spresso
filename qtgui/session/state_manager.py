@@ -9,6 +9,30 @@ import json
 import re
 from datetime import datetime
 
+# Optional Qt invoker to ensure session listeners run on the Qt main thread.
+# If Qt is not available (tests or headless contexts), fall back to
+# synchronous invocation.
+try:
+    from qtpy.QtCore import QObject, Signal as _QtSignal, Qt, QCoreApplication
+
+    class _Invoker(QObject):
+        invoke = _QtSignal(object, tuple, dict)
+
+        def __init__(self):
+            super().__init__()
+            # Ensure calls are delivered to the Qt event loop thread
+            self.invoke.connect(self._handle_invoke, Qt.QueuedConnection)
+
+        def _handle_invoke(self, fn, args, kwargs):
+            try:
+                fn(*args, **(kwargs or {}))
+            except Exception:
+                pass
+
+    _INVOKER = _Invoker()
+except Exception:
+    _INVOKER = None
+
 
 # Default session data directory
 DEFAULT_SESSIONS_DIR = os.path.expanduser("~/.xespresso/sessions")
@@ -166,7 +190,25 @@ class SessionState:
         try:
             for listener in self._listeners:
                 try:
-                    listener()
+                    if _INVOKER is not None and QCoreApplication.instance() is not None:
+                        try:
+                            _INVOKER.invoke.emit(listener, (), {})
+                            # Try to process events immediately so queued calls run
+                            try:
+                                QCoreApplication.processEvents()
+                            except Exception:
+                                pass
+                        except Exception:
+                            try:
+                                listener()
+                            except Exception:
+                                pass
+                    else:
+                        # No Qt event loop available — call synchronously
+                        try:
+                            listener()
+                        except Exception:
+                            pass
                 except Exception:
                     pass
         finally:

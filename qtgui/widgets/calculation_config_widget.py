@@ -11,12 +11,14 @@ from typing import Dict
 
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox,
-    QGroupBox, QFormLayout, QDoubleSpinBox, QHBoxLayout, QPushButton,
-    QDialog
+    QFormLayout, QDoubleSpinBox, QHBoxLayout, QPushButton,
+    QDialog, QWidget as QtWidget, QGroupBox
 )
 from qtpy.QtCore import Signal
 
 logger = logging.getLogger(__name__)
+
+from qtgui.widgets.curtain_widget import CurtainWidget
 
 # Optional selector import
 try:
@@ -66,9 +68,10 @@ class CalculationConfigWidget(QWidget):
     def _init_ui(self):
         main = QVBoxLayout(self)
 
-        # Machine / version / code group (minimal)
-        env = QGroupBox('Machine')
-        env_layout = QFormLayout(env)
+        # Machine / version / code group (minimal) inside a curtain
+        env_curtain = CurtainWidget('Machine')
+        env_widget = QtWidget()
+        env_layout = QFormLayout(env_widget)
         self.machine_combo = QComboBox(); self.machine_combo.setEditable(True)
         self.machine_combo.currentTextChanged.connect(self._on_machine_changed)
         env_layout.addRow('Machine:', self.machine_combo)
@@ -78,11 +81,13 @@ class CalculationConfigWidget(QWidget):
         env_layout.addRow('QE Version:', self.version_combo)
         self.code_combo = QComboBox(); self.code_combo.currentTextChanged.connect(lambda v: self.changed.emit())
         env_layout.addRow('Code:', self.code_combo)
-        main.addWidget(env)
+        env_curtain.content_layout.addWidget(env_widget)
+        main.addWidget(env_curtain)
 
-        # Pseudopotentials group
-        pseudo_group = QGroupBox('🔬 Pseudopotentials')
-        pseudo_layout = QVBoxLayout(pseudo_group)
+        # Pseudopotentials group inside a curtain
+        pseudo_curtain = CurtainWidget('🔬 Pseudopotentials')
+        pseudo_widget = QtWidget()
+        pseudo_layout = QVBoxLayout(pseudo_widget)
 
         if PSEUDO_SELECTOR_AVAILABLE:
             # instantiate selector exactly as in CalculationSetupPage
@@ -111,11 +116,12 @@ class CalculationConfigWidget(QWidget):
             self.pseudo_selector = None
             self.pseudo_info_label = QLabel('Load a structure to configure pseudopotentials')
             pseudo_layout.addWidget(self.pseudo_info_label)
-            self.pseudo_container = QWidget()
+            self.pseudo_container = QtWidget()
             self.pseudo_container_layout = QFormLayout(self.pseudo_container)
             pseudo_layout.addWidget(self.pseudo_container)
 
-        main.addWidget(pseudo_group)
+        pseudo_curtain.content_layout.addWidget(pseudo_widget)
+        main.addWidget(pseudo_curtain)
 
         # Protocol + label
         row = QHBoxLayout()

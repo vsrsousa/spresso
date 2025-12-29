@@ -86,12 +86,27 @@ class CalculationConfigWidget(QWidget):
         self.code_combo = QComboBox(); self.code_combo.currentTextChanged.connect(lambda v: self.changed.emit())
         env_layout.addRow('Code:', self.code_combo)
         env_curtain.content_layout.addWidget(env_widget)
-        main.addWidget(env_curtain)
 
         # Pseudopotentials group inside a curtain
         pseudo_curtain = CurtainWidget('Pseudopotentials')
         pseudo_widget = QtWidget()
         pseudo_layout = QVBoxLayout(pseudo_widget)
+
+        # Place Execution Environment and Pseudopotentials side-by-side
+        try:
+            container = QtWidget()
+            cont_layout = QHBoxLayout(container)
+            cont_layout.setContentsMargins(0, 0, 0, 0)
+            # Ensure both curtains expand and share space
+            env_curtain.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            pseudo_curtain.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            cont_layout.addWidget(env_curtain, 1)
+            cont_layout.addWidget(pseudo_curtain, 1)
+            main.addWidget(container)
+        except Exception:
+            # fallback: add sequentially
+            main.addWidget(env_curtain)
+            main.addWidget(pseudo_curtain)
 
         if PSEUDO_SELECTOR_AVAILABLE:
             # instantiate selector exactly as in CalculationSetupPage

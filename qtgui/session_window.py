@@ -18,6 +18,35 @@ from .session import controllers as session_controllers
 from .ui_components import create_sidebar, setup_menu, setup_toolbar, setup_statusbar
 from .ui_components.window_focus import apply_focus_decorator
 
+def _get_package_version():
+    """Return the package version using importlib.metadata or setup.py fallback."""
+    try:
+        try:
+            from importlib import metadata as _metadata
+        except Exception:
+            import importlib_metadata as _metadata
+        try:
+            return _metadata.version("spresso")
+        except Exception:
+            try:
+                return _metadata.version("xespresso")
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Fallback: parse setup.py in repository root
+    try:
+        import re
+        from pathlib import Path
+        p = Path(__file__).resolve().parent.parent / "setup.py"
+        txt = p.read_text(encoding="utf-8")
+        m = re.search(r"version\s*=\s*['\"]([^'\"]+)['\"]", txt)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "unknown"
+
 
 # Lazy import helper for page modules (copied here to avoid circular imports)
 _page_modules = {}
@@ -899,13 +928,14 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         """Show about dialog."""
+        ver = _get_package_version()
         QMessageBox.about(
             self,
             "About xespresso GUI",
-            """<h2>xespresso GUI</h2>
-<p><b>Version:</b> 1.2.0</p>
-<p>PySide6 interface for Quantum ESPRESSO calculations.</p>
-"""
+            f"""<h2>xespresso GUI</h2>
+    <p><b>Version:</b> {ver}</p>
+    <p>PySide6 interface for Quantum ESPRESSO calculations.</p>
+    """
         )
 
     def _get_job_monitor(self):

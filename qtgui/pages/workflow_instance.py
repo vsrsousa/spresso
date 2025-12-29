@@ -535,6 +535,42 @@ class WorkflowInstancePage(QWidget):
                     self.status_changed.emit("Prepared")
                 except Exception:
                     pass
+                try:
+                    # Update config preview with a short summary in the main thread
+                    def _show_preview():
+                        try:
+                            txt = []
+                            try:
+                                txt.append(f"Prepared: {label}")
+                            except Exception:
+                                pass
+                            try:
+                                f = prepared_atoms.get_chemical_formula()
+                                txt.append(f"Formula: {f}")
+                            except Exception:
+                                pass
+                            try:
+                                d = getattr(calc, 'directory', None) or getattr(calc, 'workdir', None) or 'n/a'
+                                txt.append(f"Calculator dir: {d}")
+                            except Exception:
+                                pass
+                            try:
+                                self.config_preview.setPlainText('\n'.join(txt))
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+                    from qtpy.QtCore import QTimer
+                    QTimer.singleShot(0, _show_preview)
+                except Exception:
+                    pass
+                try:
+                    # debug marker
+                    with open('/tmp/xespresso_prepare_called.txt', 'a', encoding='utf-8') as _f:
+                        import time
+                        _f.write(f"{time.asctime()} PREPARED {label}\n")
+                except Exception:
+                    pass
             except Exception as e:
                 try:
                     self.log_signal.emit(f"Failed to prepare calculation: {e}")

@@ -5,14 +5,18 @@ This page creates multi-step workflows using the GUIWorkflow class.
 """
 
 import os
+import threading
+import tempfile
+import time
+import logging
 
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
     QMessageBox, QScrollArea, QFrame, QDoubleSpinBox,
-    QSpinBox, QCheckBox, QTextEdit, QRadioButton
+    QSpinBox, QCheckBox, QTextEdit, QRadioButton, QSizePolicy
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 
 try:
     from xespresso.machines.config.loader import (
@@ -44,6 +48,28 @@ try:
 except ImportError:
     WORKFLOW_AVAILABLE = False
 
+# Runtime import marker for debugging which file is loaded at runtime
+try:
+    logging.getLogger(__name__).info(f"workflow_builder imported: {__file__}")
+except Exception:
+    pass
+try:
+    with open('/tmp/xespresso_workflow_builder_loaded.txt', 'a', encoding='utf-8') as _f:
+        _f.write(f"{time.asctime()} IMPORTED {__file__}\n")
+except Exception:
+    pass
+try:
+    print("XESPRESSO: workflow_builder imported from", __file__)
+except Exception:
+    pass
+
+# prepare helper
+try:
+    from qtgui.calculations.preparation import prepare_calculation_from_gui
+    PREPARE_AVAILABLE = True
+except Exception:
+    PREPARE_AVAILABLE = False
+
 
 class WorkflowBuilderPage(QWidget):
     """Workflow builder page widget."""
@@ -66,7 +92,7 @@ class WorkflowBuilderPage(QWidget):
         scroll_layout = QVBoxLayout(scroll_widget)
         
         # Header
-        header_label = QLabel("<h2>🔄 Workflow Builder</h2>")
+        header_label = QLabel("<h2>🔄 Workflow Builder — (modified)</h2>")
         header_label.setTextFormat(Qt.RichText)
         scroll_layout.addWidget(header_label)
         
@@ -111,7 +137,7 @@ class WorkflowBuilderPage(QWidget):
         self.code_combo = QComboBox()
         env_layout.addRow("Code:", self.code_combo)
         
-        scroll_layout.addWidget(env_group)
+        # Execution and pseudopotentials will be placed side-by-side below
         
         # Workflow Type
         workflow_group = QGroupBox("🔧 Workflow Type")
@@ -224,7 +250,21 @@ class WorkflowBuilderPage(QWidget):
             self.pseudo_container_layout = QFormLayout(self.pseudo_container)
             pseudo_layout.addWidget(self.pseudo_container)
         
-        scroll_layout.addWidget(pseudo_group)
+        # Place Execution Environment and Pseudopotentials side-by-side
+        try:
+            container = QWidget()
+            container_layout = QHBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            # Ensure groups expand horizontally and share space
+            env_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            pseudo_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            container_layout.addWidget(env_group, 1)
+            container_layout.addWidget(pseudo_group, 1)
+            scroll_layout.addWidget(container)
+        except Exception:
+            # fallback: add sequentially
+            scroll_layout.addWidget(env_group)
+            scroll_layout.addWidget(pseudo_group)
         
         # Magnetic Configuration (optional)
         self.magnetic_group = QGroupBox("🧲 Magnetic Configuration (Optional)")
@@ -320,6 +360,11 @@ class WorkflowBuilderPage(QWidget):
         build_btn.clicked.connect(self._build_workflow)
         build_layout.addWidget(build_btn)
 
+        # Prepare Calculation button (runs preparation and stores results)
+        prepare_btn = QPushButton("🔧 Prepare Calculation")
+        prepare_btn.clicked.connect(self._on_prepare)
+        build_layout.addWidget(prepare_btn)
+
         # Save / Load workflow buttons
         save_btn = QPushButton("💾 Save Workflow")
         save_btn.clicked.connect(self._save_workflow)
@@ -328,13 +373,16 @@ class WorkflowBuilderPage(QWidget):
         load_btn = QPushButton("📂 Load Workflow")
         load_btn.clicked.connect(self._load_workflow)
         build_layout.addWidget(load_btn)
+
+        # Results box (shows prepare/build messages) placed under the buttons
+        self.results_box = QTextEdit()
+        self.results_box.setReadOnly(True)
+        self.results_box.setMaximumHeight(140)
+        build_layout.addWidget(self.results_box)
         
         scroll_layout.addWidget(build_group)
         
-        # Results area
-        self.results_label = QLabel("")
-        self.results_label.setWordWrap(True)
-        scroll_layout.addWidget(self.results_label)
+        # Results area moved into Build Workflow group as `results_box`
         
         # Workflow summary
         summary_group = QGroupBox("📊 Current Workflow")
@@ -355,6 +403,84 @@ class WorkflowBuilderPage(QWidget):
         # Load initial data
         self._load_machines()
         self._update_structure_status()
+
+    def _on_prepare(self):
+        """Prepare calculation objects and store results in session_state.
+
+        Runs prepare_calculation_from_gui in a background thread and stores
+        resulting objects in the session state under `espresso_calculator`
+        and `prepared_atoms`. Appends a small run summary to `workflow_runs`.
+        """
+        # Import helper at call time to avoid import-time failures
+        try:
+            from qtgui.calculations.preparation import prepare_calculation_from_gui
+        except Exception as e:
+            QMessageBox.warning(self, "Prepare", f"Could not import prepare helper: {e}")
+            return
+
+        atoms = self.session_state.get('current_structure')
+        if atoms is None:
+            QMessageBox.warning(self, "Prepare", "No structure loaded — cannot prepare calculation")
+            return
+
+        cfg = self.session_state.get('workflow_config')
+        if cfg is None:
+            wf = self._build_workflow_descriptor(return_obj=True)
+            cfg = wf.get('config', {}) if wf else {}
+
+        try:
+            label = wf.get('base_label') if 'wf' in locals() and wf else None
+        except Exception:
+            label = None
+        if not label:
+            try:
+                formula = atoms.get_chemical_formula()
+            except Exception:
+                formula = 'structure'
+            label = f"prepare/{formula}"
+
+        # Immediate UX feedback
+            try:
+                self.results_box.setPlainText("Preparing...")
+            except Exception:
+                pass
+
+        def _prepare_worker():
+            try:
+                prepared_atoms, calc = prepare_calculation_from_gui(atoms, cfg, label=label)
+                # store in session_state
+                try:
+                    runs = self.session_state.get('workflow_runs') or []
+                except Exception:
+                    runs = []
+                runs.append({"label": label, "prepared": True})
+                try:
+                    self.session_state['workflow_runs'] = runs
+                    self.session_state['espresso_calculator'] = calc
+                    self.session_state['prepared_atoms'] = prepared_atoms
+                except Exception:
+                    try:
+                        setattr(self.session_state, 'workflow_runs', runs)
+                        setattr(self.session_state, 'espresso_calculator', calc)
+                        setattr(self.session_state, 'prepared_atoms', prepared_atoms)
+                    except Exception:
+                        pass
+
+                # Notify user in main thread
+                QTimer.singleShot(0, lambda: QMessageBox.information(self, "Prepare", f"Prepared '{label}'"))
+                QTimer.singleShot(0, lambda: self.results_box.setPlainText(f"Prepared '{label}'"))
+            except Exception as e:
+                QTimer.singleShot(0, lambda: QMessageBox.warning(self, "Prepare", f"Prepare failed: {e}"))
+                QTimer.singleShot(0, lambda: self.results_box.setPlainText(f"Prepare failed: {e}"))
+
+        th = threading.Thread(target=_prepare_worker, daemon=True)
+        th.start()
+        # marker for debugging clicks
+        try:
+            with open('/tmp/xespresso_prepare_called.txt', 'a', encoding='utf-8') as _f:
+                _f.write(f"{time.asctime()} PREPARE_CLICKED {label}\n")
+        except Exception:
+            pass
 
     # -- Persistence helpers -------------------------------------------------
     def _workflows_dir(self):
@@ -932,7 +1058,7 @@ QE Version: {config.get('qe_version', 'Not selected')}
 Calculators created: {len(workflow.calculations)}
 """)
             
-            self.results_label.setText(f"""
+            self.results_box.setHtml(f"""
 ✅ <b>Workflow built successfully!</b>
 
 The GUIWorkflow object has been created with {len(workflow.calculations)} calculation step(s).
@@ -940,8 +1066,7 @@ Each step has its own Espresso calculator object ready to use.
 
 Go to <b>Job Submission</b> page to execute the workflow steps.
 """)
-            self.results_label.setStyleSheet("color: green;")
-            self.results_label.setTextFormat(Qt.RichText)
+            self.results_box.setStyleSheet("color: green;")
             
             QMessageBox.information(
                 self,

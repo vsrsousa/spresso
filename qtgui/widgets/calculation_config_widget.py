@@ -13,8 +13,9 @@ from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, QComboBox,
     QFormLayout, QDoubleSpinBox, QHBoxLayout, QPushButton,
     QDialog, QWidget as QtWidget, QGroupBox, QSpinBox,
-    QRadioButton
+    QRadioButton, QScrollArea
 )
+from qtpy.QtWidgets import QSizePolicy
 from qtpy.QtCore import Signal, Qt
 
 logger = logging.getLogger(__name__)
@@ -72,41 +73,30 @@ class CalculationConfigWidget(QWidget):
     def _init_ui(self):
         main = QVBoxLayout(self)
 
-        # Machine / version / code group (minimal) inside a curtain
-        env_curtain = CurtainWidget('Execution Environment')
-        env_widget = QtWidget()
-        env_layout = QFormLayout(env_widget)
-        self.machine_combo = QComboBox(); self.machine_combo.setEditable(True)
-        self.machine_combo.currentTextChanged.connect(self._on_machine_changed)
-        env_layout.addRow('Machine:', self.machine_combo)
+        # Machine / version / code group (Execution) and Pseudopotentials
+        # presented side-by-side using simple group boxes (no curtains).
+        # Hidden execution controls removed — widgets are not created.
+        # Keep a machine info label for summaries but do not expose
+        # editable combo boxes in the widget hierarchy.
+        self.machine_combo = None
+        self.version_combo = None
+        self.code_combo = None
         self.machine_info_label = QLabel("")
-        env_layout.addRow(self.machine_info_label)
-        self.version_combo = QComboBox(); self.version_combo.currentTextChanged.connect(self._on_version_changed)
-        env_layout.addRow('QE Version:', self.version_combo)
-        self.code_combo = QComboBox(); self.code_combo.currentTextChanged.connect(lambda v: self.changed.emit())
-        env_layout.addRow('Code:', self.code_combo)
-        env_curtain.content_layout.addWidget(env_widget)
 
-        # Pseudopotentials group inside a curtain
-        pseudo_curtain = CurtainWidget('Pseudopotentials')
+        # Execution and Pseudopotentials UI suppressed here —
+        # these controls are managed by the Workflow tab buttons
+        # (Set Machine / Set Pseudopotentials) and shown in dedicated dialogs.
+        # We still create the underlying widgets above so other code can
+        # interact with `self.machine_combo`, `self.version_combo`,
+        # `self.code_combo` and the pseudopotential selector, but they are
+        # intentionally not added to the main layout.
         pseudo_widget = QtWidget()
         pseudo_layout = QVBoxLayout(pseudo_widget)
-
-        # Place Execution Environment and Pseudopotentials side-by-side
+        pseudo_layout.setContentsMargins(4, 4, 4, 4)
         try:
-            container = QtWidget()
-            cont_layout = QHBoxLayout(container)
-            cont_layout.setContentsMargins(0, 0, 0, 0)
-            # Ensure both curtains expand and share space
-            env_curtain.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            pseudo_curtain.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            cont_layout.addWidget(env_curtain, 1)
-            cont_layout.addWidget(pseudo_curtain, 1)
-            main.addWidget(container)
+            pseudo_widget.setMinimumHeight(300)
         except Exception:
-            # fallback: add sequentially
-            main.addWidget(env_curtain)
-            main.addWidget(pseudo_curtain)
+            pass
 
         if PSEUDO_SELECTOR_AVAILABLE:
             # instantiate selector exactly as in CalculationSetupPage
@@ -139,8 +129,8 @@ class CalculationConfigWidget(QWidget):
             self.pseudo_container_layout = QFormLayout(self.pseudo_container)
             pseudo_layout.addWidget(self.pseudo_container)
 
-        pseudo_curtain.content_layout.addWidget(pseudo_widget)
-        main.addWidget(pseudo_curtain)
+        # (No curtain fallback needed — pseudopotentials widget placed
+        # inside `pseudo_box` above.)
 
         # Label (separate row) - show above protocol per user request
         label_row = QHBoxLayout()
@@ -218,6 +208,55 @@ class CalculationConfigWidget(QWidget):
         row2_l.addWidget(lbl_smear); row2_l.addWidget(self.smearing_combo)
         row2_l.addWidget(lbl_degauss); row2_l.addWidget(self.degauss_spin)
         pform.addRow(row2)
+
+        # Row 3: Force/Stress toggles and advanced control parameters
+        self.calc_forces_chk = None
+        self.calc_stress_chk = None
+        try:
+            from qtpy.QtWidgets import QCheckBox
+            self.calc_forces_chk = QCheckBox()
+            self.calc_forces_chk.setToolTip('Print forces (sets tprnfor = True)')
+            self.calc_stress_chk = QCheckBox()
+            self.calc_stress_chk.setToolTip('Print stress (sets tstress = True)')
+        except Exception:
+            self.calc_forces_chk = None
+            self.calc_stress_chk = None
+
+        # Advanced control parameters
+        self.verbosity_combo = QComboBox()
+        self.verbosity_combo.addItems(['low', 'normal', 'high'])
+        self.restart_mode_combo = QComboBox()
+        self.restart_mode_combo.addItems(['from_scratch', 'restart'])
+        self.disk_io_combo = QComboBox()
+        self.disk_io_combo.addItems(['none', 'low', 'medium', 'high'])
+        self.max_steps_spin = QSpinBox(); self.max_steps_spin.setRange(1, 100000); self.max_steps_spin.setValue(100)
+        self.mixing_mode_combo = QComboBox(); self.mixing_mode_combo.addItems(['plain', 'local-TF', 'TF'])
+        self.mixing_beta = QDoubleSpinBox(); self.mixing_beta.setRange(0.0, 1.0); self.mixing_beta.setSingleStep(0.05); self.mixing_beta.setValue(0.7)
+
+        row3 = QtWidget(); row3_l = QHBoxLayout(row3); row3_l.setContentsMargins(0,0,0,0); row3_l.setSpacing(6)
+        row3_l.addWidget(QLabel('Forces:'))
+        row3_l.addWidget(self.calc_forces_chk)
+        row3_l.addWidget(QLabel('Stress:'))
+        row3_l.addWidget(self.calc_stress_chk)
+        row3_l.addWidget(QLabel('Verbosity:'))
+        row3_l.addWidget(self.verbosity_combo)
+        pform.addRow(row3)
+
+        row4 = QtWidget(); row4_l = QHBoxLayout(row4); row4_l.setContentsMargins(0,0,0,0); row4_l.setSpacing(6)
+        row4_l.addWidget(QLabel('Restart:'))
+        row4_l.addWidget(self.restart_mode_combo)
+        row4_l.addWidget(QLabel('Disk IO:'))
+        row4_l.addWidget(self.disk_io_combo)
+        row4_l.addWidget(QLabel('Max steps:'))
+        row4_l.addWidget(self.max_steps_spin)
+        pform.addRow(row4)
+
+        row5 = QtWidget(); row5_l = QHBoxLayout(row5); row5_l.setContentsMargins(0,0,0,0); row5_l.setSpacing(6)
+        row5_l.addWidget(QLabel('Mixing:'))
+        row5_l.addWidget(self.mixing_mode_combo)
+        row5_l.addWidget(QLabel('Beta:'))
+        row5_l.addWidget(self.mixing_beta)
+        pform.addRow(row5)
 
         # Kpoints mode and values compact
         # K-spacing: keep only k-spacing control and show computed k-mesh
@@ -554,33 +593,164 @@ class CalculationConfigWidget(QWidget):
         Returns a dict suitable for merging into a workflow configuration.
         """
         out = {}
+        # Prefer session-level defaults or per-preset saved draft when
+        # the in-widget controls are not present (we removed visible
+        # Execution/Pseudopotentials widgets). This keeps summaries and
+        # preparation logic functional even without hidden widgets.
         try:
-            out['machine_name'] = self.machine_combo.currentText()
+            store = self.session.get('workflow_tabs_config') or {}
+            preset_cfg = store.get(self.preset_name, {}) if self.preset_name else {}
+        except Exception:
+            preset_cfg = {}
+
+        try:
+            out['machine_name'] = self.session.get('current_machine_name') or preset_cfg.get('machine_name')
         except Exception:
             out['machine_name'] = None
         try:
-            out['code'] = self.code_combo.currentText()
+            # codes may be stored as a dict under 'current_codes' or in the preset
+            cur_codes = self.session.get('current_codes')
+            out['code'] = None
+            if isinstance(cur_codes, dict):
+                # try to extract a single code name if present
+                out['code'] = cur_codes.get('pw') or next(iter(cur_codes.keys()), None)
+            if not out['code']:
+                out['code'] = preset_cfg.get('code')
         except Exception:
             out['code'] = None
         try:
-            out['protocol'] = self.protocol_combo.currentText()
+            out['protocol'] = self.protocol_combo.currentText() if getattr(self, 'protocol_combo', None) is not None else preset_cfg.get('protocol')
         except Exception:
             out['protocol'] = None
         try:
-            out['label'] = self.label_edit.text().strip() or None
+            out['label'] = self.label_edit.text().strip() or preset_cfg.get('label')
         except Exception:
             out['label'] = None
         try:
             out['ecutwfc'] = float(self.ecutwfc_spin.value())
         except Exception:
             out['ecutwfc'] = None
+        try:
+            out['kspacing'] = float(self.kspacing_spin.value()) if getattr(self, 'kspacing_spin', None) is not None else None
+        except Exception:
+            out['kspacing'] = None
+
+        # Include queue/machine object if loaded in session (helps prepare pick up execution settings)
+        try:
+            mq = self.session.get('calc_machine') or self.session.get('selected_machine')
+            # If machine object present, convert to queue configuration using to_queue()
+            if hasattr(mq, 'to_queue'):
+                try:
+                    out['queue'] = mq.to_queue()
+                except Exception:
+                    out['queue'] = mq
+            else:
+                out['queue'] = mq
+        except Exception:
+            out['queue'] = None
+        # Basic parameters continued
+        try:
+            out['ecutrho'] = float(self.ecutrho_spin.value()) if getattr(self, 'ecutrho_spin', None) is not None else None
+        except Exception:
+            out['ecutrho'] = None
+        try:
+            out['conv_thr'] = float(self.conv_thr_edit.text()) if getattr(self, 'conv_thr_edit', None) is not None else None
+        except Exception:
+            out['conv_thr'] = None
+        try:
+            out['occupations'] = self.occupations_combo.currentText() if getattr(self, 'occupations_combo', None) is not None else None
+        except Exception:
+            out['occupations'] = None
+        try:
+            if out.get('occupations') == 'smearing':
+                out['smearing'] = self.smearing_combo.currentText() if getattr(self, 'smearing_combo', None) is not None else None
+                out['degauss'] = float(self.degauss_spin.value()) if getattr(self, 'degauss_spin', None) is not None else None
+        except Exception:
+            pass
+        # Force / stress printing flags
+        try:
+            out['tprnfor'] = bool(self.calc_forces_chk.isChecked()) if getattr(self, 'calc_forces_chk', None) is not None else bool(preset_cfg.get('tprnfor', False))
+        except Exception:
+            out['tprnfor'] = False
+        try:
+            out['tstress'] = bool(self.calc_stress_chk.isChecked()) if getattr(self, 'calc_stress_chk', None) is not None else bool(preset_cfg.get('tstress', False))
+        except Exception:
+            out['tstress'] = False
+
+        # Additional control parameters
+        try:
+            out['verbosity'] = self.verbosity_combo.currentText() if getattr(self, 'verbosity_combo', None) is not None else None
+        except Exception:
+            out['verbosity'] = None
+        try:
+            out['restart_mode'] = self.restart_mode_combo.currentText() if getattr(self, 'restart_mode_combo', None) is not None else None
+        except Exception:
+            out['restart_mode'] = None
+        try:
+            out['disk_io'] = self.disk_io_combo.currentText() if getattr(self, 'disk_io_combo', None) is not None else None
+        except Exception:
+            out['disk_io'] = None
+        try:
+            out['max_steps'] = int(self.max_steps_spin.value()) if getattr(self, 'max_steps_spin', None) is not None else None
+        except Exception:
+            out['max_steps'] = None
+        try:
+            out['mixing_mode'] = self.mixing_mode_combo.currentText() if getattr(self, 'mixing_mode_combo', None) is not None else None
+        except Exception:
+            out['mixing_mode'] = None
+        try:
+            out['mixing_beta'] = float(self.mixing_beta.value()) if getattr(self, 'mixing_beta', None) is not None else None
+        except Exception:
+            out['mixing_beta'] = None
+        # QE version and selected code
+        try:
+            out['qe_version'] = preset_cfg.get('qe_version') or self.session.get('selected_qe_version')
+        except Exception:
+            out['qe_version'] = None
+        try:
+            out['selected_code'] = preset_cfg.get('selected_code') or out.get('code')
+        except Exception:
+            out['selected_code'] = None
+
+        # Attempt to load modules from codes configuration (if available)
+        try:
+            machine_name = out.get('machine_name')
+            version = out.get('qe_version')
+            modules = None
+            if machine_name and version and XESPRESSO_AVAILABLE:
+                try:
+                    codes = load_codes_config(machine_name, DEFAULT_CODES_DIR, version=version, verbose=False)
+                    if codes:
+                        # Prefer versioned config dict
+                        vers = getattr(codes, 'versions', None)
+                        if vers and version in vers:
+                            modules = vers[version].get('modules')
+                        else:
+                            # fallback: some managers expose get_version_config
+                            try:
+                                vc = getattr(codes, 'get_version_config', lambda v: None)(version)
+                                if vc:
+                                    modules = vc.get('modules')
+                            except Exception:
+                                pass
+                except Exception:
+                    modules = None
+            if modules:
+                out['modules'] = modules
+        except Exception:
+            pass
 
         # pseudopotentials mapping
         try:
-            if self.pseudo_selector is not None and hasattr(self.pseudo_selector, 'get_pseudopotentials'):
-                out['pseudopotentials'] = self.pseudo_selector.get_pseudopotentials() or {}
+            # prefer explicit current pseudopotentials stored in session
+            pp_map = self.session.get('current_pseudopotentials') or preset_cfg.get('pseudopotentials') or {}
+            if pp_map:
+                out['pseudopotentials'] = pp_map
             else:
-                out['pseudopotentials'] = {k: v.text().strip() for k, v in self.pseudo_edits.items() if v.text().strip()}
+                if self.pseudo_selector is not None and hasattr(self.pseudo_selector, 'get_pseudopotentials'):
+                    out['pseudopotentials'] = self.pseudo_selector.get_pseudopotentials() or {}
+                else:
+                    out['pseudopotentials'] = {k: v.text().strip() for k, v in getattr(self, 'pseudo_edits', {}).items() if v.text().strip()}
         except Exception:
             out['pseudopotentials'] = {}
 
@@ -594,19 +764,22 @@ class CalculationConfigWidget(QWidget):
             return
         # restore begins
         try:
-            if 'machine_name' in cfg and cfg.get('machine_name'):
+            # Persist machine/code selection into the session draft store
+            try:
+                store = self.session.get('workflow_tabs_config') or {}
+            except Exception:
+                store = getattr(self.session, 'workflow_tabs_config', {}) or {}
+            if self.preset_name:
+                existing = store.get(self.preset_name, {})
+                existing.update({k: v for k, v in cfg.items() if k in ('machine_name', 'code', 'qe_version', 'selected_code', 'pseudopotentials', 'label', 'protocol', 'tprnfor', 'tstress')})
+                store[self.preset_name] = existing
                 try:
-                    self.machine_combo.setCurrentText(cfg.get('machine_name'))
+                    self.session['workflow_tabs_config'] = store
                 except Exception:
-                    pass
-        except Exception:
-            pass
-        try:
-            if 'code' in cfg and cfg.get('code'):
-                try:
-                    self.code_combo.setCurrentText(cfg.get('code'))
-                except Exception:
-                    pass
+                    try:
+                        setattr(self.session, 'workflow_tabs_config', store)
+                    except Exception:
+                        pass
         except Exception:
             pass
 

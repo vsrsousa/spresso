@@ -14,6 +14,8 @@ from xespresso import Espresso
 from xespresso.tools import setup_magnetic_config
 from qtgui.calculations.base import BaseCalculationPreparation
 import logging
+import re
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,26 @@ class CalculationPreparation(BaseCalculationPreparation):
         if config.get("occupations") == "smearing":
             input_data["smearing"] = config.get("smearing", "gaussian")
             input_data["degauss"] = config.get("degauss", 0.02)
+
+        # Print forces / stress flags
+        if "tprnfor" in config:
+            input_data["tprnfor"] = bool(config.get("tprnfor"))
+        if "tstress" in config:
+            input_data["tstress"] = bool(config.get("tstress"))
+
+        # Additional control parameters
+        if "verbosity" in config and config.get("verbosity") is not None:
+            input_data["verbosity"] = config.get("verbosity")
+        if "restart_mode" in config and config.get("restart_mode") is not None:
+            input_data["restart_mode"] = config.get("restart_mode")
+        if "disk_io" in config and config.get("disk_io") is not None:
+            input_data["disk_io"] = config.get("disk_io")
+        if "max_steps" in config and config.get("max_steps") is not None:
+            input_data["max_steps"] = int(config.get("max_steps"))
+        if "mixing_mode" in config and config.get("mixing_mode") is not None:
+            input_data["mixing_mode"] = config.get("mixing_mode")
+        if "mixing_beta" in config and config.get("mixing_beta") is not None:
+            input_data["mixing_beta"] = float(config.get("mixing_beta"))
 
         # Add spin polarization if magnetism is enabled
         if enable_magnetism:
@@ -357,6 +379,101 @@ def dry_run_calculation(
 
     # Write input files using xespresso's method
     calc.write_input(atoms)
+
+    # Post-process generated PW input for SCF calculations to remove
+    # irrelevant empty namelists that some generators include by default.
+    # These include &IONS, &CELL, &FCP, &RISM when they are empty.
+    # Only run this cleaner for pure SCF runs — relax/vc-relax may require
+    # these namelists even if they are minimal.
+    calc_type = config.get("calc_type", "scf")
+    if calc_type == "scf":
+        try:
+            # Always attempt to post-process any generated .pwi input file and remove
+            # empty namelists. This is safe because we only drop namelists that
+            # contain no meaningful entries.
+            pwi_path = None
+            try:
+                pwi_path = getattr(calc, 'pwi', None)
+            except Exception:
+                pwi_path = None
+            if not pwi_path:
+                try:
+                    raw = getattr(calc, '__dict__', {}) or {}
+                    prefix = raw.get('prefix') or raw.get('_prefix')
+                    directory = raw.get('_directory') or raw.get('directory')
+                    if prefix and directory:
+                        cand = os.path.join(directory, f"{prefix}.pwi")
+                        if os.path.exists(cand):
+                            pwi_path = cand
+                except Exception:
+                    pwi_path = None
+
+            if pwi_path and os.path.exists(pwi_path):
+                try:
+                    with open(pwi_path, 'r', encoding='utf-8', errors='replace') as f:
+                        txt = f.read()
+
+                    def _remove_empty_namelists(txt, names):
+                        lines = txt.splitlines(keepends=True)
+                        out_lines = []
+                        i = 0
+                        n = len(lines)
+                        while i < n:
+                            line = lines[i]
+                            stripped_l = line.lstrip()
+                            matched_name = None
+                            for name in names:
+                                if stripped_l.upper().startswith('&' + name.upper()):
+                                    matched_name = name
+                                    break
+                            if matched_name is None:
+                                out_lines.append(line)
+                                i += 1
+                                continue
+                            # found namelist start
+                            start_i = i
+                            i += 1
+                            block_lines = []
+                            found_end = False
+                            while i < n:
+                                ln = lines[i]
+                                if ln.strip() == '/':
+                                    found_end = True
+                                    end_i = i
+                                    i += 1
+                                    break
+                                block_lines.append(ln)
+                                i += 1
+                            if not found_end:
+                                # unterminated — keep original
+                                out_lines.extend(lines[start_i:i])
+                                continue
+                            # determine if block_lines contain any non-empty non-comment lines
+                            useful = False
+                            for bl in block_lines:
+                                s = bl.strip()
+                                if not s:
+                                    continue
+                                if s.startswith('!') or s.startswith('#'):
+                                    continue
+                                useful = True
+                                break
+                            if useful:
+                                # include the whole namelist block
+                                out_lines.extend(lines[start_i:end_i+1])
+                            else:
+                                # drop the namelist entirely (skip)
+                                pass
+                        return ''.join(out_lines)
+
+                    new_txt = _remove_empty_namelists(txt, ['IONS', 'CELL', 'FCP', 'RISM'])
+                    if new_txt != txt:
+                        with open(pwi_path, 'w', encoding='utf-8', errors='replace') as f:
+                            f.write(new_txt)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     logger.info(f"Dry run complete - input files written to {calc.directory}")
 

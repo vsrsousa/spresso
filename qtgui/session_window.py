@@ -221,6 +221,22 @@ class MainWindow(QMainWindow):
 
     def _create_pages(self):
         """Create all page widgets (workflow pages only) using lazy imports."""
+        # Create an empty placeholder so the right-side content area is blank
+        # by default when a session window opens. Real pages are added after
+        # the placeholder and the placeholder remains the initial visible
+        # widget until the user navigates.
+        empty_page = QWidget()
+        try:
+            empty_layout = QVBoxLayout(empty_page)
+            empty_layout.addStretch()
+        except Exception:
+            pass
+        self.content_stack.addWidget(empty_page)
+        try:
+            self.content_stack.setCurrentWidget(empty_page)
+        except Exception:
+            pass
+
         # Create pages in order matching navigation list (Structure viewer is created on demand)
         self.pages = [
             _get_page_class('CalculationSetupPage')(self.session_state),
@@ -462,22 +478,50 @@ class MainWindow(QMainWindow):
     def _view_structure(self):
         """Switch the main content to the Structure Viewer page if available."""
         try:
-            # Create the StructureViewerPage on demand and show it
-            if self._structure_viewer is None:
-                from qtgui.pages.structure_viewer import StructureViewerPage
-                # Create view-only structure viewer so only visualization is shown
-                self._structure_viewer = StructureViewerPage(self.session_state, view_only=True)
-                self.content_stack.addWidget(self._structure_viewer)
-                # If a structure is already loaded in session, ensure viewer displays it
+            # Prefer to show the Structure Viewer as a closable tab inside the
+            # Workflow Tabs page so users can keep it open for inspection.
+            from qtgui.pages.structure_viewer import StructureViewerPage
+            # Find or create a WorkflowTabsPage in the content stack
+            tabs_page = None
+            for i in range(self.content_stack.count()):
+                w = self.content_stack.widget(i)
+                from qtgui.pages.workflow_tabs_page import WorkflowTabsPage
+                if isinstance(w, WorkflowTabsPage):
+                    tabs_page = w
+                    break
+
+            if tabs_page is None:
+                # Create and add a new WorkflowTabsPage
+                from qtgui.pages.workflow_tabs_page import WorkflowTabsPage
+                tabs_page = WorkflowTabsPage(self.session_state)
+                self.content_stack.addWidget(tabs_page)
+
+            # Check if a Structure View tab already exists and focus it
+            for idx in range(tabs_page.tabs.count()):
+                if tabs_page.tabs.tabText(idx) == 'Structure View':
+                    tabs_page.tabs.setCurrentIndex(idx)
+                    self.content_stack.setCurrentWidget(tabs_page)
+                    return True
+
+            # Create a fresh StructureViewerPage and add as a closable tab
+            viewer = StructureViewerPage(self.session_state, view_only=True)
+            title = 'Structure View'
+            idx = tabs_page.tabs.addTab(viewer, title)
+            tabs_page.tabs.setCurrentIndex(idx)
+            # Ensure the viewer shows the current session structure if present
+            try:
                 atoms = self.session_state.get('current_structure')
                 source = self.session_state.get('structure_source')
-                try:
-                    if atoms is not None:
-                        self._structure_viewer._set_structure(atoms, source or '')
-                except Exception:
-                    pass
-            # Switch to the dynamic structure viewer widget
-            self.content_stack.setCurrentWidget(self._structure_viewer)
+                if atoms is not None:
+                    try:
+                        viewer._set_structure(atoms, source or '')
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Make the WorkflowTabsPage visible
+            self.content_stack.setCurrentWidget(tabs_page)
             return True
         except Exception:
             QMessageBox.information(self, "View", "Structure viewer not available.")

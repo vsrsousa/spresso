@@ -1,5 +1,5 @@
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QTextEdit, QCheckBox, QHBoxLayout
+    QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QTextEdit, QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox
 )
 from qtpy.QtCore import Qt, Signal
 import threading
@@ -7,7 +7,20 @@ import tempfile
 
 from xespresso.workflow.tasks import ScfTask, RelaxTask, WorkflowRunner
 from qtgui.widgets.calculation_config_widget import CalculationConfigWidget
+from qtgui.widgets.machine_dialog import MachineDialog
+from qtgui.widgets.pseudopotentials_dialog import PseudopotentialsDialog
 from qtgui.calculations.preparation import prepare_calculation_from_gui
+try:
+    from xespresso.machines.config.loader import load_machine, DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
+    from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
+    XESPRESSO_AVAILABLE = True
+except Exception:
+    load_machine = lambda *a, **k: None
+    load_codes_config = lambda *a, **k: None
+    DEFAULT_CONFIG_PATH = None
+    DEFAULT_MACHINES_DIR = None
+    DEFAULT_CODES_DIR = None
+    XESPRESSO_AVAILABLE = False
 
 
 class WorkflowInstancePage(QWidget):
@@ -33,6 +46,42 @@ class WorkflowInstancePage(QWidget):
         header = QLabel(f"Workflow: {self.preset_name}")
         header.setObjectName("pageTitle")
         layout.addWidget(header)
+        # Quick action buttons and summaries (buttons at top)
+        try:
+            btn_row = QHBoxLayout()
+            self.set_machine_btn = QPushButton('Set Machine')
+            self.set_machine_btn.clicked.connect(self._on_set_machine)
+            btn_row.addWidget(self.set_machine_btn)
+            self.set_pseudo_btn = QPushButton('Set Pseudopotentials')
+            self.set_pseudo_btn.clicked.connect(self._on_set_pseudopotentials)
+            btn_row.addWidget(self.set_pseudo_btn)
+            btn_row.addStretch()
+            layout.addLayout(btn_row)
+
+            # Summaries side-by-side
+            summaries_row = QHBoxLayout()
+            # Machine summary column
+            mcol = QVBoxLayout()
+            mlabel = QLabel('Machine Summary:')
+            self.machine_summary = QTextEdit()
+            self.machine_summary.setReadOnly(True)
+            self.machine_summary.setMaximumHeight(120)
+            mcol.addWidget(mlabel)
+            mcol.addWidget(self.machine_summary)
+            # Pseudopotentials summary column
+            pcol = QVBoxLayout()
+            plabel = QLabel('Pseudopotentials Summary:')
+            self.pseudopotentials_summary = QTextEdit()
+            self.pseudopotentials_summary.setReadOnly(True)
+            self.pseudopotentials_summary.setMaximumHeight(200)
+            pcol.addWidget(plabel)
+            pcol.addWidget(self.pseudopotentials_summary)
+            summaries_row.addLayout(mcol, 1)
+            summaries_row.addLayout(pcol, 2)
+            layout.addLayout(summaries_row)
+        except Exception:
+            pass
+
         # Detailed calculation configuration widget (based on CalculationSetupPage)
         self.config_widget = CalculationConfigWidget(self.session, preset_name=self.preset_name)
         layout.addWidget(self.config_widget)
@@ -226,6 +275,53 @@ class WorkflowInstancePage(QWidget):
         except Exception:
             pass
 
+        # Apply session-level defaults (machine and pseudopotentials) for new tabs
+        try:
+            # Machine default
+            try:
+                cur_machine = self.session.get('current_machine_name')
+                if cur_machine and hasattr(self.config_widget, 'machine_combo'):
+                    try:
+                        self.config_widget.machine_combo.setCurrentText(cur_machine)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Pseudopotentials default mapping
+            try:
+                pp_map = self.session.get('current_pseudopotentials') or {}
+                if pp_map:
+                    if getattr(self.config_widget, 'pseudo_selector', None) is not None and hasattr(self.config_widget.pseudo_selector, 'set_pseudopotentials'):
+                        try:
+                            # ensure selector has inputs for required elements
+                            try:
+                                if hasattr(self.config_widget.pseudo_selector, 'set_elements'):
+                                    self.config_widget.pseudo_selector.set_elements(set(pp_map.keys()))
+                            except Exception:
+                                pass
+                            self.config_widget.pseudo_selector.set_pseudopotentials(pp_map)
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            for k, v in pp_map.items():
+                                if hasattr(self.config_widget, 'pseudo_edits') and k in self.config_widget.pseudo_edits:
+                                    try:
+                                        self.config_widget.pseudo_edits[k].setText(v)
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            try:
+                self._refresh_summaries()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         # Prepare calculation button (creates Espresso calculator objects)
         self.prepare_btn = QPushButton("Prepare Calculation")
         self.prepare_btn.clicked.connect(self._on_prepare)
@@ -291,7 +387,244 @@ class WorkflowInstancePage(QWidget):
         except Exception:
             pass
 
-        return cfg
+    def _refresh_summaries(self):
+        try:
+            cfg = {}
+            try:
+                cfg = self.config_widget.get_config() or {}
+            except Exception:
+                cfg = {}
+            # Machine summary: show machine text and config widget info if available
+            try:
+                machine = cfg.get('machine_name') or self.session.get('current_machine_name') or ''
+                info_lines = []
+                # try to show machine object details if available
+                machine_obj = None
+                try:
+                    machine_obj = self.session.get('current_machine')
+                except Exception:
+                    machine_obj = None
+                if machine_obj is None and machine and XESPRESSO_AVAILABLE:
+                    try:
+                        machine_obj = load_machine(DEFAULT_CONFIG_PATH, machine, DEFAULT_MACHINES_DIR, return_object=True)
+                    except Exception:
+                        machine_obj = None
+
+                if machine:
+                    info_lines.append(str(machine))
+                    try:
+                        if machine_obj is not None:
+                            exec_type = getattr(machine_obj, 'execution', '')
+                            scheduler = getattr(machine_obj, 'scheduler', None)
+                            details = []
+                            if exec_type:
+                                details.append(f"Type: {exec_type}")
+                            if scheduler:
+                                details.append(f"Scheduler: {scheduler}")
+                            if details:
+                                info_lines.append(' | '.join(details))
+                    except Exception:
+                        pass
+
+                    # show selected code and version
+                    try:
+                        code = None
+                        codes_obj = self.session.get('current_codes') or {}
+                        if isinstance(codes_obj, dict) and codes_obj:
+                            code = next(iter(codes_obj.keys()))
+                        # fallback to config widget/preset stored values
+                        if not code:
+                            code = cfg.get('selected_code') or cfg.get('code')
+
+                        version = self.session.get('selected_qe_version') or cfg.get('qe_version')
+
+                        # If still no code but we have machine+version, try to load codes config
+                        if not code and machine and version and XESPRESSO_AVAILABLE:
+                            try:
+                                codes = load_codes_config(machine, DEFAULT_CODES_DIR, version=version, verbose=False)
+                                if codes:
+                                    # Prefer 'pw' if present, else first available
+                                    all_codes = list(codes.get_all_codes(version=version).keys()) if hasattr(codes, 'get_all_codes') else []
+                                    if 'pw' in all_codes:
+                                        code = 'pw'
+                                    elif all_codes:
+                                        code = all_codes[0]
+                                    # persist into session for future use
+                                    try:
+                                        self.session['current_codes'] = {code: True} if code else {}
+                                    except Exception:
+                                        try:
+                                            setattr(self.session, 'current_codes', {code: True} if code else {})
+                                        except Exception:
+                                            pass
+                            except Exception:
+                                pass
+
+                        if code:
+                            if version:
+                                info_lines.append(f"Code: {code} v{version}")
+                            else:
+                                info_lines.append(f"Code: {code}")
+                    except Exception:
+                        pass
+
+                    self.machine_summary.setPlainText('\n'.join(info_lines))
+                else:
+                    self.machine_summary.setPlainText('<No machine selected>')
+            except Exception:
+                try:
+                    self.machine_summary.setPlainText('<Error showing machine>')
+                except Exception:
+                    pass
+            # Pseudopotentials summary
+            try:
+                pp = cfg.get('pseudopotentials') or {}
+                if not pp:
+                    self.pseudopotentials_summary.setPlainText('<No pseudopotentials configured>')
+                else:
+                    lines = [f"{k}: {v}" for k, v in sorted(pp.items())]
+                    self.pseudopotentials_summary.setPlainText('\n'.join(lines))
+            except Exception:
+                try:
+                    self.pseudopotentials_summary.setPlainText('<Error showing pseudopotentials>')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _on_set_machine(self):
+        # Open a modeless machine dialog and apply selection when finished
+        dlg = MachineDialog(session=self.session, parent=None)
+        try:
+            cur = self.config_widget.get_config()
+            if cur and cur.get('machine_name'):
+                try:
+                    dlg.machine_combo.setCurrentText(cur.get('machine_name'))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            self._machine_dialog = dlg
+            dlg.finished.connect(lambda res, dlg=dlg: self._apply_machine_dialog(dlg, res))
+        except Exception:
+            pass
+        dlg.show()
+
+    def _apply_machine_dialog(self, dlg, result):
+        try:
+            if result != QDialog.Accepted:
+                return
+        except Exception:
+            pass
+        try:
+            new_cfg = dlg.get_config() or {}
+            machine = new_cfg.get('machine_name')
+            version = new_cfg.get('version')
+            code = new_cfg.get('code')
+            # Persist selection into session so summaries and prepares pick it up
+            try:
+                if machine:
+                    self.session['current_machine_name'] = machine
+                if version:
+                    self.session['selected_qe_version'] = version
+                if code:
+                    # store as a simple dict so other code can inspect keys
+                    self.session['current_codes'] = {code: True}
+            except Exception:
+                try:
+                    setattr(self.session, 'current_machine_name', machine)
+                    setattr(self.session, 'selected_qe_version', version)
+                    setattr(self.session, 'current_codes', {code: True} if code else None)
+                except Exception:
+                    pass
+
+            try:
+                self._refresh_summaries()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _on_set_pseudopotentials(self):
+        # Open a modeless pseudopotentials dialog, prefilled for the current structure
+        dlg = PseudopotentialsDialog(session=self.session, parent=None)
+        try:
+            atoms = None
+            try:
+                atoms = self.session.get('current_structure')
+            except Exception:
+                atoms = None
+            elements = set()
+            if atoms is not None:
+                try:
+                    syms = []
+                    try:
+                        syms = atoms.get_chemical_symbols()
+                    except Exception:
+                        syms = getattr(atoms, 'symbols', []) or []
+                    elements = set(syms)
+                except Exception:
+                    elements = set()
+            try:
+                dlg.set_elements(elements)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            self._pseudo_dialog = dlg
+            dlg.finished.connect(lambda res, dlg=dlg: self._apply_pseudo_dialog(dlg, res))
+        except Exception:
+            pass
+        dlg.show()
+
+    def _apply_pseudo_dialog(self, dlg, result):
+        try:
+            if result != QDialog.Accepted:
+                return
+        except Exception:
+            pass
+        try:
+            new_cfg = dlg.get_config() or {}
+            pp = new_cfg.get('pseudopotentials') or {}
+            if pp:
+                # persist into session-level defaults
+                try:
+                    self.session['current_pseudopotentials'] = pp
+                except Exception:
+                    try:
+                        setattr(self.session, 'current_pseudopotentials', pp)
+                    except Exception:
+                        pass
+                # also store in draft for this preset so restore_from_dict finds it
+                try:
+                    store = self.session.get('workflow_tabs_config') or {}
+                except Exception:
+                    store = getattr(self.session, 'workflow_tabs_config', {}) or {}
+                try:
+                    if self.preset_name:
+                        cfg = store.get(self.preset_name, {})
+                        cfg['pseudopotentials'] = pp
+                        store[self.preset_name] = cfg
+                        try:
+                            self.session['workflow_tabs_config'] = store
+                        except Exception:
+                            try:
+                                setattr(self.session, 'workflow_tabs_config', store)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            try:
+                self._refresh_summaries()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    
 
     def _save_draft(self, *args, **kwargs):
         """Save current form values to the session state as a draft for this preset."""

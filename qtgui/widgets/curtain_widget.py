@@ -42,7 +42,6 @@ class CurtainWidget(QWidget):
             pass
 
         # No icon label: only show the title text beside the toggle
-        self.icon_label = None
 
         # Place the toggle at the left, then title, with stretch to the right.
         header.addWidget(self.toggle)
@@ -73,6 +72,3 @@ class CurtainWidget(QWidget):
         except Exception:
             pass
 
-    def setIcon(self, icon: str):
-        # Icon support removed; no-op kept for API compatibility.
-        return

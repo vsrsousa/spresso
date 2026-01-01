@@ -16,7 +16,8 @@ from qtpy.QtWidgets import (
     QMessageBox, QScrollArea, QFrame, QDoubleSpinBox,
     QSpinBox, QCheckBox, QTextEdit, QRadioButton, QSizePolicy
 )
-from qtpy.QtCore import Qt, QTimer
+import os
+from qtpy.QtCore import Qt, QTimer, Signal
 
 try:
     from xespresso.machines.config.loader import (
@@ -73,6 +74,7 @@ except Exception:
 
 class WorkflowBuilderPage(QWidget):
     """Workflow builder page widget."""
+    results_signal = Signal(str)
     
     def __init__(self, session_state):
         super().__init__()
@@ -379,6 +381,10 @@ class WorkflowBuilderPage(QWidget):
         self.results_box.setReadOnly(True)
         self.results_box.setMaximumHeight(140)
         build_layout.addWidget(self.results_box)
+        try:
+            self.results_signal.connect(self.results_box.setPlainText)
+        except Exception:
+            pass
         
         scroll_layout.addWidget(build_group)
         
@@ -420,6 +426,11 @@ class WorkflowBuilderPage(QWidget):
 
         atoms = self.session_state.get('current_structure')
         if atoms is None:
+            # Inform user in both a modal and the results box so it's visible
+            try:
+                self.results_box.setPlainText("No structure loaded — cannot prepare calculation")
+            except Exception:
+                pass
             QMessageBox.warning(self, "Prepare", "No structure loaded — cannot prepare calculation")
             return
 
@@ -439,9 +450,50 @@ class WorkflowBuilderPage(QWidget):
                 formula = 'structure'
             label = f"prepare/{formula}"
 
-        # Immediate UX feedback
+        # Immediate UX feedback shown unconditionally so the user sees activity
+        try:
+            self.results_box.setPlainText("Preparing...")
+        except Exception:
+            pass
+
+        # Ensure pseudopotentials are present in the configuration. Try to
+        # collect them from the UI (advanced selector or fallback edits).
+        try:
+            pp = cfg.get('pseudopotentials') or {}
+        except Exception:
+            pp = {}
+        try:
+            if not pp and PSEUDO_SELECTOR_AVAILABLE and hasattr(self, 'pseudo_selector'):
+                try:
+                    pp = getattr(self.pseudo_selector, 'get_pseudopotentials', lambda: {})() or {}
+                except Exception:
+                    pp = {}
+        except Exception:
+            pp = pp or {}
+        try:
+            if not pp and hasattr(self, 'pseudo_edits'):
+                mapping = {}
+                for el, edit in getattr(self, 'pseudo_edits', {}).items():
+                    try:
+                        v = edit.text().strip()
+                        if v:
+                            mapping[el] = v
+                    except Exception:
+                        continue
+                if mapping:
+                    pp = mapping
+        except Exception:
+            pass
+        if not pp:
             try:
-                self.results_box.setPlainText("Preparing...")
+                self.results_box.setPlainText('No pseudopotentials configured — configure pseudopotentials first')
+            except Exception:
+                pass
+            QMessageBox.warning(self, 'Prepare', 'Configuration must include pseudopotentials')
+            return
+        else:
+            try:
+                cfg['pseudopotentials'] = pp
             except Exception:
                 pass
 
@@ -467,8 +519,107 @@ class WorkflowBuilderPage(QWidget):
                         pass
 
                 # Notify user in main thread
-                QTimer.singleShot(0, lambda: QMessageBox.information(self, "Prepare", f"Prepared '{label}'"))
-                QTimer.singleShot(0, lambda: self.results_box.setPlainText(f"Prepared '{label}'"))
+                # Build a useful textual summary of the calculator for inspection
+                def _summarize_obj(obj, max_items=12):
+                    out = []
+                    try:
+                        if obj is None:
+                            return 'None'
+                        data = None
+                        try:
+                            data = getattr(obj, '__dict__', None)
+                        except Exception:
+                            data = None
+                        if isinstance(data, dict) and data:
+                            for k, v in list(data.items())[:max_items]:
+                                try:
+                                    if callable(v):
+                                        continue
+                                    if isinstance(v, (str, int, float, bool)):
+                                        out.append(f"{k}: {v}")
+                                    elif isinstance(v, dict):
+                                        out.append(f"{k}: dict(len={len(v)})")
+                                    elif isinstance(v, (list, tuple)):
+                                        out.append(f"{k}: {type(v).__name__}(len={len(v)})")
+                                    else:
+                                        out.append(f"{k}: {repr(v)[:120]}")
+                                except Exception:
+                                    continue
+                            return '\n'.join(out) if out else repr(obj)
+                        for name in [n for n in dir(obj) if not n.startswith('_')][:max_items]:
+                            try:
+                                val = getattr(obj, name)
+                                if callable(val):
+                                    continue
+                                if isinstance(val, (str, int, float, bool)):
+                                    out.append(f"{name}: {val}")
+                                elif isinstance(val, dict):
+                                    out.append(f"{name}: dict(len={len(val)})")
+                                elif isinstance(val, (list, tuple)):
+                                    out.append(f"{name}: {type(val).__name__}(len={len(val)})")
+                                else:
+                                    out.append(f"{name}: {repr(val)[:120]}")
+                            except Exception:
+                                continue
+                        return '\n'.join(out) if out else repr(obj)
+                    except Exception:
+                        return repr(obj)
+
+                try:
+                    # Try to find the generated .pwi file and display its contents
+                    summary_text = None
+                    try:
+                        import os
+                        candidates = []
+                        try:
+                            pwi_attr = getattr(calc, 'pwi', None)
+                            if pwi_attr:
+                                candidates.append(pwi_attr)
+                        except Exception:
+                            pass
+                        try:
+                            _dir = getattr(calc, '_directory', None) or getattr(calc, 'directory', None)
+                            pref = getattr(calc, 'prefix', None) or getattr(calc, '_prefix', None)
+                            if _dir and pref:
+                                candidates.append(os.path.join(_dir, f"{pref}.pwi"))
+                        except Exception:
+                            pass
+                        for p in candidates:
+                            try:
+                                if p and os.path.exists(p):
+                                    with open(p, 'r', encoding='utf-8') as f:
+                                        summary_text = f.read()
+                                        break
+                            except Exception:
+                                continue
+                    except Exception:
+                        summary_text = None
+                    if not summary_text:
+                        try:
+                            import pprint
+                            raw = getattr(calc, '__dict__', None)
+                            if raw:
+                                summary_text = pprint.pformat(raw, width=120)
+                            else:
+                                summary_text = repr(calc)
+                        except Exception:
+                            try:
+                                summary_text = repr(calc)
+                            except Exception:
+                                summary_text = 'Calculator: <unprintable>'
+                except Exception:
+                    try:
+                        summary_text = repr(calc)
+                    except Exception:
+                        summary_text = 'Calculator: <unprintable>'
+                try:
+                    self.results_signal.emit(summary_text)
+                except Exception:
+                    try:
+                        from qtpy.QtCore import QTimer
+                        QTimer.singleShot(0, lambda t=summary_text: self.results_box.setPlainText(t))
+                    except Exception:
+                        pass
             except Exception as e:
                 QTimer.singleShot(0, lambda: QMessageBox.warning(self, "Prepare", f"Prepare failed: {e}"))
                 QTimer.singleShot(0, lambda: self.results_box.setPlainText(f"Prepare failed: {e}"))
@@ -1087,18 +1238,11 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
             print(f"Error building workflow:\n{error_details}")
     
     def _create_step_config(self, base_config, calc_type):
-        """
-        Create configuration for a specific calculation step.
-        
-        Args:
-            base_config: Base workflow configuration
-            calc_type: Type of calculation (scf, relax, vc-relax, etc.)
-            
-        Returns:
-            dict: Configuration for this step
-        """
-        step_config = base_config.copy()
-        step_config['calc_type'] = calc_type
+        """Create configuration for a specific calculation step."""
+
+        # Start from a shallow copy of the base configuration so we don't
+        # mutate the original dict stored in the UI/session.
+        step_config = dict(base_config) if base_config is not None else {}
         
         # Add relaxation-specific parameters if needed
         if calc_type in ['relax', 'vc-relax']:

@@ -25,7 +25,7 @@ try:
         QInputDialog, QLineEdit, QSizePolicy
     )
     from qtpy.QtCore import Qt, QSize, Signal
-    from qtpy.QtGui import QIcon, QFont, QAction, QScreen
+    from qtpy.QtGui import QFont, QAction, QScreen
     _HAS_QT = True
 except Exception:
     # Allow importing this module in headless/test environments where
@@ -58,7 +58,7 @@ except Exception:
     Qt = object
     QSize = object
     Signal = object
-    QIcon = object
+    # QIcon removed: no GUI icon references kept to simplify headless imports
     QFont = object
     QAction = object
     QScreen = object

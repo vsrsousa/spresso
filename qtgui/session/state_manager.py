@@ -61,6 +61,7 @@ class SessionState:
         'working_directory', 'session_name', 'session_created',
         'session_modified', 'calc_machine', 'selected_machine',
         'selected_qe_version', 'structure_source', 'workflow_machine',
+        'current_pseudopotentials',
         'structure_file_path', 'structure_db_path',
         # provenance configuration keys
         'provenance_db_path', 'provenance_dir'
@@ -105,6 +106,8 @@ class SessionState:
         self._state['current_machine_name'] = None
         self._state['current_codes'] = None
         self._state['selected_code_version'] = None
+        # Default pseudopotentials mapping (empty dict means none chosen)
+        self._state['current_pseudopotentials'] = {}
         self._state['workflow_config'] = {}
         self._state['working_directory'] = os.path.expanduser("~")
         self._state['session_name'] = "Default Session"

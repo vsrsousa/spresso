@@ -281,7 +281,16 @@ class CalculationPreparation(BaseCalculationPreparation):
 
         # Add queue configuration if present (for job submission)
         if "queue" in config and config["queue"]:
-            calc_params["queue"] = config["queue"]
+            # Guard: some callers may store a simple machine name (string)
+            # instead of a queue dict. Coerce non-dict queue values into a
+            # minimal dict to avoid performing item assignment on strings.
+            q = config["queue"]
+            if not isinstance(q, dict):
+                try:
+                    q = {"name": q}
+                except Exception:
+                    q = {"name": str(q)}
+            calc_params["queue"] = q
             # Ensure modules from codes configuration are included in queue
             # This is important for HPC environments where specific modules need to be loaded
             if "modules" in config and config["modules"]:

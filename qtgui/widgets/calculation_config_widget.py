@@ -277,6 +277,23 @@ class CalculationConfigWidget(QWidget):
         pform.addRow(kpts_widget)
         params_curtain.content_layout.addWidget(params_widget)
         main.addWidget(params_curtain)
+        # Set initial protocol selection: prefer saved preset, else default to 'fast'
+        try:
+            store = self.session.get('workflow_tabs_config') or {}
+            preset_cfg = store.get(self.preset_name, {}) if self.preset_name else {}
+            desired = preset_cfg.get('protocol') or ('fast' if self.protocol_combo.findText('fast') >= 0 else None)
+            if desired:
+                try:
+                    self.protocol_combo.setCurrentText(desired)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Populate basic parameters for the chosen protocol now that widgets exist
+        try:
+            self._on_protocol_changed(self.protocol_combo.currentText())
+        except Exception:
+            pass
 
     def _load_machines(self):
         if not XESPRESSO_AVAILABLE:

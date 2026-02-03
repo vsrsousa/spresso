@@ -29,6 +29,7 @@ class WorkflowInstancePage(QWidget):
     # Signals for thread-safe GUI updates from worker threads
     status_changed = Signal(str)
     log_signal = Signal(str)
+    preview_signal = Signal(str)
 
     def __init__(self, session_state, preset_name: str, parent=None):
         super().__init__(parent)
@@ -327,7 +328,11 @@ class WorkflowInstancePage(QWidget):
         self.prepare_btn.clicked.connect(self._on_prepare)
         layout.addWidget(self.prepare_btn, alignment=Qt.AlignRight)
 
-        # Config preview / advanced
+        # Status label right below Prepare Calculation (shows short state)
+        self.status = QLabel("Idle")
+        layout.addWidget(self.status)
+
+        # Config preview / advanced (detailed messages go here)
         self.config_preview = QTextEdit()
         self.config_preview.setReadOnly(True)
         layout.addWidget(self.config_preview)
@@ -337,9 +342,7 @@ class WorkflowInstancePage(QWidget):
         self.run_btn.clicked.connect(self._on_submit)
         layout.addWidget(self.run_btn, alignment=Qt.AlignRight)
 
-        # Status/log area
-        self.status = QLabel("Idle")
-        layout.addWidget(self.status)
+        # Log area (below Submit Run)
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         layout.addWidget(self.log)
@@ -351,6 +354,11 @@ class WorkflowInstancePage(QWidget):
             pass
         try:
             self.log_signal.connect(self._append_log)
+        except Exception:
+            pass
+        try:
+            # Update the config preview via a queued signal (thread-safe)
+            self.preview_signal.connect(self.config_preview.setPlainText)
         except Exception:
             pass
 
@@ -386,6 +394,9 @@ class WorkflowInstancePage(QWidget):
                 cfg['magnetism'] = bool(self.magnetism_chk.isChecked())
         except Exception:
             pass
+        # Return the composed configuration dictionary so callers receive
+        # a concrete mapping instead of None (was missing previously).
+        return cfg
 
     def _refresh_summaries(self):
         try:
@@ -814,7 +825,14 @@ class WorkflowInstancePage(QWidget):
             atoms = None
 
         if atoms is None:
-            self._append_log("No structure loaded — cannot prepare calculation")
+            # Show message in the Prepare Calculation preview box instead
+            try:
+                self.preview_signal.emit('No structure loaded — cannot prepare calculation')
+            except Exception:
+                try:
+                    self._append_log("No structure loaded — cannot prepare calculation")
+                except Exception:
+                    pass
             return
 
         cfg = self._compose_config()
@@ -828,6 +846,51 @@ class WorkflowInstancePage(QWidget):
             except Exception:
                 formula = 'structure'
             label = f"{self.preset_name.lower()}/{formula}"
+
+        # Emit a detailed, truncated debug summary of the composed config
+        try:
+            def _short_repr(x, maxlen=300):
+                try:
+                    if x is None:
+                        return '<None>'
+                    t = type(x).__name__
+                    r = repr(x)
+                    if len(r) > maxlen:
+                        r = r[: maxlen - 3] + '...'
+                    return f"{t}: {r}"
+                except Exception:
+                    return '<unreprable>'
+
+            dbg_lines = [f"Configuration Summary:", f"Label: {_short_repr(label)}", ""]
+            for key in (
+                'calc_type',
+                'machine_name',
+                'queue',
+                'selected_code',
+                'qe_version',
+                'pseudopotentials',
+                'modules',
+                'enable_magnetism',
+                'enable_hubbard',
+                'magnetic_config',
+                'hubbard_u',
+                'hubbard_format',
+                'kspacing',
+                'kpts',
+            ):
+                try:
+                    dbg_lines.append(f"{key}: {_short_repr(cfg.get(key))}")
+                except Exception:
+                    dbg_lines.append(f"{key}: <error retrieving>")
+            try:
+                self.preview_signal.emit('\n'.join(dbg_lines))
+            except Exception:
+                try:
+                    self._append_log('\n'.join(dbg_lines))
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         def _prepare_worker():
             try:
@@ -860,41 +923,34 @@ class WorkflowInstancePage(QWidget):
                     except Exception:
                         pass
 
-                try:
-                    self.log_signal.emit(f"Prepared calculation '{label}' successfully")
-                except Exception:
-                    pass
+                # Show success message in the preview box (below Prepare Calculation)
+                # instead of sending it to the general run log below Submit Run.
                 try:
                     self.status_changed.emit("Prepared")
                 except Exception:
                     pass
                 try:
-                    # Update config preview with a short summary in the main thread
-                    def _show_preview():
-                        try:
-                            txt = []
-                            try:
-                                txt.append(f"Prepared: {label}")
-                            except Exception:
-                                pass
-                            try:
-                                f = prepared_atoms.get_chemical_formula()
-                                txt.append(f"Formula: {f}")
-                            except Exception:
-                                pass
-                            try:
-                                d = getattr(calc, 'directory', None) or getattr(calc, 'workdir', None) or 'n/a'
-                                txt.append(f"Calculator dir: {d}")
-                            except Exception:
-                                pass
-                            try:
-                                self.config_preview.setPlainText('\n'.join(txt))
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
-                    from qtpy.QtCore import QTimer
-                    QTimer.singleShot(0, _show_preview)
+                    # Build preview text and emit via preview_signal (thread-safe)
+                    txt = []
+                    try:
+                        txt.append(f"Prepared: {label}")
+                    except Exception:
+                        pass
+                    try:
+                        f = prepared_atoms.get_chemical_formula()
+                        txt.append(f"Formula: {f}")
+                    except Exception:
+                        pass
+                    try:
+                        d = getattr(calc, 'directory', None) or getattr(calc, 'workdir', None) or 'n/a'
+                        txt.append(f"Calculator dir: {d}")
+                    except Exception:
+                        pass
+                    try:
+                        full = '\n'.join(txt) + f"\nPrepared calculation '{label}' successfully"
+                        self.preview_signal.emit(full)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 try:
@@ -905,10 +961,14 @@ class WorkflowInstancePage(QWidget):
                 except Exception:
                     pass
             except Exception as e:
+                # On failure, show the error in the Prepare Calculation preview box
                 try:
-                    self.log_signal.emit(f"Failed to prepare calculation: {e}")
+                    self.preview_signal.emit(f"Failed to prepare calculation: {e}")
                 except Exception:
-                    pass
+                    try:
+                        self.log_signal.emit(f"Failed to prepare calculation: {e}")
+                    except Exception:
+                        pass
                 try:
                     self.status_changed.emit("Prepare Failed")
                 except Exception:

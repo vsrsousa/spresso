@@ -10,6 +10,7 @@ from qtgui.widgets.calculation_config_widget import CalculationConfigWidget
 from qtgui.widgets.machine_dialog import MachineDialog
 from qtgui.widgets.pseudopotentials_dialog import PseudopotentialsDialog
 from qtgui.calculations.preparation import prepare_calculation_from_gui
+from xespresso.provenance import ProvenanceDB
 try:
     from xespresso.machines.config.loader import load_machine, DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
     from xespresso.codes.manager import load_codes_config, DEFAULT_CODES_DIR
@@ -777,7 +778,8 @@ class WorkflowInstancePage(QWidget):
         else:
             params = dict(common); params.update({"atoms": atoms}); tasks.append(ScfTask(name="scf", params=params))
 
-        runner = WorkflowRunner(tasks=tasks, context={"debug": True, "provenance_dir": tempfile.mkdtemp(prefix="xespresso_prov_")})
+        prov_dir = tempfile.mkdtemp(prefix="xespresso_prov_")
+        runner = WorkflowRunner(tasks=tasks, context={"debug": True, "provenance_dir": prov_dir})
 
         def _worker():
             try:
@@ -794,6 +796,59 @@ class WorkflowInstancePage(QWidget):
                     self.log_signal.emit(str(r))
                 except Exception:
                     pass
+            # Record provenance for this run (best-effort). Attempt to extract
+            # energy/efermi from results when available and include a short
+            # results summary in meta.
+            try:
+                energy = None
+                efermi = None
+                try:
+                    # results is expected to be a list; probe entries for common keys
+                    for r in (results or []):
+                        try:
+                            if isinstance(r, dict):
+                                if energy is None:
+                                    for k in ('energy', 'total_energy'):
+                                        if k in r:
+                                            energy = r.get(k)
+                                            break
+                                if efermi is None and 'efermi' in r:
+                                    efermi = r.get('efermi')
+                            else:
+                                # object with attributes
+                                if energy is None:
+                                    energy = getattr(r, 'energy', energy)
+                                if efermi is None:
+                                    efermi = getattr(r, 'efermi', efermi)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
+                # Short results summary: repr of first few entries
+                try:
+                    summary = repr(results[:3]) if isinstance(results, (list, tuple)) else repr(results)
+                except Exception:
+                    summary = '<unreprable-results>'
+
+                try:
+                    db = ProvenanceDB.get_default()
+                    try:
+                        db.add_record(
+                            atoms,
+                            label=label,
+                            calc_type=config.get('calc_type'),
+                            energy=energy,
+                            efermi=efermi,
+                            params=config,
+                            meta={"provenance_dir": prov_dir, "results_summary": summary},
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
             # store run summary in session
             try:
                 runs = self.session.get('workflow_runs') or []
@@ -922,6 +977,17 @@ class WorkflowInstancePage(QWidget):
                         setattr(self.session, 'prepared_atoms', prepared_atoms)
                     except Exception:
                         pass
+
+                # Record provenance for this prepared calculation (best-effort)
+                try:
+                    db = ProvenanceDB.get_default()
+                    try:
+                        prov_dir = getattr(calc, 'directory', None) or getattr(calc, 'workdir', None)
+                        db.add_record(prepared_atoms, label=label, calc_type=cfg.get('calc_type'), params=cfg, meta={"provenance_dir": prov_dir, "prepared": True})
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
 
                 # Show success message in the preview box (below Prepare Calculation)
                 # instead of sending it to the general run log below Submit Run.

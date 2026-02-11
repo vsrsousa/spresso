@@ -316,9 +316,16 @@ class SessionState:
         if session_id == self._current_session_id:
             return False
         if session_id in self._sessions:
+            session_name = self._sessions[session_id].get('name', session_id)
+            # Create safe filename like save_session does
+            safe_filename = session_name
+            for char in INVALID_FILENAME_CHARS:
+                safe_filename = safe_filename.replace(char, '_')
+            session_path = os.path.join(self._sessions_dir, f"{safe_filename}.json")
+            
             del self._sessions[session_id]
             self._save_sessions_index()
-            session_path = os.path.join(self._sessions_dir, f"{session_id}.json")
+            
             if os.path.exists(session_path):
                 os.remove(session_path)
             return True

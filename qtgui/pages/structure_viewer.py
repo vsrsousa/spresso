@@ -1323,14 +1323,6 @@ then view them in the "View Structure" tab.</p>
         # Normalize the path
         db_path = os.path.abspath(os.path.expanduser(db_path))
         print(f"DEBUG: normalized db_path: '{db_path}'")
-        # Get file modification time before write
-        if os.path.exists(db_path):
-            mtime_before = os.path.getmtime(db_path)
-            print(f"DEBUG: file mtime before: {mtime_before}")
-        else:
-            mtime_before = None
-            print("DEBUG: file does not exist before write")
-        
         try:
             # Create database directory if it doesn't exist
             db_dir = os.path.dirname(db_path)
@@ -1339,11 +1331,32 @@ then view them in the "View Structure" tab.</p>
             
             # Save to database - use the same approach as manual testing
             print(f"DEBUG: About to call db.write with atoms: {atoms.get_chemical_formula()}")
-            print(f"DEBUG: key_value_pairs: {key_value_pairs}")
             
-            # Force a flush/close of any existing connections
-            import gc
-            gc.collect()
+            # Prepare key-value pairs
+            key_value_pairs = {}
+            
+            # Add name
+            save_name = name_edit.text().strip()
+            if save_name:
+                key_value_pairs['name'] = save_name
+                print(f"DEBUG: name = '{save_name}'")
+            
+            # Add source info
+            source = self.session_state.get('structure_source', '')
+            if source:
+                key_value_pairs['source'] = source
+                print(f"DEBUG: source = '{source}'")
+            
+            # Parse and add tags
+            tags = tags_edit.text().strip()
+            if tags:
+                for tag in tags.split(','):
+                    tag = tag.strip()
+                    if tag:
+                        key_value_pairs[tag] = True
+                        print(f"DEBUG: tag = '{tag}'")
+            
+            print(f"DEBUG: key_value_pairs: {key_value_pairs}")
             
             # Create fresh database connection
             db = ase_db_connect(db_path)

@@ -191,6 +191,8 @@ class SessionManagerWindow(QMainWindow):
 
         self.sessions_list = QListWidget()
         self.sessions_list.itemDoubleClicked.connect(self._open_selected_session)
+        self.sessions_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.sessions_list.customContextMenuRequested.connect(self._show_session_context_menu)
         sessions_layout.addWidget(self.sessions_list)
 
         btn_row = QHBoxLayout()
@@ -215,6 +217,11 @@ class SessionManagerWindow(QMainWindow):
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self._close_selected_session)
         btn_row.addWidget(close_btn)
+
+        delete_btn = QPushButton("Delete")
+        delete_btn.setToolTip("Delete the selected saved session (cannot delete open sessions)")
+        delete_btn.clicked.connect(self._delete_selected_session)
+        btn_row.addWidget(delete_btn)
 
         refresh_btn = QPushButton("Refresh")
         refresh_btn.clicked.connect(self._refresh_sessions)
@@ -447,6 +454,64 @@ class SessionManagerWindow(QMainWindow):
         window.close()
         self._refresh_sessions()
         self.statusBar().showMessage("Session closed")
+
+    def _delete_selected_session(self):
+        meta = self._selected_meta()
+        if not meta:
+            QMessageBox.warning(self, "No Selection", "Please select a session to delete.")
+            return
+        
+        if meta['open']:
+            QMessageBox.warning(self, "Cannot Delete", "Cannot delete an open session. Close it first.")
+            return
+        
+        session_name = meta['name']
+        reply = QMessageBox.question(
+            self, 
+            "Delete Session", 
+            f"Are you sure you want to delete the session '{session_name}'?\n\nThis action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            success = self.manager_state.delete_session(meta['session_id'])
+            if success:
+                self._refresh_sessions()
+                self.statusBar().showMessage(f"Deleted session: {session_name}")
+            else:
+                QMessageBox.warning(self, "Delete Failed", f"Could not delete session '{session_name}'.")
+
+    def _show_session_context_menu(self, position):
+        """Show context menu for session list items."""
+        item = self.sessions_list.itemAt(position)
+        if not item:
+            return
+        
+        meta = item.data(Qt.UserRole)
+        if not meta:
+            return
+        
+        menu = QMenu(self)
+        
+        # Open action
+        open_action = QAction("Open Session", self)
+        open_action.triggered.connect(lambda: self._open_selected_session(item))
+        menu.addAction(open_action)
+        
+        # Close action (only for open sessions)
+        if meta['open']:
+            close_action = QAction("Close Session", self)
+            close_action.triggered.connect(lambda: self._close_selected_session())
+            menu.addAction(close_action)
+        else:
+            # Delete action (only for saved sessions)
+            delete_action = QAction("Delete Session", self)
+            delete_action.triggered.connect(lambda: self._delete_selected_session())
+            menu.addAction(delete_action)
+        
+        menu.exec_(self.sessions_list.mapToGlobal(position))
+
     # Note: delete/restore removed. Use file manager to remove session JSON files.
 
     def _spawn_session_window(self, state):

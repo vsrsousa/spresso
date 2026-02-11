@@ -262,10 +262,10 @@ class CalculationWindow(QWidget):
         try:
             self.protocol_combo.addItems(list(PRESETS.keys()))
             self.protocol_combo.currentTextChanged.connect(self._on_protocol_changed)
-            # Set moderate as the default selection
-            moderate_index = self.protocol_combo.findText('moderate')
-            if moderate_index >= 0:
-                self.protocol_combo.setCurrentIndex(moderate_index)
+            # Set fast as the default selection
+            fast_index = self.protocol_combo.findText('fast')
+            if fast_index >= 0:
+                self.protocol_combo.setCurrentIndex(fast_index)
         except Exception:
             pass
         form.addRow('Protocol:', self.protocol_combo)
@@ -314,11 +314,11 @@ class CalculationWindow(QWidget):
         
         # Forces and stress calculation
         self.calc_forces_check = QCheckBox('Calculate forces')
-        self.calc_forces_check.setChecked(True)  # Usually enabled
+        self.calc_forces_check.setChecked(False)  # Disabled by default for speed
         form.addRow('', self.calc_forces_check)
         
         self.calc_stress_check = QCheckBox('Calculate stress')
-        self.calc_stress_check.setChecked(True)  # Usually enabled
+        self.calc_stress_check.setChecked(False)  # Disabled by default for speed
         form.addRow('', self.calc_stress_check)
         
         # Initialize with moderate preset (default)

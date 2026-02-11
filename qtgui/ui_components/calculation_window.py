@@ -66,6 +66,9 @@ class CalculationWindow(QWidget):
         self.setWindowTitle(f"Calculation: {calc_name}")
         self.resize(900, 700)
 
+        # Determine calculation type from calc_name
+        self.calculation_type = self._get_calculation_type_from_name(calc_name)
+
         main_layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
@@ -81,6 +84,25 @@ class CalculationWindow(QWidget):
         # Listen for structure changes to update pseudopotentials
         if self.session_state and hasattr(self.session_state, 'add_listener'):
             self.session_state.add_listener(self._update_pseudopotentials_for_structure)
+
+    def _get_calculation_type_from_name(self, calc_name: str) -> str:
+        """Map calculation window name to Quantum ESPRESSO calculation type."""
+        name_lower = calc_name.lower()
+        
+        # Map button names to calculation types
+        if 'scf' in name_lower:
+            return 'scf'
+        elif 'relax' in name_lower:
+            return 'relax'
+        elif 'geometry optimization' in name_lower or 'vc-relax' in name_lower:
+            return 'vc-relax'
+        elif 'md' in name_lower or 'molecular dynamics' in name_lower:
+            return 'md'
+        elif 'neb' in name_lower:
+            return 'neb'
+        else:
+            # Default to SCF for unknown types
+            return 'scf'
 
     def _build_machine_tab(self):
         w = QWidget()
@@ -321,9 +343,37 @@ class CalculationWindow(QWidget):
         self.calc_stress_check.setChecked(False)  # Disabled by default for speed
         form.addRow('', self.calc_stress_check)
         
+        # Relaxation parameters
+        self.ion_dynamics_combo = QComboBox()
+        self.ion_dynamics_combo.addItems(['bfgs', 'damp', 'verlet', 'langevin', 'none'])
+        self.ion_dynamics_combo.setCurrentText('bfgs')
+        form.addRow('ion_dynamics:', self.ion_dynamics_combo)
+        
+        self.cell_dynamics_combo = QComboBox()
+        self.cell_dynamics_combo.addItems(['none', 'bfgs', 'damp-pr', 'damp-w'])
+        self.cell_dynamics_combo.setCurrentText('none')
+        form.addRow('cell_dynamics:', self.cell_dynamics_combo)
+        
+        self.cell_dofree_combo = QComboBox()
+        self.cell_dofree_combo.addItems(['all', 'shape', 'volume', 'x', 'y', 'z', 'xy', 'xz', 'yz'])
+        self.cell_dofree_combo.setCurrentText('all')
+        form.addRow('cell_dofree:', self.cell_dofree_combo)
+        
+        self.press_edit = QLineEdit('0.0')
+        form.addRow('press (kbar):', self.press_edit)
+        
+        self.press_conv_test_edit = QLineEdit('0.5')
+        form.addRow('press_conv_test (kbar):', self.press_conv_test_edit)
+        
         # Initialize with fast preset (default)
         try:
             self._on_protocol_changed('fast')
+        except Exception:
+            pass
+        
+        # Initialize calculation type visibility based on the determined type
+        try:
+            self._on_calculation_type_changed(self.calculation_type)
         except Exception:
             pass
         
@@ -539,6 +589,40 @@ class CalculationWindow(QWidget):
         except Exception:
             pass
 
+    def _on_calculation_type_changed(self, calc_type: str):
+        """Show/hide parameters based on calculation type."""
+        try:
+            # Relaxation parameters are only relevant for relax, vc-relax, and md calculations
+            show_relaxation = calc_type in ['relax', 'vc-relax', 'md']
+            
+            # Hide/show relaxation parameter widgets
+            relaxation_widgets = [
+                self.ion_dynamics_combo, self.cell_dynamics_combo, 
+                self.cell_dofree_combo, self.press_edit, self.press_conv_test_edit
+            ]
+            
+            for widget in relaxation_widgets:
+                if hasattr(widget, 'setVisible'):
+                    widget.setVisible(show_relaxation)
+                    # Also hide the label by finding the parent layout item
+                    try:
+                        # Get the form layout and find the row containing this widget
+                        form_layout = widget.parent().layout()
+                        if isinstance(form_layout, QFormLayout):
+                            # Find the row index for this widget
+                            for i in range(form_layout.rowCount()):
+                                field_item = form_layout.itemAt(i, QFormLayout.FieldRole)
+                                if field_item and field_item.widget() == widget:
+                                    label_item = form_layout.itemAt(i, QFormLayout.LabelRole)
+                                    if label_item and label_item.widget():
+                                        label_item.widget().setVisible(show_relaxation)
+                                    break
+                    except Exception:
+                        pass
+                        
+        except Exception:
+            pass
+
     def get_pseudopotentials(self):
         """Get the current pseudopotentials configuration as a dict."""
         if PSEUDO_SELECTOR_AVAILABLE and hasattr(self, 'pseudo_selector'):
@@ -575,6 +659,10 @@ class CalculationWindow(QWidget):
                 protocol = self.protocol_combo.currentText()
                 if protocol:
                     params['protocol'] = protocol
+            
+            # Calculation type (determined from window name)
+            if hasattr(self, 'calculation_type') and self.calculation_type:
+                params['calculation'] = self.calculation_type
             
             # Energy cutoffs
             if hasattr(self, 'ecutwfc_edit') and self.ecutwfc_edit.text():
@@ -616,6 +704,29 @@ class CalculationWindow(QWidget):
             
             if hasattr(self, 'calc_stress_check'):
                 params['tstress'] = self.calc_stress_check.isChecked()
+            
+            # Relaxation parameters
+            if hasattr(self, 'ion_dynamics_combo'):
+                ion_dyn = self.ion_dynamics_combo.currentText()
+                if ion_dyn != 'none':  # Only add if not none
+                    params['ion_dynamics'] = ion_dyn
+            
+            if hasattr(self, 'cell_dynamics_combo'):
+                cell_dyn = self.cell_dynamics_combo.currentText()
+                if cell_dyn != 'none':  # Only add if not none
+                    params['cell_dynamics'] = cell_dyn
+            
+            if hasattr(self, 'cell_dofree_combo'):
+                cell_free = self.cell_dofree_combo.currentText()
+                params['cell_dofree'] = cell_free
+            
+            if hasattr(self, 'press_edit') and self.press_edit.text():
+                press = float(self.press_edit.text())
+                if press != 0.0:  # Only add if not zero
+                    params['press'] = press
+            
+            if hasattr(self, 'press_conv_test_edit') and self.press_conv_test_edit.text():
+                params['press_conv_test'] = float(self.press_conv_test_edit.text())
                 
         except Exception:
             pass

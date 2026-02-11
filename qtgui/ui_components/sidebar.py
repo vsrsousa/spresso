@@ -155,40 +155,32 @@ def create_sidebar(main_window):
     workdir_layout.addWidget(browse_btn)
     layout.addWidget(workdir_group)
 
-    # Workflow navigation
-    workflow_group = QGroupBox("🔬 Workflows")
-    workflow_layout = QVBoxLayout(workflow_group)
-    main_window.nav_list = QListWidget()
-    # Show independent workflow presets directly in the sidebar. Selecting
-    # an item will launch the chosen workflow (no Calculation Setup page).
+    # Calculations navigation (session-window specific)
+    calc_group = QGroupBox("🧪 Calculations")
+    calc_layout = QVBoxLayout(calc_group)
+    # Use buttons instead of a list so each calculation type opens its own
+    # modeless window when activated.
     presets = [
         "SCF",
         "Relax",
-        "SCF+Relax",
         "Convergence Test",
         "Geometry Optimization",
         "NEB",
         "Post-Processing",
     ]
+    main_window.calc_buttons = {}
     for p in presets:
-        main_window.nav_list.addItem(QListWidgetItem(p))
-    # Connect navigation changes to the session window handler if available
-    try:
-        # Use currentRowChanged so programmatic changes trigger the handler
-        main_window.nav_list.currentRowChanged.connect(getattr(main_window, '_on_nav_changed', lambda idx: None))
-    except Exception:
-        pass
-    # When a preset is activated, call the session window launcher directly.
-    def _on_preset_activated(item):
+        btn = QPushButton(p)
+        btn.setToolTip(f"Open {p} calculation window for this session")
+        # Connect click to session window handler if available
         try:
-            name = item.text()
-            getattr(main_window, 'launch_workflow', lambda n: None)(name)
+            btn.clicked.connect(lambda checked, name=p: getattr(main_window, 'launch_calculation', lambda n: None)(name))
         except Exception:
             pass
+        calc_layout.addWidget(btn)
+        main_window.calc_buttons[p] = btn
 
-    main_window.nav_list.itemActivated.connect(_on_preset_activated)
-    workflow_layout.addWidget(main_window.nav_list)
-    layout.addWidget(workflow_group)
+    layout.addWidget(calc_group)
 
     layout.addStretch()
 

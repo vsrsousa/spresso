@@ -8,7 +8,7 @@ import os
 from qtpy.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QLabel, QFileDialog, QMessageBox, QSplitter,
-    QInputDialog, QLineEdit
+    QInputDialog, QLineEdit, QPushButton
 )
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QAction
@@ -310,6 +310,19 @@ class MainWindow(QMainWindow):
             # Add a new independent tab for this workflow
             tabs_page.add_workflow_tab(workflow_name)
             self.content_stack.setCurrentWidget(tabs_page)
+        except Exception:
+            return
+
+    def launch_calculation(self, calc_name: str):
+        """Open a modeless calculation configuration window for the given type."""
+        try:
+            from .ui_components.calculation_window import CalculationWindow
+            win = CalculationWindow(calc_name, self.session_state)
+            # Keep reference to avoid GC
+            if not hasattr(self, '_calc_windows'):
+                self._calc_windows = []
+            self._calc_windows.append(win)
+            win.show()
         except Exception:
             return
 

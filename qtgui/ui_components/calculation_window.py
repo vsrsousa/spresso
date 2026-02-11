@@ -19,6 +19,12 @@ except Exception:
     PRESETS = {}
 
 try:
+    from qtgui.utils.pseudopotentials_selector import PseudopotentialsSelectorWidget
+    PSEUDO_SELECTOR_AVAILABLE = True
+except Exception:
+    PSEUDO_SELECTOR_AVAILABLE = False
+
+try:
     from xespresso.machines.config.loader import list_machines, load_machine, DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
 except Exception:
     list_machines = lambda *a, **k: []
@@ -71,6 +77,10 @@ class CalculationWindow(QWidget):
         self._build_hubbard_tab()
         self._build_prepare_tab()
         self._build_submit_tab()
+
+        # Listen for structure changes to update pseudopotentials
+        if self.session_state and hasattr(self.session_state, 'add_listener'):
+            self.session_state.add_listener(self._update_pseudopotentials_for_structure)
 
     def _build_machine_tab(self):
         w = QWidget()
@@ -199,10 +209,49 @@ class CalculationWindow(QWidget):
 
     def _build_pseudopotentials_tab(self):
         w = QWidget()
-        form = QFormLayout(w)
-        self.pseudo_editor = QTextEdit()
-        form.addRow('Pseudopotentials:', self.pseudo_editor)
+        layout = QVBoxLayout(w)
+        
+        if PSEUDO_SELECTOR_AVAILABLE:
+            self.pseudo_selector = PseudopotentialsSelectorWidget(self.session_state)
+            self.pseudo_selector.changed.connect(self._on_pseudopotentials_changed)
+            layout.addWidget(self.pseudo_selector)
+            
+            # Update pseudopotentials for current structure
+            self._update_pseudopotentials_for_structure()
+        else:
+            # Fallback to simple text editor
+            form = QFormLayout()
+            self.pseudo_editor = QTextEdit()
+            form.addRow('Pseudopotentials:', self.pseudo_editor)
+            layout.addLayout(form)
+        
         self.tabs.addTab(w, 'Pseudopotentials')
+
+    def _update_pseudopotentials_for_structure(self):
+        """Update pseudopotentials selector based on current structure."""
+        if not PSEUDO_SELECTOR_AVAILABLE:
+            return
+            
+        try:
+            atoms = self.session_state.get('current_structure')
+            if atoms is not None:
+                # Get unique elements from structure
+                symbols = atoms.get_chemical_symbols()
+                elements = set(symbols)
+                self.pseudo_selector.set_elements(elements)
+            else:
+                self.pseudo_selector.set_elements(set())
+        except Exception as e:
+            # If anything fails, just clear elements
+            try:
+                self.pseudo_selector.set_elements(set())
+            except Exception:
+                pass
+
+    def _on_pseudopotentials_changed(self):
+        """Handle pseudopotentials configuration changes."""
+        # Could add validation or other logic here if needed
+        pass
 
     def _build_basic_tab(self):
         w = QWidget()
@@ -411,3 +460,29 @@ class CalculationWindow(QWidget):
                     pass
         except Exception:
             pass
+
+    def get_pseudopotentials(self):
+        """Get the current pseudopotentials configuration as a dict."""
+        if PSEUDO_SELECTOR_AVAILABLE and hasattr(self, 'pseudo_selector'):
+            try:
+                return self.pseudo_selector.get_pseudopotentials()
+            except Exception:
+                pass
+        
+        # Fallback to manual text input
+        if hasattr(self, 'pseudo_editor'):
+            try:
+                text = self.pseudo_editor.toPlainText().strip()
+                if text:
+                    # Parse simple format like "Fe=Fe.UPF\nO=O.UPF"
+                    pseudo_dict = {}
+                    for line in text.split('\n'):
+                        line = line.strip()
+                        if '=' in line:
+                            element, pseudo = line.split('=', 1)
+                            pseudo_dict[element.strip()] = pseudo.strip()
+                    return pseudo_dict
+            except Exception:
+                pass
+        
+        return {}

@@ -9,7 +9,7 @@ import os
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFormLayout,
     QComboBox, QLineEdit, QTextEdit, QPushButton, QCheckBox,
-    QTabWidget, QApplication, QMessageBox, QGroupBox
+    QTabWidget, QApplication, QMessageBox, QGroupBox, QScrollArea
 )
 from qtpy.QtCore import Qt
 
@@ -382,9 +382,169 @@ class CalculationWindow(QWidget):
     def _build_magnetism_tab(self):
         w = QWidget()
         form = QFormLayout(w)
+        
+        # Enable magnetism checkbox
         self.magnetism_chk = QCheckBox('Enable magnetism')
+        self.magnetism_chk.stateChanged.connect(self._on_magnetism_toggled)
         form.addRow(self.magnetism_chk)
+        
+        # Magnetic configuration type selector
+        self.mag_config_label = QLabel('Magnetic configuration:')
+        self.mag_config_combo = QComboBox()
+        self.mag_config_combo.addItems([
+            'ferromagnetic', 
+            'antiferromagnetic', 
+            'custom'
+        ])
+        self.mag_config_combo.setCurrentText('ferromagnetic')
+        self.mag_config_combo.currentTextChanged.connect(self._on_mag_config_changed)
+        form.addRow(self.mag_config_label, self.mag_config_combo)
+        
+        # Container for atom magnetization list
+        self.mag_atoms_container = QWidget()
+        mag_atoms_layout = QVBoxLayout(self.mag_atoms_container)
+        
+        # Header for atom list
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel('Atom'))
+        header_layout.addWidget(QLabel('Element'))
+        header_layout.addWidget(QLabel('Magnetization'))
+        mag_atoms_layout.addLayout(header_layout)
+        
+        # Scroll area for atom list
+        self.mag_scroll_area = QScrollArea()
+        self.mag_scroll_widget = QWidget()
+        self.mag_scroll_layout = QVBoxLayout(self.mag_scroll_widget)
+        self.mag_scroll_area.setWidget(self.mag_scroll_widget)
+        self.mag_scroll_area.setWidgetResizable(True)
+        self.mag_scroll_area.setMaximumHeight(200)
+        mag_atoms_layout.addWidget(self.mag_scroll_area)
+        
+        form.addRow('Atom magnetizations:', self.mag_atoms_container)
+        
+        # Initially hide magnetic configuration options
+        self._show_magnetic_config(False)
+        
         self.tabs.addTab(w, 'Magnetism')
+
+    def _on_magnetism_toggled(self, state):
+        """Show/hide magnetic configuration options when magnetism is enabled/disabled."""
+        enabled = state == 2  # Qt.CheckState.Checked
+        self._show_magnetic_config(enabled)
+        if enabled:
+            self._update_atom_magnetizations()
+
+    def _show_magnetic_config(self, show):
+        """Show or hide magnetic configuration widgets."""
+        try:
+            self.mag_config_label.setVisible(show)
+            self.mag_config_combo.setVisible(show)
+            self.mag_atoms_container.setVisible(show)
+        except Exception:
+            pass
+
+    def _on_mag_config_changed(self, config_type):
+        """Update atom magnetizations when configuration type changes."""
+        self._update_atom_magnetizations()
+
+    def _update_atom_magnetizations(self):
+        """Update the list of atoms with their magnetization values based on current config."""
+        try:
+            # Clear existing atom widgets
+            while self.mag_scroll_layout.count():
+                child = self.mag_scroll_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+            
+            # Get current structure
+            atoms = None
+            if self.session_state:
+                atoms = self.session_state.get('current_structure')
+            
+            if not atoms:
+                # No structure loaded, show message
+                no_struct_label = QLabel("No structure loaded")
+                no_struct_label.setStyleSheet("color: gray; font-style: italic;")
+                self.mag_scroll_layout.addWidget(no_struct_label)
+                return
+            
+            config_type = self.mag_config_combo.currentText()
+            
+            # Generate magnetization values based on configuration type
+            mag_values = self._generate_magnetization_values(atoms, config_type)
+            
+            # Create widgets for each atom
+            for i, (symbol, mag_value) in enumerate(zip(atoms.get_chemical_symbols(), mag_values)):
+                atom_layout = QHBoxLayout()
+                
+                # Atom index
+                atom_label = QLabel(f"{i}")
+                atom_label.setFixedWidth(30)
+                atom_layout.addWidget(atom_label)
+                
+                # Element symbol
+                element_label = QLabel(symbol)
+                element_label.setFixedWidth(50)
+                atom_layout.addWidget(element_label)
+                
+                # Magnetization input
+                mag_edit = QLineEdit(f"{mag_value:.1f}")
+                mag_edit.setFixedWidth(80)
+                # Store reference for later retrieval
+                if not hasattr(self, 'mag_edits'):
+                    self.mag_edits = {}
+                self.mag_edits[i] = mag_edit
+                atom_layout.addWidget(mag_edit)
+                
+                atom_layout.addStretch()
+                self.mag_scroll_layout.addLayout(atom_layout)
+                
+        except Exception as e:
+            # If anything fails, show error message
+            try:
+                while self.mag_scroll_layout.count():
+                    child = self.mag_scroll_layout.takeAt(0)
+                    if child.widget():
+                        child.widget().deleteLater()
+                error_label = QLabel(f"Error loading atoms: {e}")
+                error_label.setStyleSheet("color: red;")
+                self.mag_scroll_layout.addWidget(error_label)
+            except Exception:
+                pass
+
+    def _generate_magnetization_values(self, atoms, config_type):
+        """Generate default magnetization values based on configuration type."""
+        symbols = atoms.get_chemical_symbols()
+        num_atoms = len(symbols)
+        
+        if config_type == 'ferromagnetic':
+            # All atoms of same element get same magnetization (default 1.0 for magnetic elements)
+            mag_values = []
+            for symbol in symbols:
+                if symbol in ['Fe', 'Co', 'Ni', 'Mn', 'Cr']:
+                    mag_values.append(1.0)
+                else:
+                    mag_values.append(0.0)
+            return mag_values
+            
+        elif config_type == 'antiferromagnetic':
+            # Alternate positive/negative for magnetic elements
+            mag_values = []
+            element_counters = {}
+            for symbol in symbols:
+                if symbol in ['Fe', 'Co', 'Ni', 'Mn', 'Cr']:
+                    if symbol not in element_counters:
+                        element_counters[symbol] = 0
+                    element_counters[symbol] += 1
+                    # Alternate sign for each occurrence of the element
+                    mag_values.append(1.0 if element_counters[symbol] % 2 == 1 else -1.0)
+                else:
+                    mag_values.append(0.0)
+            return mag_values
+            
+        else:  # custom
+            # All zeros, user can set manually
+            return [0.0] * num_atoms
 
     def _build_hubbard_tab(self):
         w = QWidget()
@@ -732,3 +892,68 @@ class CalculationWindow(QWidget):
             pass
         
         return params
+
+    def get_magnetism_config(self):
+        """Get the current magnetism configuration as a dict."""
+        config = {}
+        
+        try:
+            # Check if magnetism is enabled
+            if not hasattr(self, 'magnetism_chk') or not self.magnetism_chk.isChecked():
+                return config
+            
+            # Get atoms from session state
+            atoms = None
+            if self.session_state:
+                atoms = self.session_state.get('current_structure')
+            
+            if not atoms:
+                return config
+            
+            # Get magnetization values from UI
+            mag_values = []
+            if hasattr(self, 'mag_edits'):
+                for i in range(len(atoms)):
+                    if i in self.mag_edits:
+                        try:
+                            mag_value = float(self.mag_edits[i].text())
+                            mag_values.append(mag_value)
+                        except (ValueError, AttributeError):
+                            mag_values.append(0.0)
+                    else:
+                        mag_values.append(0.0)
+            else:
+                # Fallback: generate based on config type
+                config_type = self.mag_config_combo.currentText() if hasattr(self, 'mag_config_combo') else 'ferromagnetic'
+                mag_values = self._generate_magnetization_values(atoms, config_type)
+            
+            # Use xespresso's set_magnetic_moments to create proper configuration
+            try:
+                from xespresso import set_magnetic_moments
+                mag_config = set_magnetic_moments(atoms, mag_values)
+                config.update(mag_config)
+            except Exception:
+                # Fallback: create basic config
+                config['input_ntyp'] = {'starting_magnetization': {}}
+                # Group by unique magnetization values
+                unique_mags = {}
+                for i, mag in enumerate(mag_values):
+                    if mag not in unique_mags:
+                        unique_mags[mag] = []
+                    unique_mags[mag].append(i)
+                
+                species_counter = {}
+                for mag, atom_indices in unique_mags.items():
+                    if mag == 0.0:
+                        continue  # Skip non-magnetic atoms
+                    element = atoms.get_chemical_symbols()[atom_indices[0]]
+                    if element not in species_counter:
+                        species_counter[element] = 0
+                    species_counter[element] += 1
+                    species_name = f"{element}{species_counter[element]}" if species_counter[element] > 1 else element
+                    config['input_ntyp']['starting_magnetization'][species_name] = mag
+                
+        except Exception:
+            pass
+        
+        return config

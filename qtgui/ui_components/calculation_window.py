@@ -381,15 +381,20 @@ class CalculationWindow(QWidget):
 
     def _build_magnetism_tab(self):
         w = QWidget()
-        form = QFormLayout(w)
+        layout = QVBoxLayout(w)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
         
         # Enable magnetism checkbox
         self.magnetism_chk = QCheckBox('Enable magnetism')
         self.magnetism_chk.stateChanged.connect(self._on_magnetism_toggled)
-        form.addRow(self.magnetism_chk)
+        layout.addWidget(self.magnetism_chk)
         
         # Magnetic configuration type selector
-        self.mag_config_label = QLabel('Magnetic configuration:')
+        config_layout = QHBoxLayout()
+        config_layout.setSpacing(10)
+        self.mag_config_label = QLabel('Configuration:')
+        self.mag_config_label.setMinimumWidth(100)
         self.mag_config_combo = QComboBox()
         self.mag_config_combo.addItems([
             'ferromagnetic', 
@@ -398,34 +403,154 @@ class CalculationWindow(QWidget):
         ])
         self.mag_config_combo.setCurrentText('ferromagnetic')
         self.mag_config_combo.currentTextChanged.connect(self._on_mag_config_changed)
-        form.addRow(self.mag_config_label, self.mag_config_combo)
+        config_layout.addWidget(self.mag_config_label)
+        config_layout.addWidget(self.mag_config_combo)
+        config_layout.addStretch()
+        layout.addLayout(config_layout)
         
         # Container for atom magnetization list
         self.mag_atoms_container = QWidget()
         mag_atoms_layout = QVBoxLayout(self.mag_atoms_container)
+        mag_atoms_layout.setSpacing(5)
+        mag_atoms_layout.setContentsMargins(0, 0, 0, 0)
         
         # Header for atom list
         header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel('Atom'))
-        header_layout.addWidget(QLabel('Element'))
-        header_layout.addWidget(QLabel('Magnetization'))
+        header_layout.setSpacing(10)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        atom_header = QLabel('Atom')
+        atom_header.setFixedWidth(40)
+        atom_header.setStyleSheet("font-weight: bold;")
+        header_layout.addWidget(atom_header)
+        
+        element_header = QLabel('Element')
+        element_header.setFixedWidth(60)
+        element_header.setStyleSheet("font-weight: bold;")
+        header_layout.addWidget(element_header)
+        
+        mag_header = QLabel('Magnetization')
+        mag_header.setStyleSheet("font-weight: bold;")
+        header_layout.addWidget(mag_header)
+        
+        header_layout.addStretch()
         mag_atoms_layout.addLayout(header_layout)
         
         # Scroll area for atom list
         self.mag_scroll_area = QScrollArea()
         self.mag_scroll_widget = QWidget()
         self.mag_scroll_layout = QVBoxLayout(self.mag_scroll_widget)
+        self.mag_scroll_layout.setSpacing(2)
+        self.mag_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.mag_scroll_area.setWidget(self.mag_scroll_widget)
         self.mag_scroll_area.setWidgetResizable(True)
         self.mag_scroll_area.setMaximumHeight(200)
+        self.mag_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.mag_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         mag_atoms_layout.addWidget(self.mag_scroll_area)
         
-        form.addRow('Atom magnetizations:', self.mag_atoms_container)
-        
-        # Initially hide magnetic configuration options
-        self._show_magnetic_config(False)
+        layout.addWidget(self.mag_atoms_container)
+        layout.addStretch()
         
         self.tabs.addTab(w, 'Magnetism')
+
+    def _show_magnetic_config(self, show: bool):
+        """Show or hide magnetic configuration options."""
+        try:
+            self.mag_config_label.setVisible(show)
+            self.mag_config_combo.setVisible(show)
+            self.mag_atoms_container.setVisible(show)
+        except Exception:
+            pass
+
+    def _on_magnetism_toggled(self, state):
+        """Handle magnetism enable/disable toggle."""
+        enabled = state == 2  # Qt.CheckState.Checked
+        self._show_magnetic_config(enabled)
+        
+        if enabled:
+            # Initialize magnetic configuration when enabled
+            self._on_mag_config_changed(self.mag_config_combo.currentText())
+
+    def _on_mag_config_changed(self, config_type: str):
+        """Handle magnetic configuration type change."""
+        try:
+            self._update_atom_magnetizations(config_type)
+        except Exception:
+            pass
+
+    def _update_atom_magnetizations(self, config_type: str):
+        """Update the atom magnetization list based on configuration type."""
+        try:
+            # Clear existing atom widgets
+            while self.mag_scroll_layout.count():
+                child = self.mag_scroll_layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+            
+            # Get current structure
+            atoms = None
+            if self.session_state:
+                atoms = self.session_state.get('current_structure')
+            
+            if not atoms:
+                # No structure loaded, show message
+                no_struct_label = QLabel("No structure loaded. Load a structure first.")
+                no_struct_label.setStyleSheet("color: gray; font-style: italic;")
+                self.mag_scroll_layout.addWidget(no_struct_label)
+                return
+            
+            # Create magnetization inputs for each atom
+            self.mag_editors = []
+            
+            for i, (symbol, pos) in enumerate(zip(atoms.get_chemical_symbols(), atoms.positions)):
+                # Create row for this atom
+                atom_row = QWidget()
+                atom_layout = QHBoxLayout(atom_row)
+                atom_layout.setContentsMargins(0, 0, 0, 0)
+                
+                # Atom index
+                index_label = QLabel(f"{i}")
+                index_label.setFixedWidth(30)
+                atom_layout.addWidget(index_label)
+                
+                # Element symbol
+                symbol_label = QLabel(symbol)
+                symbol_label.setFixedWidth(50)
+                atom_layout.addWidget(symbol_label)
+                
+                # Magnetization input
+                mag_edit = QLineEdit()
+                mag_edit.setFixedWidth(80)
+                
+                # Set default magnetization based on configuration type
+                if config_type == 'ferromagnetic':
+                    # All atoms of same element get same positive magnetization
+                    default_mag = 1.0 if symbol in ['Fe', 'Co', 'Ni'] else 0.5
+                    mag_edit.setText(str(default_mag))
+                elif config_type == 'antiferromagnetic':
+                    # Alternate positive/negative for same element
+                    element_atoms = [j for j, s in enumerate(atoms.get_chemical_symbols()) if s == symbol]
+                    atom_index_in_element = element_atoms.index(i)
+                    default_mag = 1.0 if atom_index_in_element % 2 == 0 else -1.0
+                    mag_edit.setText(str(default_mag))
+                else:  # custom
+                    mag_edit.setText("0.0")
+                
+                atom_layout.addWidget(mag_edit)
+                atom_layout.addStretch()
+                
+                self.mag_editors.append(mag_edit)
+                self.mag_scroll_layout.addWidget(atom_row)
+            
+            # Add stretch at the end
+            self.mag_scroll_layout.addStretch()
+            
+        except Exception as e:
+            # Fallback: show error message
+            error_label = QLabel(f"Error loading atom list: {e}")
+            error_label.setStyleSheet("color: red;")
+            self.mag_scroll_layout.addWidget(error_label)
 
     def _on_magnetism_toggled(self, state):
         """Show/hide magnetic configuration options when magnetism is enabled/disabled."""
@@ -517,11 +642,17 @@ class CalculationWindow(QWidget):
         symbols = atoms.get_chemical_symbols()
         num_atoms = len(symbols)
         
+        # Magnetic elements: 3d transition metals + lanthanides (except La, Lu)
+        magnetic_elements = [
+            'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',  # 3d
+            'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb'  # Lanthanides
+        ]
+        
         if config_type == 'ferromagnetic':
             # All atoms of same element get same magnetization (default 1.0 for magnetic elements)
             mag_values = []
             for symbol in symbols:
-                if symbol in ['Fe', 'Co', 'Ni', 'Mn', 'Cr']:
+                if symbol in magnetic_elements:
                     mag_values.append(1.0)
                 else:
                     mag_values.append(0.0)
@@ -532,7 +663,7 @@ class CalculationWindow(QWidget):
             mag_values = []
             element_counters = {}
             for symbol in symbols:
-                if symbol in ['Fe', 'Co', 'Ni', 'Mn', 'Cr']:
+                if symbol in magnetic_elements:
                     if symbol not in element_counters:
                         element_counters[symbol] = 0
                     element_counters[symbol] += 1
@@ -912,15 +1043,12 @@ class CalculationWindow(QWidget):
             
             # Get magnetization values from UI
             mag_values = []
-            if hasattr(self, 'mag_edits'):
-                for i in range(len(atoms)):
-                    if i in self.mag_edits:
-                        try:
-                            mag_value = float(self.mag_edits[i].text())
-                            mag_values.append(mag_value)
-                        except (ValueError, AttributeError):
-                            mag_values.append(0.0)
-                    else:
+            if hasattr(self, 'mag_editors'):
+                for edit in self.mag_editors:
+                    try:
+                        mag_value = float(edit.text())
+                        mag_values.append(mag_value)
+                    except (ValueError, AttributeError):
                         mag_values.append(0.0)
             else:
                 # Fallback: generate based on config type

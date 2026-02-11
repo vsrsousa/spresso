@@ -1188,10 +1188,13 @@ then view them in the "View Structure" tab.</p>
     
     def _refresh_db_list(self):
         """Refresh the database structures list."""
+        print("DEBUG: _refresh_db_list called")
         if not ASE_DB_AVAILABLE:
+            print("DEBUG: ASE_DB not available")
             return
         
         db_path = self.db_path_edit.text().strip()
+        print(f"DEBUG: Refreshing database at: {db_path}")
         if not db_path:
             self.db_status_label.setText("⚠️ Please enter a database path")
             self.db_status_label.setStyleSheet("color: #d97706;")
@@ -1199,6 +1202,7 @@ then view them in the "View Structure" tab.</p>
         
         # Normalize the path
         db_path = os.path.abspath(os.path.expanduser(db_path))
+        print(f"DEBUG: Normalized path: {db_path}")
         
         if not os.path.exists(db_path):
             self.db_status_label.setText("ℹ️ Database does not exist yet. It will be created when you save your first structure.")
@@ -1209,6 +1213,7 @@ then view them in the "View Structure" tab.</p>
         try:
             db = ase_db_connect(db_path)
             rows = list(db.select())
+            print(f"DEBUG: Found {len(rows)} rows in database")
             
             if rows:
                 self.db_status_label.setText(f"✅ Found {len(rows)} structure(s) in database")
@@ -1235,6 +1240,7 @@ then view them in the "View Structure" tab.</p>
                 self.db_structures_table.setRowCount(0)
                 
         except Exception as e:
+            print(f"DEBUG: Error in refresh: {e}")
             self.db_status_label.setText(f"❌ Error reading database: {e}")
             self.db_status_label.setStyleSheet("color: red;")
             self.db_structures_table.setRowCount(0)
@@ -1288,21 +1294,42 @@ then view them in the "View Structure" tab.</p>
     
     def _save_structure_to_db(self, db_path_edit, name_edit, tags_edit):
         """Save the current structure to the database."""
+        print("DEBUG: _save_structure_to_db called")
+        print(f"DEBUG: Current working directory: {os.getcwd()}")
+        print(f"DEBUG: HOME environment variable: {os.environ.get('HOME', 'NOT SET')}")
+        print(f"DEBUG: USER environment variable: {os.environ.get('USER', 'NOT SET')}")
         if not ASE_DB_AVAILABLE:
+            print("DEBUG: ASE_DB not available")
             return
         
         atoms = self.session_state.get('current_structure')
         if atoms is None:
+            print("DEBUG: No structure loaded")
             QMessageBox.warning(self, "Warning", "No structure loaded. Load or build a structure first.")
             return
         
+        print(f"DEBUG: Atoms object: {atoms}")
+        print(f"DEBUG: Atoms formula: {atoms.get_chemical_formula()}")
+        print(f"DEBUG: Atoms positions shape: {atoms.positions.shape}")
+        print(f"DEBUG: Atoms cell: {atoms.cell}")
+        
         db_path = db_path_edit.text().strip()
+        print(f"DEBUG: db_path from edit: '{db_path}'")
         if not db_path:
+            print("DEBUG: No db_path provided")
             QMessageBox.warning(self, "Warning", "Please enter a database path")
             return
         
         # Normalize the path
         db_path = os.path.abspath(os.path.expanduser(db_path))
+        print(f"DEBUG: normalized db_path: '{db_path}'")
+        # Get file modification time before write
+        if os.path.exists(db_path):
+            mtime_before = os.path.getmtime(db_path)
+            print(f"DEBUG: file mtime before: {mtime_before}")
+        else:
+            mtime_before = None
+            print("DEBUG: file does not exist before write")
         
         try:
             # Create database directory if it doesn't exist
@@ -1310,35 +1337,39 @@ then view them in the "View Structure" tab.</p>
             if db_dir:
                 os.makedirs(db_dir, exist_ok=True)
             
+            # Save to database - use the same approach as manual testing
+            print(f"DEBUG: About to call db.write with atoms: {atoms.get_chemical_formula()}")
+            print(f"DEBUG: key_value_pairs: {key_value_pairs}")
+            
+            # Force a flush/close of any existing connections
+            import gc
+            gc.collect()
+            
+            # Create fresh database connection
             db = ase_db_connect(db_path)
             
-            # Prepare key-value pairs
-            key_value_pairs = {}
+            # Double-check the path
+            print(f"DEBUG: Double-checking db_path: {db_path}")
+            print(f"DEBUG: os.path.abspath result: {os.path.abspath(db_path)}")
             
-            # Add name
-            save_name = name_edit.text().strip()
-            if save_name:
-                key_value_pairs['name'] = save_name
+            # Write and immediately check
+            row_id = db.write(atoms, **key_value_pairs)
+            print(f"DEBUG: db.write returned row_id: {row_id}")
             
-            # Add source info
-            source = self.session_state.get('structure_source', '')
-            if source:
-                key_value_pairs['source'] = source
+            # Check immediately after write
+            all_rows = list(db.select())
+            print(f"DEBUG: Immediate check - total structures: {len(all_rows)}")
             
-            # Parse and add tags
-            tags = tags_edit.text().strip()
-            if tags:
-                for tag in tags.split(','):
-                    tag = tag.strip()
-                    if tag:
-                        key_value_pairs[tag] = True
+            # Check if our new structure is there
+            found_new = False
+            for row in all_rows:
+                if row.id == row_id:
+                    print(f"DEBUG: Found new structure immediately: ID {row.id}, Formula {row.formula}")
+                    found_new = True
+                    break
             
-            # Save to database and capture inserted row id when available
-            try:
-                row_id = db.write(atoms, **key_value_pairs)
-            except Exception:
-                # Some ASE versions may not return an id; fall back to None
-                row_id = None
+            if not found_new:
+                print("DEBUG: ERROR - New structure not found immediately after write!")
 
             self.results_label.setText(f"✅ Structure saved to database: {db_path}")
             self.results_label.setStyleSheet("color: green;")
@@ -1347,9 +1378,21 @@ then view them in the "View Structure" tab.</p>
                 self, "Success",
                 f"Structure saved to database!\n\n"
                 f"Formula: {atoms.get_chemical_formula()}\n"
-                f"Database: {db_path}\n\n"
-                "💡 Go to the 'ASE Database' tab to see the updated list."
+                f"Database: {db_path}"
             )
+
+            # Auto-refresh the database list
+            print(f"DEBUG: Saving to path: {db_path}")
+            print(f"DEBUG: Database tab path: {self.db_path_edit.text() if hasattr(self, 'db_path_edit') else 'No db_path_edit'}")
+            
+            # Update the database tab path to match where we just saved
+            if hasattr(self, 'db_path_edit'):
+                self.db_path_edit.setText(db_path)
+                print("DEBUG: Updated database tab path, refreshing list...")
+                self._refresh_db_list()
+                print("DEBUG: Refresh completed")
+            else:
+                print("DEBUG: No db_path_edit found")
 
             # Clear the name and tags
             name_edit.clear()

@@ -291,6 +291,36 @@ class CalculationWindow(QWidget):
         self.electron_maxstep_edit = QLineEdit('200')
         form.addRow('electron_maxstep:', self.electron_maxstep_edit)
         
+        # Additional SCF parameters
+        self.verbosity_combo = QComboBox()
+        self.verbosity_combo.addItems(['low', 'high'])
+        self.verbosity_combo.setCurrentText('low')
+        form.addRow('verbosity:', self.verbosity_combo)
+        
+        self.restart_mode_combo = QComboBox()
+        self.restart_mode_combo.addItems(['from_scratch', 'restart'])
+        self.restart_mode_combo.setCurrentText('from_scratch')
+        form.addRow('restart_mode:', self.restart_mode_combo)
+        
+        self.disk_io_combo = QComboBox()
+        self.disk_io_combo.addItems(['low', 'medium', 'high', 'none'])
+        self.disk_io_combo.setCurrentText('low')
+        form.addRow('disk_io:', self.disk_io_combo)
+        
+        self.mixing_mode_combo = QComboBox()
+        self.mixing_mode_combo.addItems(['plain', 'TF', 'local-TF'])
+        self.mixing_mode_combo.setCurrentText('plain')
+        form.addRow('mixing_mode:', self.mixing_mode_combo)
+        
+        # Forces and stress calculation
+        self.calc_forces_check = QCheckBox('Calculate forces')
+        self.calc_forces_check.setChecked(True)  # Usually enabled
+        form.addRow('', self.calc_forces_check)
+        
+        self.calc_stress_check = QCheckBox('Calculate stress')
+        self.calc_stress_check.setChecked(True)  # Usually enabled
+        form.addRow('', self.calc_stress_check)
+        
         # Initialize with moderate preset (default)
         # Note: This is handled automatically by setting the combo box index above
         
@@ -563,6 +593,26 @@ class CalculationWindow(QWidget):
             
             if hasattr(self, 'electron_maxstep_edit') and self.electron_maxstep_edit.text():
                 params['electron_maxstep'] = int(self.electron_maxstep_edit.text())
+            
+            # Additional SCF parameters
+            if hasattr(self, 'verbosity_combo'):
+                params['verbosity'] = self.verbosity_combo.currentText()
+            
+            if hasattr(self, 'restart_mode_combo'):
+                params['restart_mode'] = self.restart_mode_combo.currentText()
+            
+            if hasattr(self, 'disk_io_combo'):
+                params['disk_io'] = self.disk_io_combo.currentText()
+            
+            if hasattr(self, 'mixing_mode_combo'):
+                params['mixing_mode'] = self.mixing_mode_combo.currentText()
+            
+            # Forces and stress
+            if hasattr(self, 'calc_forces_check'):
+                params['tprnfor'] = self.calc_forces_check.isChecked()
+            
+            if hasattr(self, 'calc_stress_check'):
+                params['tstress'] = self.calc_stress_check.isChecked()
                 
         except Exception:
             pass

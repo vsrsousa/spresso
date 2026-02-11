@@ -321,8 +321,11 @@ class CalculationWindow(QWidget):
         self.calc_stress_check.setChecked(False)  # Disabled by default for speed
         form.addRow('', self.calc_stress_check)
         
-        # Initialize with moderate preset (default)
-        # Note: This is handled automatically by setting the combo box index above
+        # Initialize with fast preset (default)
+        try:
+            self._on_protocol_changed('fast')
+        except Exception:
+            pass
         
         self.tabs.addTab(w, 'Basic Parameters')
 

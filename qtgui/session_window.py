@@ -1032,6 +1032,28 @@ class MainWindow(QMainWindow):
         if self._config_dialog is not None:
             self._config_dialog.close()
 
+        # Close all calculation windows
+        if hasattr(self, '_calc_windows'):
+            for win in self._calc_windows:
+                try:
+                    win.close()
+                except Exception:
+                    pass
+
+        # Close job monitor if open
+        if hasattr(self, '_job_monitor') and self._job_monitor is not None:
+            try:
+                self._job_monitor.close()
+            except Exception:
+                pass
+
+        # Close structure manager if open
+        if hasattr(self, '_structure_manager') and self._structure_manager is not None:
+            try:
+                self._structure_manager.close()
+            except Exception:
+                pass
+
         try:
             if hasattr(self, '_manager') and hasattr(self, '_manager_session_id'):
                 try:

@@ -256,14 +256,44 @@ class CalculationWindow(QWidget):
     def _build_basic_tab(self):
         w = QWidget()
         form = QFormLayout(w)
+        
+        # Protocol selection
         self.protocol_combo = QComboBox()
         try:
             self.protocol_combo.addItems(list(PRESETS.keys()))
+            self.protocol_combo.currentTextChanged.connect(self._on_protocol_changed)
+            # Set moderate as the default selection
+            moderate_index = self.protocol_combo.findText('moderate')
+            if moderate_index >= 0:
+                self.protocol_combo.setCurrentIndex(moderate_index)
         except Exception:
             pass
         form.addRow('Protocol:', self.protocol_combo)
+        
+        # Energy cutoffs
         self.ecutwfc_edit = QLineEdit('50')
         form.addRow('ecutwfc (Ry):', self.ecutwfc_edit)
+        
+        self.ecutrho_edit = QLineEdit('400')
+        form.addRow('ecutrho (Ry):', self.ecutrho_edit)
+        
+        # Convergence and mixing
+        self.conv_thr_edit = QLineEdit('1.0e-8')
+        form.addRow('conv_thr:', self.conv_thr_edit)
+        
+        self.mixing_beta_edit = QLineEdit('0.5')
+        form.addRow('mixing_beta:', self.mixing_beta_edit)
+        
+        # K-points and SCF
+        self.kspacing_edit = QLineEdit('0.3')
+        form.addRow('kspacing (Å⁻¹):', self.kspacing_edit)
+        
+        self.electron_maxstep_edit = QLineEdit('200')
+        form.addRow('electron_maxstep:', self.electron_maxstep_edit)
+        
+        # Initialize with moderate preset (default)
+        # Note: This is handled automatically by setting the combo box index above
+        
         self.tabs.addTab(w, 'Basic Parameters')
 
     def _build_magnetism_tab(self):
@@ -453,11 +483,26 @@ class CalculationWindow(QWidget):
             preset = PRESETS.get(proto) if PRESETS else None
             if not preset:
                 return
-            if 'ecutwfc' in preset and hasattr(self, 'ecutwfc_edit'):
-                try:
-                    self.ecutwfc_edit.setText(str(preset.get('ecutwfc')))
-                except Exception:
-                    pass
+            
+            # Update all parameter fields based on preset
+            if hasattr(self, 'ecutwfc_edit') and 'ecutwfc' in preset:
+                self.ecutwfc_edit.setText(str(preset['ecutwfc']))
+            
+            if hasattr(self, 'ecutrho_edit') and 'ecutrho' in preset:
+                self.ecutrho_edit.setText(str(preset['ecutrho']))
+            
+            if hasattr(self, 'conv_thr_edit') and 'conv_thr' in preset:
+                self.conv_thr_edit.setText(f"{preset['conv_thr']:.0e}")
+            
+            if hasattr(self, 'mixing_beta_edit') and 'mixing_beta' in preset:
+                self.mixing_beta_edit.setText(str(preset['mixing_beta']))
+            
+            if hasattr(self, 'kspacing_edit') and 'kspacing' in preset:
+                self.kspacing_edit.setText(str(preset['kspacing']))
+            
+            if hasattr(self, 'electron_maxstep_edit') and 'electron_maxstep' in preset:
+                self.electron_maxstep_edit.setText(str(preset['electron_maxstep']))
+                
         except Exception:
             pass
 
@@ -486,3 +531,40 @@ class CalculationWindow(QWidget):
                 pass
         
         return {}
+
+    def get_basic_parameters(self):
+        """Get the current basic calculation parameters as a dict."""
+        params = {}
+        
+        try:
+            # Protocol
+            if hasattr(self, 'protocol_combo'):
+                protocol = self.protocol_combo.currentText()
+                if protocol:
+                    params['protocol'] = protocol
+            
+            # Energy cutoffs
+            if hasattr(self, 'ecutwfc_edit') and self.ecutwfc_edit.text():
+                params['ecutwfc'] = float(self.ecutwfc_edit.text())
+            
+            if hasattr(self, 'ecutrho_edit') and self.ecutrho_edit.text():
+                params['ecutrho'] = float(self.ecutrho_edit.text())
+            
+            # Convergence and mixing
+            if hasattr(self, 'conv_thr_edit') and self.conv_thr_edit.text():
+                params['conv_thr'] = float(self.conv_thr_edit.text())
+            
+            if hasattr(self, 'mixing_beta_edit') and self.mixing_beta_edit.text():
+                params['mixing_beta'] = float(self.mixing_beta_edit.text())
+            
+            # K-points and SCF
+            if hasattr(self, 'kspacing_edit') and self.kspacing_edit.text():
+                params['kspacing'] = float(self.kspacing_edit.text())
+            
+            if hasattr(self, 'electron_maxstep_edit') and self.electron_maxstep_edit.text():
+                params['electron_maxstep'] = int(self.electron_maxstep_edit.text())
+                
+        except Exception:
+            pass
+        
+        return params

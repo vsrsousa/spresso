@@ -5,6 +5,7 @@ to ensure a single `CalculationWindow` class provides the requested
 tabs. It intentionally keeps logic defensive to work in minimal test
 environments.
 """
+import json
 import os
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFormLayout,
@@ -54,6 +55,17 @@ except Exception:
             return True
         except Exception:
             return False
+
+
+try:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('pseudo_orbitals', os.path.join(os.path.dirname(__file__), '..', '..', 'xespresso', 'tools', 'pseudo_orbitals.py'))
+    pseudo_orbitals = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pseudo_orbitals)
+    parse_pseudopotential_orbitals = pseudo_orbitals.parse_pseudopotential_orbitals
+    PSEUDO_ORBITALS_AVAILABLE = True
+except Exception:
+    PSEUDO_ORBITALS_AVAILABLE = False
 
 
 class CalculationWindow(QWidget):
@@ -706,14 +718,14 @@ class CalculationWindow(QWidget):
         format_layout.addWidget(QLabel("Format:"))
         self.hubbard_format_combo = QComboBox()
         self.hubbard_format_combo.addItems(["Auto", "Old (QE < 7.0)", "New (QE >= 7.0)"])
-        self.hubbard_format_combo.setToolTip("QE version determines format: Old uses SYSTEM namelist, New uses HUBBARD card")
+        self.hubbard_format_combo.setToolTip("QE version determines format: Auto detects based on orbital specifications, Old uses SYSTEM namelist, New uses HUBBARD card")
         format_layout.addWidget(self.hubbard_format_combo)
 
         format_layout.addWidget(QLabel("Projector:"))
         self.hubbard_projector_combo = QComboBox()
         self.hubbard_projector_combo.addItems(["atomic", "ortho-atomic", "norm-atomic", "wf", "pseudo"])
-        self.hubbard_projector_combo.setCurrentText("atomic")
-        self.hubbard_projector_combo.setToolTip("Projector type for new format Hubbard calculations")
+        self.hubbard_projector_combo.setCurrentText("ortho-atomic")
+        self.hubbard_projector_combo.setToolTip("Projector type for new format Hubbard calculations (ortho-atomic recommended by QE)")
         format_layout.addWidget(self.hubbard_projector_combo)
         hubbard_layout.addLayout(format_layout)
 
@@ -727,6 +739,7 @@ class CalculationWindow(QWidget):
         u_layout = QVBoxLayout(u_group)
 
         u_info = QLabel("Configure Hubbard U values for each element/orbital combination.\n"
+                       "• Auto format: Automatically chooses based on orbital specifications\n"
                        "• Old format: U values per element (e.g., Fe: 4.3)\n"
                        "• New format: U values per element-orbital (e.g., Fe-3d: 4.3)")
         u_info.setWordWrap(True)
@@ -859,6 +872,9 @@ class CalculationWindow(QWidget):
                 self.hubbard_v_spec2_combo.clear()
                 self.hubbard_advanced_element_combo.clear()
 
+                # Get available orbitals based on selected pseudopotentials
+                available_orbitals = self._get_available_hubbard_orbitals()
+
                 # Add elements and element-orbital combinations
                 for element in elements:
                     self.hubbard_u_element_combo.addItem(element)
@@ -866,8 +882,9 @@ class CalculationWindow(QWidget):
                     self.hubbard_v_spec2_combo.addItem(element)
                     self.hubbard_advanced_element_combo.addItem(element)
 
-                    # Add common orbital combinations for new format
-                    for orbital in ['3d', '4d', '4f', '5d', '5f', '2p', '3p', '4p', '5p', '6p']:
+                    # Add orbital combinations based on pseudopotential analysis
+                    element_orbitals = available_orbitals.get(element, ['3d'])  # Default fallback
+                    for orbital in element_orbitals:
                         orbital_combo = f"{element}-{orbital}"
                         self.hubbard_u_element_combo.addItem(orbital_combo)
                         self.hubbard_v_spec1_combo.addItem(orbital_combo)
@@ -1166,6 +1183,90 @@ class CalculationWindow(QWidget):
                 pass
 
         self.session_state['hubbard'] = hubbard_config
+
+    def _get_available_hubbard_orbitals(self):
+        """Get available Hubbard orbitals based on selected pseudopotentials."""
+        if not PSEUDO_ORBITALS_AVAILABLE or not self.session_state:
+            return {}
+
+        pseudopotentials = self.session_state.get('pseudopotentials', {})
+        if not pseudopotentials:
+            return {}
+
+        available_orbitals = {}
+
+        # Try to find pseudopotential files in common locations
+        # This is more generic than hardcoded paths
+        for element, pseudo_filename in pseudopotentials.items():
+            if not pseudo_filename:
+                continue
+
+            # Try to find the pseudopotential file
+            pseudo_path = None
+            
+            # Check if it's an absolute path
+            if os.path.isfile(pseudo_filename):
+                pseudo_path = pseudo_filename
+            else:
+                # Try relative to current working directory
+                cwd_path = os.path.join(os.getcwd(), pseudo_filename)
+                if os.path.isfile(cwd_path):
+                    pseudo_path = cwd_path
+                else:
+                    # Try in common pseudopotential directories
+                    # This could be extended with environment variables or config
+                    common_dirs = [
+                        'pseudo',
+                        'pseudopotentials', 
+                        'data/pseudo',
+                        'examples/datas/pseudo'
+                    ]
+                    for common_dir in common_dirs:
+                        candidate_path = os.path.join(os.getcwd(), common_dir, pseudo_filename)
+                        if os.path.isfile(candidate_path):
+                            pseudo_path = candidate_path
+                            break
+
+            if pseudo_path:
+                try:
+                    # Parse the pseudopotential file to extract orbitals
+                    orbital_info = parse_pseudopotential_orbitals(pseudo_path)
+                    orbitals = orbital_info.get('orbitals', [])
+
+                    # Convert to the format expected by Hubbard (e.g., '3d', '4f')
+                    # Filter out s and p orbitals as they're typically not used for Hubbard U
+                    hubbard_orbitals = [orb for orb in orbitals if orb[-1] in ['d', 'f']]
+
+                    if hubbard_orbitals:
+                        available_orbitals[element] = hubbard_orbitals
+                    else:
+                        # Fallback to JSON file data
+                        available_orbitals[element] = self._get_fallback_orbitals_for_element(element)
+
+                except Exception as e:
+                    # If parsing fails, use fallback from JSON
+                    available_orbitals[element] = self._get_fallback_orbitals_for_element(element)
+            else:
+                # If pseudopotential file not found, use fallback from JSON
+                available_orbitals[element] = self._get_fallback_orbitals_for_element(element)
+
+        return available_orbitals
+
+    def _get_fallback_orbitals_for_element(self, element):
+        """Get fallback orbital suggestions from JSON file."""
+        try:
+            # Load the hubbard orbitals JSON file
+            json_path = os.path.join(os.path.dirname(__file__), '..', '..', 'xespresso', 'data', 'hubbard_orbitals.json')
+            with open(json_path, 'r') as f:
+                orbital_data = json.load(f)
+            
+            # Filter to only d and f orbitals for Hubbard U
+            all_orbitals = orbital_data.get("orbitals", {}).get(element, ['3d'])
+            hubbard_orbitals = [orb for orb in all_orbitals if orb[-1] in ['d', 'f']]
+            return hubbard_orbitals if hubbard_orbitals else ['3d']
+        except Exception:
+            # Ultimate fallback if JSON loading fails
+            return ['3d']
 
     def _build_prepare_tab(self):
         w = QWidget()

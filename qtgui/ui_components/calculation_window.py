@@ -89,6 +89,7 @@ class CalculationWindow(QWidget):
         # Initialize dictionaries for dynamic inputs
         self.magnetic_edits = {}
         self.magnetic_checkboxes = {}  # Track which elements have magnetism enabled
+        self.version_signal_connected = False  # Track if version combo signal is connected
 
         # Determine calculation type from calc_name
         self.calculation_type = self._get_calculation_type_from_name(calc_name)
@@ -1302,8 +1303,13 @@ class CalculationWindow(QWidget):
         self.preview_refresh_btn.clicked.connect(self._update_preview)
         button_layout.addWidget(self.preview_refresh_btn)
 
+        self.preview_cancel_btn = QPushButton("❌ Cancel")
+        self.preview_cancel_btn.clicked.connect(self._cancel_preview)
+        self.preview_cancel_btn.setEnabled(False)
+        button_layout.addWidget(self.preview_cancel_btn)
+
         self.preview_auto_checkbox = QCheckBox("Auto-update preview")
-        self.preview_auto_checkbox.setChecked(True)
+        self.preview_auto_checkbox.setChecked(False)  # Off by default to avoid slow updates
         self.preview_auto_checkbox.setToolTip("Automatically update preview when settings change")
         button_layout.addWidget(self.preview_auto_checkbox)
 
@@ -1328,7 +1334,7 @@ class CalculationWindow(QWidget):
         self.preview_timer = QTimer()
         self.preview_timer.timeout.connect(self._on_preview_timer_timeout)
         self.preview_timer.setSingleShot(True)
-        self.preview_timer.setInterval(1000)  # 1 second delay
+        self.preview_timer.setInterval(3000)  # 3 second delay for less aggressive updates
 
         # Connect to session state changes for auto-update
         if hasattr(self, 'session_state'):
@@ -1371,7 +1377,7 @@ class CalculationWindow(QWidget):
 
     def _schedule_preview_update(self):
         """Schedule a preview update with debouncing."""
-        if not self.preview_auto_checkbox.isChecked():
+        if not hasattr(self, 'preview_auto_checkbox') or not self.preview_auto_checkbox.isChecked():
             return
 
         # Restart the timer to debounce rapid changes
@@ -1411,17 +1417,88 @@ class CalculationWindow(QWidget):
             self.preview_status_label.setStyleSheet("color: orange;")
             return
 
-        # Generate preview in background thread
-        self.preview_status_label.setText("⏳ Generating preview...")
-        self.preview_status_label.setStyleSheet("color: blue;")
-        self.preview_refresh_btn.setEnabled(False)
+        # Simple caching to avoid regenerating identical previews
+        import json
+        config_hash = hash(json.dumps(config, sort_keys=True, default=str))
+        if hasattr(self, '_last_preview_config') and self._last_preview_config == config_hash:
+            # Configuration hasn't changed, skip update
+            return
+        self._last_preview_config = config_hash
+
+        # For faster preview, show config summary first, then full input
+        self._show_config_summary(config)
+
+    def _show_config_summary(self, config):
+        """Show a quick configuration summary."""
+        try:
+            summary = []
+            summary.append("=== QUICK CONFIGURATION SUMMARY ===")
+            summary.append(f"Calculation Type: {config.get('calc_type', 'unknown')}")
+            summary.append(f"Protocol: {config.get('protocol', 'unknown')}")
+            summary.append(f"ECUTWFC: {config.get('ecutwfc', 'not set')}")
+            summary.append(f"ECUTRHO: {config.get('ecutrho', 'not set')}")
+
+            if config.get('pseudopotentials'):
+                summary.append(f"Pseudopotentials: {len(config['pseudopotentials'])} configured")
+
+            if config.get('enable_magnetism'):
+                summary.append("Magnetism: Enabled")
+            else:
+                summary.append("Magnetism: Disabled")
+
+            if config.get('enable_hubbard'):
+                summary.append("Hubbard: Enabled")
+                if config.get('hubbard_config'):
+                    summary.append(f"Hubbard orbitals: {len(config['hubbard_config'])} configured")
+            else:
+                summary.append("Hubbard: Disabled")
+
+            summary.append("")
+            summary.append("=== GENERATING FULL INPUT PREVIEW ===")
+
+            self.preview_text.setPlainText("\n".join(summary))
+            self.preview_status_label.setText("⏳ Generating full preview...")
+            self.preview_status_label.setStyleSheet("color: blue;")
+            self.preview_refresh_btn.setEnabled(False)
+
+            # Generate full preview in background
+            self._generate_full_preview(config)
+
+        except Exception as e:
+            self.preview_text.setPlainText(f"Error creating summary: {e}")
+            self.preview_status_label.setText("❌ Summary failed")
+            self.preview_status_label.setStyleSheet("color: red;")
+
+    def _cancel_preview(self):
+        """Cancel the current preview generation."""
+        if hasattr(self, '_preview_thread') and self._preview_thread and self._preview_thread.is_alive():
+            # Note: Python threads cannot be forcefully killed, but we can set a flag
+            self._preview_cancelled = True
+            self.preview_status_label.setText("❌ Preview cancelled")
+            self.preview_status_label.setStyleSheet("color: orange;")
+            self.preview_refresh_btn.setEnabled(True)
+            self.preview_cancel_btn.setEnabled(False)
+
+    def _generate_full_preview(self, config):
+        """Generate the full input file preview in background thread."""
+        atoms = self.session_state.get('current_structure')
+        self._preview_cancelled = False
+        self.preview_cancel_btn.setEnabled(True)
 
         def generate_preview():
             try:
+                # Check if cancelled before starting
+                if self._preview_cancelled:
+                    return
+
                 # Create temporary directory for dry run
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Generate input files
                     atoms_copy, calc = dry_run_calculation(atoms, config, label="preview")
+
+                    # Check if cancelled during calculation
+                    if self._preview_cancelled:
+                        return
 
                     # Read the generated input file
                     input_content = ""
@@ -1444,29 +1521,37 @@ class CalculationWindow(QWidget):
                     except Exception as e:
                         input_content = f"Error reading input file: {e}"
 
+                    # Check if cancelled before updating UI
+                    if self._preview_cancelled:
+                        return
+
                     # Update UI in main thread
                     def update_ui():
-                        self.preview_text.setPlainText(input_content)
-                        self.preview_status_label.setText("✅ Preview generated successfully")
-                        self.preview_status_label.setStyleSheet("color: green;")
-                        self.preview_refresh_btn.setEnabled(True)
+                        if not self._preview_cancelled:  # Double-check
+                            self.preview_text.setPlainText(input_content)
+                            self.preview_status_label.setText("✅ Preview generated successfully")
+                            self.preview_status_label.setStyleSheet("color: green;")
+                            self.preview_refresh_btn.setEnabled(True)
+                            self.preview_cancel_btn.setEnabled(False)
 
                     # Schedule UI update
                     from qtpy.QtCore import QTimer
                     QTimer.singleShot(0, update_ui)
 
             except Exception as e:
-                def update_error():
-                    self.preview_text.setPlainText(f"Error generating preview:\n\n{str(e)}")
-                    self.preview_status_label.setText("❌ Preview generation failed")
-                    self.preview_status_label.setStyleSheet("color: red;")
-                    self.preview_refresh_btn.setEnabled(True)
+                if not self._preview_cancelled:
+                    def update_error():
+                        self.preview_text.setPlainText(f"Error generating preview:\n\n{str(e)}")
+                        self.preview_status_label.setText("❌ Preview generation failed")
+                        self.preview_status_label.setStyleSheet("color: red;")
+                        self.preview_refresh_btn.setEnabled(True)
+                        self.preview_cancel_btn.setEnabled(False)
 
-                QTimer.singleShot(0, update_error)
+                    QTimer.singleShot(0, update_error)
 
         # Start background thread
-        thread = threading.Thread(target=generate_preview, daemon=True)
-        thread.start()
+        self._preview_thread = threading.Thread(target=generate_preview, daemon=True)
+        self._preview_thread.start()
 
     def _build_config_from_gui_state(self):
         """Build configuration dictionary from current GUI state."""
@@ -1602,14 +1687,13 @@ class CalculationWindow(QWidget):
                             self.codes_combo.addItem(str(name))
                 except Exception:
                     pass
-                try:
-                    self.version_combo.currentTextChanged.disconnect()
-                except Exception:
-                    pass
-                try:
-                    self.version_combo.currentTextChanged.connect(lambda v: self._on_version_changed(v, cfg))
-                except Exception:
-                    pass
+                # Connect the signal only once
+                if not self.version_signal_connected:
+                    try:
+                        self.version_combo.currentTextChanged.connect(lambda v: self._on_version_changed(v, cfg))
+                        self.version_signal_connected = True
+                    except Exception:
+                        pass
             else:
                 try:
                     self.version_combo.setVisible(False)

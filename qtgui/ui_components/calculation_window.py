@@ -7,12 +7,14 @@ environments.
 """
 import json
 import os
+import tempfile
+import threading
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFormLayout,
     QComboBox, QLineEdit, QTextEdit, QPushButton, QCheckBox,
     QTabWidget, QApplication, QMessageBox, QGroupBox, QScrollArea
 )
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 
 try:
     from xespresso.workflow.simple_workflow import PRESETS
@@ -67,6 +69,12 @@ try:
 except Exception:
     PSEUDO_ORBITALS_AVAILABLE = False
 
+try:
+    from qtgui.calculations import dry_run_calculation
+    DRY_RUN_AVAILABLE = True
+except Exception:
+    DRY_RUN_AVAILABLE = False
+
 
 class CalculationWindow(QWidget):
     """Modeless calculation configuration window with required tabs."""
@@ -94,7 +102,7 @@ class CalculationWindow(QWidget):
         self._build_basic_tab()
         self._build_magnetism_tab()
         self._build_hubbard_tab()
-        self._build_prepare_tab()
+        self._build_preview_tab()
         self._build_submit_tab()
 
         # Listen for structure changes to update pseudopotentials and magnetic inputs
@@ -420,6 +428,9 @@ class CalculationWindow(QWidget):
             info_label.setStyleSheet("font-style: italic; color: gray;")
             self.pseudo_form_layout.addRow(info_label)
 
+        # Update preview when structure changes
+        self._schedule_preview_update()
+
     def _on_pseudopotentials_changed(self):
         """Handle pseudopotential input changes."""
         pseudopotentials = {}
@@ -694,6 +705,9 @@ class CalculationWindow(QWidget):
         except Exception:
             pass
 
+        # Update preview when magnetic settings change
+        self._schedule_preview_update()
+
     def _on_magnetism_toggled(self, state):
         """Show/hide magnetic configuration options when magnetism is enabled/disabled."""
         enabled = state == 2  # Qt.CheckState.Checked
@@ -925,6 +939,9 @@ class CalculationWindow(QWidget):
         except Exception as e:
             self.hubbard_status_label.setText(f"Error updating Hubbard inputs: {e}")
             self.hubbard_status_label.setStyleSheet("color: red;")
+
+        # Update preview when Hubbard settings change
+        self._schedule_preview_update()
 
     def _clear_hubbard_u_inputs(self):
         """Clear all U parameter inputs."""
@@ -1268,14 +1285,243 @@ class CalculationWindow(QWidget):
             # Ultimate fallback if JSON loading fails
             return ['3d']
 
-    def _build_prepare_tab(self):
+    def _build_preview_tab(self):
+        """Build the preview tab that shows generated input files automatically."""
         w = QWidget()
         layout = QVBoxLayout(w)
-        box = QGroupBox('Preparation Actions')
-        bl = QVBoxLayout(box)
-        bl.addWidget(QLabel('Actions: generate input, validate settings, dry-run'))
-        layout.addWidget(box)
-        self.tabs.addTab(w, 'Prepare')
+        layout.setSpacing(5)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Preview Configuration
+        preview_group = QGroupBox("📄 Input File Preview")
+        preview_layout = QVBoxLayout(preview_group)
+
+        # Control buttons
+        button_layout = QHBoxLayout()
+        self.preview_refresh_btn = QPushButton("🔄 Refresh Preview")
+        self.preview_refresh_btn.clicked.connect(self._update_preview)
+        button_layout.addWidget(self.preview_refresh_btn)
+
+        self.preview_auto_checkbox = QCheckBox("Auto-update preview")
+        self.preview_auto_checkbox.setChecked(True)
+        self.preview_auto_checkbox.setToolTip("Automatically update preview when settings change")
+        button_layout.addWidget(self.preview_auto_checkbox)
+
+        button_layout.addStretch()
+        preview_layout.addLayout(button_layout)
+
+        # Status label
+        self.preview_status_label = QLabel("Ready to generate preview")
+        self.preview_status_label.setWordWrap(True)
+        preview_layout.addWidget(self.preview_status_label)
+
+        # Input file display
+        self.preview_text = QTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setFontFamily("Monospace")
+        self.preview_text.setPlainText("Click 'Refresh Preview' to generate input files preview")
+        preview_layout.addWidget(self.preview_text)
+
+        layout.addWidget(preview_group)
+
+        # Set up auto-update timer
+        self.preview_timer = QTimer()
+        self.preview_timer.timeout.connect(self._on_preview_timer_timeout)
+        self.preview_timer.setSingleShot(True)
+        self.preview_timer.setInterval(1000)  # 1 second delay
+
+        # Connect to session state changes for auto-update
+        if hasattr(self, 'session_state'):
+            # We'll implement auto-update by connecting to various change signals
+            self._setup_preview_auto_update()
+
+        self.tabs.addTab(w, 'Preview')
+
+    def _setup_preview_auto_update(self):
+        """Set up automatic preview updates when settings change."""
+        # Connect to various change signals that should trigger preview update
+        try:
+            # Basic tab changes
+            if hasattr(self, 'ecutwfc_edit'):
+                self.ecutwfc_edit.textChanged.connect(self._schedule_preview_update)
+            if hasattr(self, 'ecutrho_edit'):
+                self.ecutrho_edit.textChanged.connect(self._schedule_preview_update)
+            if hasattr(self, 'protocol_combo'):
+                self.protocol_combo.currentTextChanged.connect(self._schedule_preview_update)
+
+            # Pseudopotentials changes
+            if hasattr(self, 'pseudo_group'):
+                self.pseudo_group.toggled.connect(self._schedule_preview_update)
+
+            # Magnetism changes
+            if hasattr(self, 'magnetism_group'):
+                self.magnetism_group.toggled.connect(self._schedule_preview_update)
+
+            # Hubbard changes
+            if hasattr(self, 'hubbard_group'):
+                self.hubbard_group.toggled.connect(self._schedule_preview_update)
+            if hasattr(self, 'hubbard_format_combo'):
+                self.hubbard_format_combo.currentTextChanged.connect(self._schedule_preview_update)
+            if hasattr(self, 'hubbard_projector_combo'):
+                self.hubbard_projector_combo.currentTextChanged.connect(self._schedule_preview_update)
+
+        except Exception as e:
+            # Silently ignore connection errors in minimal environments
+            pass
+
+    def _schedule_preview_update(self):
+        """Schedule a preview update with debouncing."""
+        if not self.preview_auto_checkbox.isChecked():
+            return
+
+        # Restart the timer to debounce rapid changes
+        self.preview_timer.start()
+
+    def _on_preview_timer_timeout(self):
+        """Handle the preview update timer timeout."""
+        self._update_preview()
+
+    def _update_preview(self):
+        """Update the preview with current configuration."""
+        if not DRY_RUN_AVAILABLE:
+            self.preview_text.setPlainText("Preview not available - dry run functionality not loaded")
+            self.preview_status_label.setText("❌ Preview unavailable")
+            self.preview_status_label.setStyleSheet("color: red;")
+            return
+
+        # Check if we have the required data
+        if not self.session_state:
+            self.preview_text.setPlainText("No session state available")
+            self.preview_status_label.setText("❌ No session data")
+            self.preview_status_label.setStyleSheet("color: red;")
+            return
+
+        atoms = self.session_state.get('current_structure')
+        if not atoms:
+            self.preview_text.setPlainText("No structure loaded")
+            self.preview_status_label.setText("❌ No structure loaded")
+            self.preview_status_label.setStyleSheet("color: red;")
+            return
+
+        # Build configuration from current GUI state
+        config = self._build_config_from_gui_state()
+        if not config:
+            self.preview_text.setPlainText("Configuration incomplete")
+            self.preview_status_label.setText("❌ Configuration incomplete")
+            self.preview_status_label.setStyleSheet("color: orange;")
+            return
+
+        # Generate preview in background thread
+        self.preview_status_label.setText("⏳ Generating preview...")
+        self.preview_status_label.setStyleSheet("color: blue;")
+        self.preview_refresh_btn.setEnabled(False)
+
+        def generate_preview():
+            try:
+                # Create temporary directory for dry run
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Generate input files
+                    atoms_copy, calc = dry_run_calculation(atoms, config, label="preview")
+
+                    # Read the generated input file
+                    input_content = ""
+                    try:
+                        # Try to find the input file
+                        pwi_path = getattr(calc, 'pwi', None)
+                        if not pwi_path:
+                            # Try to construct the path
+                            prefix = getattr(calc, 'prefix', 'pw')
+                            directory = getattr(calc, 'directory', temp_dir)
+                            pwi_path = os.path.join(directory, f"{prefix}.pwi")
+
+                        if os.path.exists(pwi_path):
+                            with open(pwi_path, 'r') as f:
+                                input_content = f.read()
+                        else:
+                            input_content = f"Input file not found at: {pwi_path}\n\nAvailable files in {temp_dir}:\n"
+                            for file in os.listdir(temp_dir):
+                                input_content += f"- {file}\n"
+                    except Exception as e:
+                        input_content = f"Error reading input file: {e}"
+
+                    # Update UI in main thread
+                    def update_ui():
+                        self.preview_text.setPlainText(input_content)
+                        self.preview_status_label.setText("✅ Preview generated successfully")
+                        self.preview_status_label.setStyleSheet("color: green;")
+                        self.preview_refresh_btn.setEnabled(True)
+
+                    # Schedule UI update
+                    from qtpy.QtCore import QTimer
+                    QTimer.singleShot(0, update_ui)
+
+            except Exception as e:
+                def update_error():
+                    self.preview_text.setPlainText(f"Error generating preview:\n\n{str(e)}")
+                    self.preview_status_label.setText("❌ Preview generation failed")
+                    self.preview_status_label.setStyleSheet("color: red;")
+                    self.preview_refresh_btn.setEnabled(True)
+
+                QTimer.singleShot(0, update_error)
+
+        # Start background thread
+        thread = threading.Thread(target=generate_preview, daemon=True)
+        thread.start()
+
+    def _build_config_from_gui_state(self):
+        """Build configuration dictionary from current GUI state."""
+        config = {}
+
+        try:
+            # Basic calculation settings
+            if hasattr(self, 'protocol_combo'):
+                protocol = self.protocol_combo.currentText()
+                if protocol and protocol != 'custom':
+                    config.update(PRESETS.get(protocol, {}))
+
+            if hasattr(self, 'ecutwfc_edit') and self.ecutwfc_edit.text():
+                config['ecutwfc'] = float(self.ecutwfc_edit.text())
+            if hasattr(self, 'ecutrho_edit') and self.ecutrho_edit.text():
+                config['ecutrho'] = float(self.ecutrho_edit.text())
+
+            # Pseudopotentials
+            if hasattr(self, 'session_state') and 'pseudopotentials' in self.session_state:
+                config['pseudopotentials'] = self.session_state['pseudopotentials']
+
+            # Magnetism
+            if hasattr(self, 'magnetism_group') and self.magnetism_group.isChecked():
+                config['enable_magnetism'] = True
+                if hasattr(self, 'session_state') and 'magnetism' in self.session_state:
+                    config['magnetic_config'] = self.session_state['magnetism']
+            else:
+                config['enable_magnetism'] = False
+
+            # Hubbard
+            if hasattr(self, 'hubbard_group') and self.hubbard_group.isChecked():
+                config['enable_hubbard'] = True
+                if hasattr(self, 'session_state') and 'hubbard' in self.session_state:
+                    hubbard_config = self.session_state['hubbard'].copy()
+
+                    # Convert format setting
+                    if 'use_new_format' in hubbard_config:
+                        if hubbard_config['use_new_format'] is True:
+                            config['hubbard_format'] = 'new'
+                        elif hubbard_config['use_new_format'] is False:
+                            config['hubbard_format'] = 'old'
+                        del hubbard_config['use_new_format']
+
+                    config.update(hubbard_config)
+            else:
+                config['enable_hubbard'] = False
+
+            # Calculation type (default to SCF)
+            config['calc_type'] = 'scf'
+
+            return config
+
+        except Exception as e:
+            print(f"Error building config: {e}")
+            return None
 
     def _build_submit_tab(self):
         w = QWidget()

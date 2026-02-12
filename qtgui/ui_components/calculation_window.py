@@ -691,11 +691,481 @@ class CalculationWindow(QWidget):
 
     def _build_hubbard_tab(self):
         w = QWidget()
-        form = QFormLayout(w)
-        self.hubbard_text = QTextEdit()
-        self.hubbard_text.setPlaceholderText('Enter Hubbard U values e.g. Fe:5.3')
-        form.addRow('Hubbard U:', self.hubbard_text)
+        layout = QVBoxLayout(w)
+        layout.setSpacing(5)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Hubbard Configuration
+        self.hubbard_group = QGroupBox("🧲 Hubbard Parameters (DFT+U)")
+        self.hubbard_group.setCheckable(True)
+        self.hubbard_group.setChecked(False)
+        hubbard_layout = QVBoxLayout(self.hubbard_group)
+
+        # Format selection and projector
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+        self.hubbard_format_combo = QComboBox()
+        self.hubbard_format_combo.addItems(["Auto", "Old (QE < 7.0)", "New (QE >= 7.0)"])
+        self.hubbard_format_combo.setToolTip("QE version determines format: Old uses SYSTEM namelist, New uses HUBBARD card")
+        format_layout.addWidget(self.hubbard_format_combo)
+
+        format_layout.addWidget(QLabel("Projector:"))
+        self.hubbard_projector_combo = QComboBox()
+        self.hubbard_projector_combo.addItems(["atomic", "ortho-atomic", "norm-atomic", "wf", "pseudo"])
+        self.hubbard_projector_combo.setCurrentText("atomic")
+        self.hubbard_projector_combo.setToolTip("Projector type for new format Hubbard calculations")
+        format_layout.addWidget(self.hubbard_projector_combo)
+        hubbard_layout.addLayout(format_layout)
+
+        # Status label
+        self.hubbard_status_label = QLabel("")
+        self.hubbard_status_label.setWordWrap(True)
+        hubbard_layout.addWidget(self.hubbard_status_label)
+
+        # U Parameters section
+        u_group = QGroupBox("U Parameters (On-site)")
+        u_layout = QVBoxLayout(u_group)
+
+        u_info = QLabel("Configure Hubbard U values for each element/orbital combination.\n"
+                       "• Old format: U values per element (e.g., Fe: 4.3)\n"
+                       "• New format: U values per element-orbital (e.g., Fe-3d: 4.3)")
+        u_info.setWordWrap(True)
+        u_layout.addWidget(u_info)
+
+        self.hubbard_u_container = QWidget()
+        self.hubbard_u_form_layout = QFormLayout(self.hubbard_u_container)
+        u_layout.addWidget(self.hubbard_u_container)
+
+        # Add U parameter button
+        add_u_layout = QHBoxLayout()
+        self.hubbard_u_element_combo = QComboBox()
+        self.hubbard_u_element_combo.setEditable(True)
+        self.hubbard_u_element_combo.setPlaceholderText("Element or Element-Orbital")
+        add_u_layout.addWidget(self.hubbard_u_element_combo)
+
+        self.hubbard_u_value_edit = QLineEdit()
+        self.hubbard_u_value_edit.setPlaceholderText("U value (eV)")
+        add_u_layout.addWidget(self.hubbard_u_value_edit)
+
+        add_u_btn = QPushButton("Add U")
+        add_u_btn.clicked.connect(self._add_hubbard_u_parameter)
+        add_u_layout.addWidget(add_u_btn)
+        u_layout.addLayout(add_u_layout)
+
+        hubbard_layout.addWidget(u_group)
+
+        # V Parameters section
+        v_group = QGroupBox("V Parameters (Inter-site)")
+        v_layout = QVBoxLayout(v_group)
+
+        v_info = QLabel("Configure Hubbard V values for inter-site interactions.\n"
+                       "• Old format: V(na,nb,k) parameters\n"
+                       "• New format: V between specific element-orbital pairs")
+        v_info.setWordWrap(True)
+        v_layout.addWidget(v_info)
+
+        self.hubbard_v_container = QWidget()
+        self.hubbard_v_form_layout = QFormLayout(self.hubbard_v_container)
+        v_layout.addWidget(self.hubbard_v_container)
+
+        # Add V parameter button
+        add_v_layout = QHBoxLayout()
+        self.hubbard_v_spec1_combo = QComboBox()
+        self.hubbard_v_spec1_combo.setEditable(True)
+        self.hubbard_v_spec1_combo.setPlaceholderText("Species1-Orbital")
+        add_v_layout.addWidget(self.hubbard_v_spec1_combo)
+
+        self.hubbard_v_spec2_combo = QComboBox()
+        self.hubbard_v_spec2_combo.setEditable(True)
+        self.hubbard_v_spec2_combo.setPlaceholderText("Species2-Orbital")
+        add_v_layout.addWidget(self.hubbard_v_spec2_combo)
+
+        self.hubbard_v_value_edit = QLineEdit()
+        self.hubbard_v_value_edit.setPlaceholderText("V value (eV)")
+        add_v_layout.addWidget(self.hubbard_v_value_edit)
+
+        add_v_btn = QPushButton("Add V")
+        add_v_btn.clicked.connect(self._add_hubbard_v_parameter)
+        add_v_layout.addWidget(add_v_btn)
+        v_layout.addLayout(add_v_layout)
+
+        hubbard_layout.addWidget(v_group)
+
+        # Advanced parameters section (collapsible)
+        self.hubbard_advanced_group = QGroupBox("Advanced Parameters (J, α, β)")
+        self.hubbard_advanced_group.setCheckable(True)
+        self.hubbard_advanced_group.setChecked(False)
+        advanced_layout = QVBoxLayout(self.hubbard_advanced_group)
+
+        self.hubbard_advanced_container = QWidget()
+        self.hubbard_advanced_form_layout = QFormLayout(self.hubbard_advanced_container)
+        advanced_layout.addWidget(self.hubbard_advanced_container)
+
+        # Add advanced parameter controls
+        add_advanced_layout = QHBoxLayout()
+        self.hubbard_advanced_type_combo = QComboBox()
+        self.hubbard_advanced_type_combo.addItems(["J", "α (alpha)", "β (beta)"])
+        add_advanced_layout.addWidget(self.hubbard_advanced_type_combo)
+
+        self.hubbard_advanced_element_combo = QComboBox()
+        self.hubbard_advanced_element_combo.setEditable(True)
+        self.hubbard_advanced_element_combo.setPlaceholderText("Element")
+        add_advanced_layout.addWidget(self.hubbard_advanced_element_combo)
+
+        self.hubbard_advanced_value_edit = QLineEdit()
+        self.hubbard_advanced_value_edit.setPlaceholderText("Value (eV)")
+        add_advanced_layout.addWidget(self.hubbard_advanced_value_edit)
+
+        add_advanced_btn = QPushButton("Add")
+        add_advanced_btn.clicked.connect(self._add_hubbard_advanced_parameter)
+        add_advanced_layout.addWidget(add_advanced_btn)
+        advanced_layout.addLayout(add_advanced_layout)
+
+        hubbard_layout.addWidget(self.hubbard_advanced_group)
+
+        # Show/hide hubbard controls when the group checkbox is toggled
+        self.hubbard_group.toggled.connect(lambda checked: self._on_hubbard_group_toggled(checked))
+
+        layout.addWidget(self.hubbard_group)
+        layout.addStretch()
+
         self.tabs.addTab(w, 'Hubbard')
+
+        # Initialize
+        self.hubbard_u_edits = {}
+        self.hubbard_v_edits = {}
+        self.hubbard_advanced_edits = {}
+        self._update_hubbard_inputs_for_structure()
+
+    def _on_hubbard_group_toggled(self, checked):
+        """Show/hide Hubbard controls when the group is toggled."""
+        # Update inputs when enabled
+        if checked:
+            self._update_hubbard_inputs_for_structure()
+
+    def _update_hubbard_inputs_for_structure(self):
+        """Update Hubbard inputs based on current structure."""
+        try:
+            atoms = None
+            if self.session_state:
+                atoms = self.session_state.get('current_structure')
+
+            if atoms:
+                elements = sorted(set(atoms.get_chemical_symbols()))
+
+                # Update element combos
+                self.hubbard_u_element_combo.clear()
+                self.hubbard_v_spec1_combo.clear()
+                self.hubbard_v_spec2_combo.clear()
+                self.hubbard_advanced_element_combo.clear()
+
+                # Add elements and element-orbital combinations
+                for element in elements:
+                    self.hubbard_u_element_combo.addItem(element)
+                    self.hubbard_v_spec1_combo.addItem(element)
+                    self.hubbard_v_spec2_combo.addItem(element)
+                    self.hubbard_advanced_element_combo.addItem(element)
+
+                    # Add common orbital combinations for new format
+                    for orbital in ['3d', '4d', '4f', '5d', '5f', '2p', '3p', '4p', '5p', '6p']:
+                        orbital_combo = f"{element}-{orbital}"
+                        self.hubbard_u_element_combo.addItem(orbital_combo)
+                        self.hubbard_v_spec1_combo.addItem(orbital_combo)
+                        self.hubbard_v_spec2_combo.addItem(orbital_combo)
+
+                # Get existing Hubbard parameters from session state
+                existing_hubbard = {}
+                if self.session_state:
+                    existing_hubbard = self.session_state.get('hubbard', {})
+
+                # Pre-populate U parameters
+                self._clear_hubbard_u_inputs()
+                if 'u' in existing_hubbard:
+                    for key, value in existing_hubbard['u'].items():
+                        self._add_hubbard_u_input(key, value)
+
+                # Pre-populate V parameters
+                self._clear_hubbard_v_inputs()
+                if 'v' in existing_hubbard:
+                    for v_param in existing_hubbard['v']:
+                        if isinstance(v_param, dict):
+                            spec1 = f"{v_param.get('species1', '')}-{v_param.get('orbital1', '')}"
+                            spec2 = f"{v_param.get('species2', '')}-{v_param.get('orbital2', '')}"
+                            value = v_param.get('value', 0.0)
+                            self._add_hubbard_v_input(spec1, spec2, value)
+
+                # Update status
+                self.hubbard_status_label.setText(f"Configured for elements: {', '.join(elements)}")
+                self.hubbard_status_label.setStyleSheet("color: green;")
+            else:
+                # No structure loaded
+                self._clear_hubbard_u_inputs()
+                self._clear_hubbard_v_inputs()
+                self._clear_hubbard_advanced_inputs()
+                self.hubbard_status_label.setText("Load a structure to configure Hubbard parameters")
+                self.hubbard_status_label.setStyleSheet("")
+
+        except Exception as e:
+            self.hubbard_status_label.setText(f"Error updating Hubbard inputs: {e}")
+            self.hubbard_status_label.setStyleSheet("color: red;")
+
+    def _clear_hubbard_u_inputs(self):
+        """Clear all U parameter inputs."""
+        while self.hubbard_u_form_layout.count():
+            item = self.hubbard_u_form_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.hubbard_u_edits = {}
+
+    def _clear_hubbard_v_inputs(self):
+        """Clear all V parameter inputs."""
+        while self.hubbard_v_form_layout.count():
+            item = self.hubbard_v_form_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.hubbard_v_edits = {}
+
+    def _clear_hubbard_advanced_inputs(self):
+        """Clear all advanced parameter inputs."""
+        while self.hubbard_advanced_form_layout.count():
+            item = self.hubbard_advanced_form_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.hubbard_advanced_edits = {}
+
+    def _add_hubbard_u_parameter(self):
+        """Add a U parameter from the input fields."""
+        element_orbital = self.hubbard_u_element_combo.currentText().strip()
+        value_text = self.hubbard_u_value_edit.text().strip()
+
+        if not element_orbital or not value_text:
+            return
+
+        try:
+            value = float(value_text)
+            self._add_hubbard_u_input(element_orbital, value)
+            self.hubbard_u_value_edit.clear()
+            self._update_hubbard_session_state()
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "U value must be a number")
+
+    def _add_hubbard_u_input(self, element_orbital, value):
+        """Add a U parameter input field."""
+        edit = QLineEdit(str(value))
+        edit.setMaximumWidth(80)
+        edit.textChanged.connect(self._update_hubbard_session_state)
+
+        remove_btn = QPushButton("×")
+        remove_btn.setMaximumWidth(25)
+        remove_btn.clicked.connect(lambda: self._remove_hubbard_u_parameter(element_orbital))
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(edit)
+        layout.addWidget(remove_btn)
+
+        self.hubbard_u_form_layout.addRow(f"{element_orbital}:", container)
+        self.hubbard_u_edits[element_orbital] = edit
+
+    def _remove_hubbard_u_parameter(self, element_orbital):
+        """Remove a U parameter."""
+        if element_orbital in self.hubbard_u_edits:
+            # Find and remove the row
+            for i in range(self.hubbard_u_form_layout.rowCount()):
+                label_item = self.hubbard_u_form_layout.itemAt(i, QFormLayout.LabelRole)
+                if label_item and label_item.widget():
+                    label_text = label_item.widget().text()
+                    if label_text.startswith(f"{element_orbital}:"):
+                        # Remove the row
+                        self.hubbard_u_form_layout.removeRow(i)
+                        break
+
+            del self.hubbard_u_edits[element_orbital]
+            self._update_hubbard_session_state()
+
+    def _add_hubbard_v_parameter(self):
+        """Add a V parameter from the input fields."""
+        spec1 = self.hubbard_v_spec1_combo.currentText().strip()
+        spec2 = self.hubbard_v_spec2_combo.currentText().strip()
+        value_text = self.hubbard_v_value_edit.text().strip()
+
+        if not spec1 or not spec2 or not value_text:
+            return
+
+        try:
+            value = float(value_text)
+            self._add_hubbard_v_input(spec1, spec2, value)
+            self.hubbard_v_value_edit.clear()
+            self._update_hubbard_session_state()
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "V value must be a number")
+
+    def _add_hubbard_v_input(self, spec1, spec2, value):
+        """Add a V parameter input field."""
+        edit = QLineEdit(str(value))
+        edit.setMaximumWidth(80)
+        edit.textChanged.connect(self._update_hubbard_session_state)
+
+        remove_btn = QPushButton("×")
+        remove_btn.setMaximumWidth(25)
+        remove_btn.clicked.connect(lambda: self._remove_hubbard_v_parameter(spec1, spec2))
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(edit)
+        layout.addWidget(remove_btn)
+
+        label = f"{spec1} ↔ {spec2}:"
+        self.hubbard_v_form_layout.addRow(label, container)
+        self.hubbard_v_edits[(spec1, spec2)] = edit
+
+    def _remove_hubbard_v_parameter(self, spec1, spec2):
+        """Remove a V parameter."""
+        key = (spec1, spec2)
+        if key in self.hubbard_v_edits:
+            # Find and remove the row
+            for i in range(self.hubbard_v_form_layout.rowCount()):
+                label_item = self.hubbard_v_form_layout.itemAt(i, QFormLayout.LabelRole)
+                if label_item and label_item.widget():
+                    label_text = label_item.widget().text()
+                    if f"{spec1} ↔ {spec2}:" in label_text:
+                        # Remove the row
+                        self.hubbard_v_form_layout.removeRow(i)
+                        break
+
+            del self.hubbard_v_edits[key]
+            self._update_hubbard_session_state()
+
+    def _add_hubbard_advanced_parameter(self):
+        """Add an advanced parameter (J, alpha, beta)."""
+        param_type = self.hubbard_advanced_type_combo.currentText()
+        element = self.hubbard_advanced_element_combo.currentText().strip()
+        value_text = self.hubbard_advanced_value_edit.text().strip()
+
+        if not element or not value_text:
+            return
+
+        try:
+            value = float(value_text)
+
+            # Map display names to parameter keys
+            type_map = {"J": "j", "α (alpha)": "alpha", "β (beta)": "beta"}
+            param_key = type_map.get(param_type, param_type.lower())
+
+            self._add_hubbard_advanced_input(param_key, element, value)
+            self.hubbard_advanced_value_edit.clear()
+            self._update_hubbard_session_state()
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Parameter value must be a number")
+
+    def _add_hubbard_advanced_input(self, param_type, element, value):
+        """Add an advanced parameter input field."""
+        edit = QLineEdit(str(value))
+        edit.setMaximumWidth(80)
+        edit.textChanged.connect(self._update_hubbard_session_state)
+
+        remove_btn = QPushButton("×")
+        remove_btn.setMaximumWidth(25)
+        remove_btn.clicked.connect(lambda: self._remove_hubbard_advanced_parameter(param_type, element))
+
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(edit)
+        layout.addWidget(remove_btn)
+
+        # Display name mapping
+        display_map = {"j": "J", "alpha": "α", "beta": "β"}
+        display_type = display_map.get(param_type, param_type.upper())
+
+        label = f"{display_type} ({element}):"
+        self.hubbard_advanced_form_layout.addRow(label, container)
+        self.hubbard_advanced_edits[(param_type, element)] = edit
+
+    def _remove_hubbard_advanced_parameter(self, param_type, element):
+        """Remove an advanced parameter."""
+        key = (param_type, element)
+        if key in self.hubbard_advanced_edits:
+            # Find and remove the row
+            display_map = {"j": "J", "alpha": "α", "beta": "β"}
+            display_type = display_map.get(param_type, param_type.upper())
+
+            for i in range(self.hubbard_advanced_form_layout.rowCount()):
+                label_item = self.hubbard_advanced_form_layout.itemAt(i, QFormLayout.LabelRole)
+                if label_item and label_item.widget():
+                    label_text = label_item.widget().text()
+                    if f"{display_type} ({element}):" in label_text:
+                        # Remove the row
+                        self.hubbard_advanced_form_layout.removeRow(i)
+                        break
+
+            del self.hubbard_advanced_edits[key]
+            self._update_hubbard_session_state()
+
+    def _update_hubbard_session_state(self):
+        """Update session state with current Hubbard parameters."""
+        if not self.session_state:
+            return
+
+        hubbard_config = {}
+
+        # Format selection
+        format_map = {"Auto": None, "Old (QE < 7.0)": "old", "New (QE >= 7.0)": "new"}
+        selected_format = self.hubbard_format_combo.currentText()
+        if format_map[selected_format] == "old":
+            hubbard_config["use_new_format"] = False
+        elif format_map[selected_format] == "new":
+            hubbard_config["use_new_format"] = True
+
+        # Projector
+        hubbard_config["projector"] = self.hubbard_projector_combo.currentText()
+
+        # U parameters
+        if self.hubbard_u_edits:
+            hubbard_config["u"] = {}
+            for element_orbital, edit in self.hubbard_u_edits.items():
+                try:
+                    value = float(edit.text().strip())
+                    hubbard_config["u"][element_orbital] = value
+                except ValueError:
+                    pass
+
+        # V parameters
+        if self.hubbard_v_edits:
+            hubbard_config["v"] = []
+            for (spec1, spec2), edit in self.hubbard_v_edits.items():
+                try:
+                    value = float(edit.text().strip())
+                    # Parse species and orbitals
+                    parts1 = spec1.split('-', 1)
+                    parts2 = spec2.split('-', 1)
+
+                    v_param = {
+                        "species1": parts1[0],
+                        "orbital1": parts1[1] if len(parts1) > 1 else "",
+                        "species2": parts2[0],
+                        "orbital2": parts2[1] if len(parts2) > 1 else "",
+                        "i": 1,
+                        "j": 1,
+                        "value": value
+                    }
+                    hubbard_config["v"].append(v_param)
+                except (ValueError, IndexError):
+                    pass
+
+        # Advanced parameters
+        for (param_type, element), edit in self.hubbard_advanced_edits.items():
+            try:
+                value = float(edit.text().strip())
+                if param_type not in hubbard_config:
+                    hubbard_config[param_type] = {}
+                hubbard_config[param_type][element] = value
+            except ValueError:
+                pass
+
+        self.session_state['hubbard'] = hubbard_config
 
     def _build_prepare_tab(self):
         w = QWidget()

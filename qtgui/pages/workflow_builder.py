@@ -276,7 +276,10 @@ class WorkflowBuilderPage(QWidget):
         
         magnetic_info = QLabel("""
 <p><b>Configure magnetic properties for spin-polarized calculations.</b></p>
-<p>Specify starting magnetization for each element. Values typically range from -1 to 1.</p>
+<p>Select which elements should be magnetic and specify their magnetic moments.</p>
+<p>• Single value: all atoms of that element get the same magnetization</p>
+<p>• Multiple values (comma-separated): creates different magnetic species (e.g., 1.0,-1.0 for AFM)</p>
+<p>• Auto-expand cell: automatically creates supercell for complex configurations</p>
 """)
         magnetic_info.setTextFormat(Qt.RichText)
         magnetic_info.setWordWrap(True)
@@ -296,8 +299,14 @@ class WorkflowBuilderPage(QWidget):
         self.magnetic_container_layout = QFormLayout(self.magnetic_container)
         magnetic_layout.addWidget(self.magnetic_container)
         
+        # Expand cell option
+        self.expand_cell_check = QCheckBox("Auto-expand cell if more magnetic moments specified than atoms exist")
+        self.expand_cell_check.setToolTip("Automatically create supercell to accommodate complex magnetic configurations")
+        magnetic_layout.addWidget(self.expand_cell_check)
+
         # Store magnetic inputs
         self.magnetic_edits = {}
+        self.magnetic_checkboxes = {}
         
         scroll_layout.addWidget(self.magnetic_group)
         
@@ -941,6 +950,7 @@ class WorkflowBuilderPage(QWidget):
                 item.widget().deleteLater()
         
         self.magnetic_edits = {}
+        self.magnetic_checkboxes = {}
         
         # Predefined magnetic moments for common elements
         predefined_moments = {
@@ -949,15 +959,31 @@ class WorkflowBuilderPage(QWidget):
         }
         
         for element in sorted(elements):
-            edit = QDoubleSpinBox()
-            edit.setRange(-10.0, 10.0)
-            edit.setSingleStep(0.1)
-            edit.setDecimals(2)
-            # Set default value based on predefined moments or 0
-            default_val = predefined_moments.get(element, 0.0)
-            edit.setValue(default_val)
+            # Create a container widget for each element with checkbox and magnetic moments input
+            container = QWidget()
+            hlayout = QHBoxLayout(container)
+            hlayout.setContentsMargins(0, 0, 0, 0)
+            
+            # Checkbox to enable/disable magnetism for this element
+            checkbox = QCheckBox()
+            checkbox.setChecked(False)  # Default to unchecked
+            checkbox.setToolTip(f"Enable magnetic configuration for {element}")
+            checkbox.stateChanged.connect(lambda state, elem=element: self._on_magnetic_element_toggled(elem, state))
+            hlayout.addWidget(checkbox)
+            
+            # Magnetic moments input (comma-separated values)
+            edit = QLineEdit()
+            edit.setPlaceholderText("e.g., 1.0 or 1.0,-1.0 or 1.0,1.0,-1.0,-1.0")
+            edit.setToolTip(f"Magnetic moments for {element} (comma-separated)")
+            edit.setEnabled(False)  # Disabled by default
+            # Set default value if predefined
+            if element in predefined_moments:
+                edit.setText(f"{predefined_moments[element]:.2f}")
+            hlayout.addWidget(edit)
+            
+            self.magnetic_checkboxes[element] = checkbox
             self.magnetic_edits[element] = edit
-            self.magnetic_container_layout.addRow(f"{element}:", edit)
+            self.magnetic_container_layout.addRow(f"{element}:", container)
     
     def _update_hubbard_inputs(self, elements):
         """Update Hubbard U input fields for the given elements."""
@@ -1011,19 +1037,32 @@ class WorkflowBuilderPage(QWidget):
         if preset == "Custom":
             return
         
+        # Clear all current settings
+        for element in self.magnetic_checkboxes:
+            self.magnetic_checkboxes[element].setChecked(False)
+            self.magnetic_edits[element].setText("")
+        
         # Predefined magnetic moments
         predefined_moments = {
             'Fe': 2.2, 'Co': 1.7, 'Ni': 0.6, 'Mn': 5.0, 'Cr': 3.0,
             'V': 2.0, 'Ti': 1.0, 'Gd': 7.0, 'Nd': 3.0, 'Sm': 5.0
         }
         
-        for element, edit in self.magnetic_edits.items():
-            base_moment = predefined_moments.get(element, 0.0)
-            if preset == "Ferromagnetic":
-                edit.setValue(base_moment)
-            elif preset == "Antiferromagnetic":
-                # For AFM, we'd need to alternate signs - simplified here
-                edit.setValue(base_moment)
+        # Apply preset
+        for element in self.magnetic_checkboxes:
+            if element in predefined_moments and predefined_moments[element] != 0.0:
+                self.magnetic_checkboxes[element].setChecked(True)
+                base_moment = predefined_moments[element]
+                if preset == "Ferromagnetic":
+                    self.magnetic_edits[element].setText(f"{base_moment:.2f}")
+                elif preset == "Antiferromagnetic":
+                    # For AFM, specify two opposite values
+                    self.magnetic_edits[element].setText(f"{base_moment:.2f},{-base_moment:.2f}")
+    
+    def _on_magnetic_element_toggled(self, element, state):
+        """Enable/disable magnetic moment input when element checkbox is toggled."""
+        if element in self.magnetic_edits:
+            self.magnetic_edits[element].setEnabled(state == 2)  # Qt.CheckState.Checked
     
     def _get_config(self):
         """Get the current configuration as a dictionary."""
@@ -1059,8 +1098,22 @@ class WorkflowBuilderPage(QWidget):
         config['enable_magnetism'] = self.magnetic_group.isChecked()
         if config['enable_magnetism']:
             config['magnetic_config'] = {}
-            for element, edit in getattr(self, 'magnetic_edits', {}).items():
-                config['magnetic_config'][element] = [edit.value()]
+            config['expand_cell'] = self.expand_cell_check.isChecked()
+            for element, checkbox in getattr(self, 'magnetic_checkboxes', {}).items():
+                if checkbox.isChecked():
+                    edit = getattr(self, 'magnetic_edits', {}).get(element)
+                    if edit:
+                        text = edit.text().strip()
+                        if text:
+                            try:
+                                # Parse comma-separated values
+                                values = [float(x.strip()) for x in text.split(',') if x.strip()]
+                                if values:
+                                    config['magnetic_config'][element] = values
+                            except ValueError:
+                                # If parsing fails, show warning but continue
+                                print(f"Warning: Invalid magnetic moment format for {element}: '{text}'")
+                                config['magnetic_config'][element] = [0.0]
         
         # Hubbard (DFT+U) configuration (optional)
         config['enable_hubbard'] = self.hubbard_group.isChecked()
@@ -1310,16 +1363,25 @@ Go to <b>Job Submission</b> page to execute the workflow steps.
         # Restore magnetic configuration checkbox state
         if config.get('enable_magnetism'):
             self.magnetic_group.setChecked(True)
+            # Restore expand_cell option
+            if config.get('expand_cell'):
+                self.expand_cell_check.setChecked(True)
             # Restore magnetic values if elements exist
             if config.get('magnetic_config'):
                 for element, mag_value in config['magnetic_config'].items():
-                    if element in self.magnetic_edits:
-                        # mag_value is stored as a list in the config
-                        value = mag_value[0] if isinstance(mag_value, list) else mag_value
-                        self.magnetic_edits[element].setValue(value)
+                    if element in self.magnetic_edits and element in self.magnetic_checkboxes:
+                        # Enable the checkbox
+                        self.magnetic_checkboxes[element].setChecked(True)
+                        # Set the magnetic moments (convert list to comma-separated string)
+                        if isinstance(mag_value, list):
+                            text_value = ','.join(f'{v:.2f}' for v in mag_value)
+                        else:
+                            text_value = f'{mag_value:.2f}'
+                        self.magnetic_edits[element].setText(text_value)
         else:
             # Explicitly uncheck if the config says magnetism is disabled
             self.magnetic_group.setChecked(False)
+            self.expand_cell_check.setChecked(False)
         
         # Restore Hubbard configuration checkbox state
         if config.get('enable_hubbard'):

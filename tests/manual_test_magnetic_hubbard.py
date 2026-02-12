@@ -150,7 +150,7 @@ def test_magnetic_hubbard_session_workflow():
         
         # Verify values were restored
         assert 'Fe' in page2.magnetic_edits
-        assert abs(page2.magnetic_edits['Fe'].value() - 2.2) < 0.01, "Magnetic value should be restored"
+        assert abs(float(page2.magnetic_edits['Fe'].text()) - 2.2) < 0.01, "Magnetic value should be restored"
         assert 'Fe' in page2.hubbard_edits
         assert abs(page2.hubbard_edits['Fe'].value() - 4.0) < 0.01, "Hubbard U value should be restored"
         print("✓ Values correctly restored")
@@ -159,7 +159,7 @@ def test_magnetic_hubbard_session_workflow():
         print_header("Step 4: Modify Configurations")
         
         # User modifies magnetic value
-        page2.magnetic_edits['Fe'].setValue(3.5)
+        page2.magnetic_edits['Fe'].setText('3.5')
         print("  Changed magnetic value: 2.2 → 3.5")
         
         # User modifies Hubbard U value

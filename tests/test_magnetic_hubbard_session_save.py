@@ -66,10 +66,10 @@ class TestMagneticHubbardSessionSave:
         
         # Verify magnetic value is restored
         assert 'Fe' in page.magnetic_edits
-        assert abs(page.magnetic_edits['Fe'].value() - 2.2) < 0.01
+        assert abs(float(page.magnetic_edits['Fe'].text()) - 2.2) < 0.01
         
         # User modifies the magnetic value
-        page.magnetic_edits['Fe'].setValue(3.5)
+        page.magnetic_edits['Fe'].setText('3.5')
         
         # Save state (as happens when user clicks Save Session)
         page.save_state()

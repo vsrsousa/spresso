@@ -10,7 +10,7 @@ import os
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QGroupBox, QFormLayout,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
 )
 from qtpy.QtCore import Qt, Signal
 
@@ -48,24 +48,37 @@ class PseudopotentialsSelectorWidget(QWidget):
         """Setup the user interface."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)  # No spacing between elements
         
         # Info label
         self.info_label = QLabel("Load a structure to configure pseudopotentials")
+        self.info_label.setContentsMargins(0, 0, 0, 0)
+        self.info_label.setStyleSheet("margin: 0px; padding: 0px;")
         layout.addWidget(self.info_label)
         
         if PSEUDOPOTENTIALS_AVAILABLE:
-            # Configuration selector
+            # Configuration selector - make it ultra compact
             config_layout = QHBoxLayout()
-            config_layout.addWidget(QLabel("Configuration:"))
+            config_layout.setSpacing(2)  # Minimal spacing between config elements
+            config_layout.setContentsMargins(0, 0, 0, 0)
+            
+            config_label = QLabel("Configuration:")
+            config_label.setContentsMargins(0, 0, 0, 0)
+            config_label.setStyleSheet("margin: 0px; padding: 0px;")
+            config_layout.addWidget(config_label)
             
             self.config_combo = QComboBox()
+            self.config_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.config_combo.currentTextChanged.connect(self._on_config_changed)
             self.config_combo.currentTextChanged.connect(lambda *a: self.changed.emit())
             config_layout.addWidget(self.config_combo, 1)
             
             refresh_btn = QPushButton("🔄")
             refresh_btn.setToolTip("Refresh configurations list")
-            refresh_btn.setMaximumWidth(40)
+            refresh_btn.setMaximumWidth(30)
+            refresh_btn.setMaximumHeight(20)
+            refresh_btn.setContentsMargins(0, 0, 0, 0)
+            refresh_btn.setStyleSheet("margin: 0px; padding: 2px;")
             refresh_btn.clicked.connect(self._load_configurations)
             config_layout.addWidget(refresh_btn)
             
@@ -74,17 +87,37 @@ class PseudopotentialsSelectorWidget(QWidget):
             # Configuration details
             self.config_details = QLabel("")
             self.config_details.setWordWrap(True)
-            self.config_details.setStyleSheet("color: gray; font-size: 11px;")
+            self.config_details.setStyleSheet("color: gray; font-size: 11px; margin: 0px; padding: 0px;")
+            self.config_details.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self.config_details)
             
             # Status label
             self.status_label = QLabel("")
             self.status_label.setWordWrap(True)
+            self.status_label.setContentsMargins(0, 0, 0, 0)
+            self.status_label.setStyleSheet("margin: 0px; padding: 0px;")
             layout.addWidget(self.status_label)
         
         # Manual input section (always available as fallback)
         self.manual_group = QGroupBox("Pseudopotentials per Element")
+        self.manual_group.setContentsMargins(0, 0, 0, 0)  # No margins
+        self.manual_group.setStyleSheet("""
+            QGroupBox {
+                margin-top: 0px;
+                padding-top: 0px;
+                border: none;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                margin: 0px;
+                padding: 0px;
+                top: 0px;
+            }
+        """)
         self.manual_layout = QFormLayout(self.manual_group)
+        self.manual_layout.setVerticalSpacing(0)  # No spacing between rows
+        self.manual_layout.setHorizontalSpacing(2)  # Minimal horizontal spacing
+        self.manual_layout.setContentsMargins(0, 0, 0, 0)  # No margins
         layout.addWidget(self.manual_group)
         
         # Load configurations
@@ -200,6 +233,9 @@ class PseudopotentialsSelectorWidget(QWidget):
             edit = QLineEdit()
             edit.textChanged.connect(lambda *a: self.changed.emit())
             edit.setPlaceholderText(f"e.g., {element}.UPF or {element}.pbe-n-kjpaw_psl.1.0.0.UPF")
+            edit.setContentsMargins(0, 0, 0, 0)
+            edit.setStyleSheet("margin: 0px; padding: 1px;")
+            edit.setMaximumHeight(20)  # Make it shorter
             self.pseudo_edits[element] = edit
             self.manual_layout.addRow(f"{element}:", edit)
         
@@ -220,13 +256,15 @@ class PseudopotentialsSelectorWidget(QWidget):
         for element in sorted(self.elements):
             edit = QLineEdit()
             edit.textChanged.connect(lambda *a: self.changed.emit())
+            edit.setContentsMargins(0, 0, 0, 0)
+            edit.setMaximumHeight(20)  # Make it shorter
             
             if element in pseudo_dict:
                 edit.setText(pseudo_dict[element])
-                edit.setStyleSheet("")
+                edit.setStyleSheet("margin: 0px; padding: 1px;")
             else:
                 edit.setPlaceholderText(f"Not found - enter manually")
-                edit.setStyleSheet("background-color: #fff3e0;")
+                edit.setStyleSheet("background-color: #fff3e0; margin: 0px; padding: 1px;")
                 missing.append(element)
             
             self.pseudo_edits[element] = edit

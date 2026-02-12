@@ -68,6 +68,7 @@ class CalculationSetupPage(QWidget):
         self._loading = False  # Guard to prevent infinite loops
         # Initialize dictionaries for dynamic inputs
         self.magnetic_edits = {}
+        self.magnetic_checkboxes = {}  # Track which elements have magnetism enabled
         self.hubbard_edits = {}
         self.hubbard_orbital_edits = {}
         self.hubbard_checkboxes = {}  # Track which elements have Hubbard enabled
@@ -303,7 +304,10 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         
         magnetic_info = QLabel("""
 <p><b>Configure magnetic properties for spin-polarized calculations.</b></p>
-<p>Specify starting magnetization for each element. Values typically range from -1 to 1.</p>
+<p>Select which elements should be magnetic and specify their magnetic moments.</p>
+<p>• Single value: all atoms of that element get the same magnetization</p>
+<p>• Multiple values (comma-separated): creates different magnetic species (e.g., 1.0,-1.0 for AFM)</p>
+<p>• Auto-expand cell: automatically creates supercell for complex configurations</p>
 """)
         magnetic_info.setTextFormat(Qt.RichText)
         magnetic_info.setWordWrap(True)
@@ -326,6 +330,12 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         self.magnetic_container_layout = QFormLayout(self.magnetic_container)
         self.magnetic_container.setVisible(False)
         magnetic_layout.addWidget(self.magnetic_container)
+        
+        # Expand cell option
+        self.expand_cell_check = QCheckBox("Auto-expand cell if more magnetic moments specified than atoms exist")
+        self.expand_cell_check.setToolTip("Automatically create supercell to accommodate complex magnetic configurations")
+        self.expand_cell_check.setVisible(False)
+        magnetic_layout.addWidget(self.expand_cell_check)
 
         # Show/hide magnetic controls when the group checkbox is toggled
         self.magnetic_group.toggled.connect(lambda checked: self._on_magnetic_group_toggled(checked))
@@ -636,16 +646,31 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
                 item.widget().deleteLater()
         
         self.magnetic_edits = {}
+        self.magnetic_checkboxes = {}
         
         for element in sorted(elements):
-            spin = QDoubleSpinBox()
-            spin.setRange(-10.0, 10.0)
-            spin.setSingleStep(0.1)
-            spin.setDecimals(2)
-            default_val = PREDEFINED_MAGNETIC_MOMENTS.get(element, 0.0)
-            spin.setValue(default_val)
-            self.magnetic_edits[element] = spin
-            self.magnetic_container_layout.addRow(f"{element}:", spin)
+            # Create a container widget for each element with checkbox and magnetic moments input
+            container = QWidget()
+            hlayout = QHBoxLayout(container)
+            hlayout.setContentsMargins(0, 0, 0, 0)
+            
+            # Checkbox to enable/disable magnetism for this element
+            checkbox = QCheckBox()
+            checkbox.setChecked(False)  # Default to unchecked
+            checkbox.setToolTip(f"Enable magnetic configuration for {element}")
+            checkbox.stateChanged.connect(lambda state, elem=element: self._on_magnetic_element_toggled(elem, state))
+            hlayout.addWidget(checkbox)
+            
+            # Magnetic moments input (comma-separated values)
+            edit = QLineEdit()
+            edit.setPlaceholderText("e.g., 1.0 or 1.0,-1.0 or 1.0,1.0,-1.0,-1.0")
+            edit.setToolTip(f"Magnetic moments for {element} (comma-separated)")
+            edit.setEnabled(False)  # Disabled by default
+            hlayout.addWidget(edit)
+            
+            self.magnetic_checkboxes[element] = checkbox
+            self.magnetic_edits[element] = edit
+            self.magnetic_container_layout.addRow(f"{element}:", container)
     
     def _update_hubbard_inputs(self, elements):
         """Update Hubbard U input fields for structure elements."""
@@ -766,15 +791,27 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         if preset == "Custom":
             return
         
-        for element, spin in self.magnetic_edits.items():
-            if element in PREDEFINED_MAGNETIC_MOMENTS:
+        # Clear all current settings
+        for element in self.magnetic_checkboxes:
+            self.magnetic_checkboxes[element].setChecked(False)
+            self.magnetic_edits[element].setText("")
+        
+        # Apply preset
+        for element in self.magnetic_checkboxes:
+            if element in PREDEFINED_MAGNETIC_MOMENTS and PREDEFINED_MAGNETIC_MOMENTS[element] != 0.0:
+                self.magnetic_checkboxes[element].setChecked(True)
                 if preset == "Ferromagnetic":
-                    spin.setValue(PREDEFINED_MAGNETIC_MOMENTS[element])
+                    self.magnetic_edits[element].setText(f"{PREDEFINED_MAGNETIC_MOMENTS[element]:.2f}")
                 elif preset == "Antiferromagnetic":
-                    spin.setValue(-PREDEFINED_MAGNETIC_MOMENTS[element])
-            else:
-                spin.setValue(0.0)
+                    # For AFM, we need two opposite values
+                    mag_val = PREDEFINED_MAGNETIC_MOMENTS[element]
+                    self.magnetic_edits[element].setText(f"{mag_val:.2f},{-mag_val:.2f}")
 
+    def _on_magnetic_element_toggled(self, element, state):
+        """Enable/disable magnetic moment input when element checkbox is toggled."""
+        if element in self.magnetic_edits:
+            self.magnetic_edits[element].setEnabled(state == 2)  # Qt.CheckState.Checked
+    
     def _on_magnetic_group_toggled(self, checked):
         """Show or hide magnetic controls when the magnetic group is toggled."""
         # Show preset selector and per-element inputs directly under the group
@@ -784,6 +821,10 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
             pass
         try:
             self.magnetic_container.setVisible(checked)
+        except Exception:
+            pass
+        try:
+            self.expand_cell_check.setVisible(checked)
         except Exception:
             pass
     
@@ -898,13 +939,30 @@ to prepare atoms and Espresso calculator objects following xespresso's design pa
         if self.magnetic_group.isChecked():
             config['enable_magnetism'] = True
             config['magnetic_config'] = {}
-            for element, spin in self.magnetic_edits.items():
-                value = spin.value()
-                if value != 0.0:
-                    config['magnetic_config'][element] = [value]
+            config['expand_cell'] = self.expand_cell_check.isChecked()
+            
+            for element, checkbox in self.magnetic_checkboxes.items():
+                if checkbox.isChecked():
+                    edit = self.magnetic_edits[element]
+                    text = edit.text().strip()
+                    if text:
+                        try:
+                            # Parse comma-separated values
+                            values = [float(x.strip()) for x in text.split(',') if x.strip()]
+                            if values:
+                                config['magnetic_config'][element] = values
+                        except ValueError:
+                            # If parsing fails, show warning but continue
+                            QMessageBox.warning(
+                                self, "Invalid Magnetic Moment", 
+                                f"Invalid magnetic moment format for {element}: '{text}'\n"
+                                "Expected format: number or comma-separated numbers (e.g., 1.0 or 1.0,-1.0)"
+                            )
+                            config['magnetic_config'][element] = [0.0]
         else:
             config['enable_magnetism'] = False
             config['magnetic_config'] = {}
+            config['expand_cell'] = False
         
         # Hubbard configuration
         if self.hubbard_group.isChecked():
@@ -1103,16 +1161,25 @@ Go to <b>Job Submission</b> page to use these objects.
         # Restore magnetic configuration checkbox state
         if config.get('enable_magnetism'):
             self.magnetic_group.setChecked(True)
+            # Restore expand_cell option
+            if config.get('expand_cell'):
+                self.expand_cell_check.setChecked(True)
             # Restore magnetic values if elements exist
             if config.get('magnetic_config'):
                 for element, mag_value in config['magnetic_config'].items():
-                    if element in self.magnetic_edits:
-                        # mag_value might be a list from setup_magnetic_config
-                        value = mag_value[0] if isinstance(mag_value, list) else mag_value
-                        self.magnetic_edits[element].setValue(value)
+                    if element in self.magnetic_edits and element in self.magnetic_checkboxes:
+                        # Enable the checkbox
+                        self.magnetic_checkboxes[element].setChecked(True)
+                        # Set the magnetic moments (convert list to comma-separated string)
+                        if isinstance(mag_value, list):
+                            text_value = ','.join(f'{v:.2f}' for v in mag_value)
+                        else:
+                            text_value = f'{mag_value:.2f}'
+                        self.magnetic_edits[element].setText(text_value)
         else:
             # Explicitly uncheck if the config says magnetism is disabled
             self.magnetic_group.setChecked(False)
+            self.expand_cell_check.setChecked(False)
         
         # Restore Hubbard configuration checkbox state
         if config.get('enable_hubbard'):

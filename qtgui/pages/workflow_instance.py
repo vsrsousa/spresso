@@ -1,15 +1,16 @@
 from qtpy.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QTextEdit, QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox
+    QWidget, QVBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QTextEdit, QCheckBox, QHBoxLayout, QDialog, QDialogButtonBox, QTabWidget
 )
 from qtpy.QtCore import Qt, Signal
 import threading
+import os
 import tempfile
 
 from xespresso.workflow.tasks import ScfTask, RelaxTask, WorkflowRunner
 from qtgui.widgets.calculation_config_widget import CalculationConfigWidget
 from qtgui.widgets.machine_dialog import MachineDialog
 from qtgui.widgets.pseudopotentials_dialog import PseudopotentialsDialog
-from qtgui.calculations.preparation import prepare_calculation_from_gui
+from qtgui.calculations.preparation import prepare_calculation_from_gui, dry_run_calculation
 from xespresso.provenance import ProvenanceDB
 try:
     from xespresso.machines.config.loader import load_machine, DEFAULT_CONFIG_PATH, DEFAULT_MACHINES_DIR
@@ -334,9 +335,26 @@ class WorkflowInstancePage(QWidget):
         layout.addWidget(self.status)
 
         # Config preview / advanced (detailed messages go here)
+        self.preview_tabs = QTabWidget()
+        
+        # Config tab
         self.config_preview = QTextEdit()
         self.config_preview.setReadOnly(True)
-        layout.addWidget(self.config_preview)
+        self.preview_tabs.addTab(self.config_preview, "Config")
+        
+        # PW Input tab
+        self.pw_input_preview = QTextEdit()
+        self.pw_input_preview.setReadOnly(True)
+        self.pw_input_preview.setFontFamily("Monospace")
+        self.preview_tabs.addTab(self.pw_input_preview, "PW Input (.pwi)")
+        
+        # ASE Input tab
+        self.ase_input_preview = QTextEdit()
+        self.ase_input_preview.setReadOnly(True)
+        self.ase_input_preview.setFontFamily("Monospace")
+        self.preview_tabs.addTab(self.ase_input_preview, "ASE Input (.asei)")
+        
+        layout.addWidget(self.preview_tabs)
 
         # Run/Submit
         self.run_btn = QPushButton("Submit Run")
@@ -1024,6 +1042,47 @@ class WorkflowInstancePage(QWidget):
                     with open('/tmp/xespresso_prepare_called.txt', 'a', encoding='utf-8') as _f:
                         import time
                         _f.write(f"{time.asctime()} PREPARED {label}\n")
+                except Exception:
+                    pass
+                
+                # Generate input files for preview
+                try:
+                    _, dry_calc = dry_run_calculation(prepared_atoms, cfg, label=label)
+                    # Read and display PW input file
+                    try:
+                        pwi_path = getattr(dry_calc, 'pwi', None)
+                        if not pwi_path:
+                            prefix = getattr(dry_calc, 'prefix', None) or getattr(dry_calc, '_prefix', None)
+                            directory = getattr(dry_calc, 'directory', None) or getattr(dry_calc, '_directory', None)
+                            if prefix and directory:
+                                pwi_path = os.path.join(directory, f"{prefix}.pwi")
+                        if pwi_path and os.path.exists(pwi_path):
+                            with open(pwi_path, 'r', encoding='utf-8') as f:
+                                pw_content = f.read()
+                            # Update PW Input tab (thread-safe)
+                            try:
+                                self.pw_input_preview.setPlainText(pw_content)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    
+                    # Read and display ASE input file
+                    try:
+                        directory = getattr(dry_calc, 'directory', None) or getattr(dry_calc, '_directory', None)
+                        if directory:
+                            asei_path = os.path.join(directory, f"{label.replace('/', '_')}.asei")
+                            if os.path.exists(asei_path):
+                                with open(asei_path, 'r', encoding='utf-8') as f:
+                                    ase_content = f.read()
+                                # Update ASE Input tab (thread-safe)
+                                try:
+                                    self.ase_input_preview.setPlainText(ase_content)
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+                    
                 except Exception:
                     pass
             except Exception as e:

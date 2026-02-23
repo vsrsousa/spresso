@@ -358,7 +358,7 @@ def prepare_calculation_from_gui(
 
 
 def dry_run_calculation(
-    atoms: Atoms, config: Dict, label: str = "calculation"
+    atoms: Atoms, config: Dict, label: str = "calculation", working_directory: Optional[str] = None
 ) -> Tuple[Atoms, Espresso]:
     """
     Prepare calculation and generate input files (dry run).
@@ -386,7 +386,52 @@ def dry_run_calculation(
     """
     atoms, calc = prepare_calculation_from_gui(atoms, config, label)
 
-    # Write input files using xespresso's method
+    # If a working_directory is provided, prefer to write inputs into a
+    # structured subdirectory: <working_directory>/<formula>/<calc_type>.
+    if working_directory:
+        try:
+            # Build formula from atoms if possible
+            formula = None
+            try:
+                if hasattr(atoms, 'get_chemical_formula'):
+                    formula = atoms.get_chemical_formula()
+                else:
+                    syms = getattr(atoms, 'get_chemical_symbols', lambda: [])()
+                    if syms:
+                        from collections import Counter
+                        cnt = Counter(syms)
+                        formula = ''.join(f"{el}{cnt[el] if cnt[el]>1 else ''}" for el in sorted(cnt))
+            except Exception:
+                formula = None
+
+            base_dir = os.path.abspath(working_directory)
+            if formula:
+                formula_dir = os.path.join(base_dir, formula)
+            else:
+                formula_dir = base_dir
+
+            calc_type = config.get('calc_type', 'scf')
+            target_dir = os.path.join(formula_dir, str(calc_type))
+            if os.path.exists(target_dir):
+                # Avoid overwriting previous runs of same calc_type
+                ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                target_dir = os.path.join(formula_dir, f"{calc_type}_{ts}")
+
+            os.makedirs(target_dir, exist_ok=True)
+
+            # Instruct the Espresso calculator to write into our target_dir.
+            try:
+                setattr(calc, 'directory', target_dir)
+            except Exception:
+                try:
+                    calc._directory = target_dir
+                except Exception:
+                    pass
+        except Exception:
+            # If anything fails, fall back to calculator defaults
+            pass
+
+    # Write input files using xespresso's method (will use calc.directory when set)
     calc.write_input(atoms)
 
     # Post-process generated PW input for SCF calculations to remove

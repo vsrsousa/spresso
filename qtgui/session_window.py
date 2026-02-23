@@ -323,7 +323,16 @@ class MainWindow(QMainWindow):
                 self._calc_windows = []
             self._calc_windows.append(win)
             win.show()
-        except Exception:
+        except Exception as e:
+            # Surface the error so users/developers can see what's failing when
+            # a calculation window fails to open. Do not modify other modules.
+            import traceback
+            tb = traceback.format_exc()
+            print(f"Error opening CalculationWindow for '{calc_name}': {e}\n{tb}")
+            try:
+                QMessageBox.warning(self, "Error", f"Could not open calculation window: {e}")
+            except Exception:
+                pass
             return
 
     def _choose_structure_file(self):

@@ -723,6 +723,52 @@ class JobSubmissionPage(QWidget):
         """
         os.environ["ASE_ESPRESSO_COMMAND"] = ASE_ESPRESSO_COMMAND_TEMPLATE
 
+    def _resolve_queue(self, config):
+        """Resolve queue dict from provided config or session machine.
+
+        Returns a dict suitable for xespresso (keys: scheduler, execution, launcher, etc.)
+        """
+        # Prefer explicit queue in config
+        q = None
+        try:
+            q = config.get("queue") if isinstance(config, dict) else None
+        except Exception:
+            q = None
+
+        # If not provided, try session machine
+        if not q:
+            mq = self.session_state.get("calc_machine") or self.session_state.get("current_machine")
+            if mq is not None:
+                try:
+                    if hasattr(mq, "to_queue"):
+                        q = mq.to_queue()
+                    else:
+                        # If it's already a dict-like object
+                        if isinstance(mq, dict):
+                            q = mq
+                        else:
+                            # Fallback to minimal dict
+                            q = {"name": str(mq)}
+                except Exception:
+                    try:
+                        # Last-resort: if machine object exposes attributes
+                        q = {
+                            "scheduler": getattr(mq, "scheduler", None),
+                            "execution": getattr(mq, "execution", None),
+                            "launcher": getattr(mq, "launcher", None),
+                        }
+                    except Exception:
+                        q = None
+
+        # Normalize to dict
+        if q and not isinstance(q, dict):
+            try:
+                q = dict(q)
+            except Exception:
+                q = {"name": str(q)}
+
+        return q or {}
+
     def _generate_files(self):
         """Generate calculation files (dry run).
 
@@ -794,6 +840,19 @@ class JobSubmissionPage(QWidget):
             # This tells xespresso where to write the files
             calc.directory = full_path
             calc.prefix = prefix
+
+            # Ensure calculator has queue info before write_input so xespresso
+            # can generate the scheduler job_file according to selected scheduler
+            try:
+                queue_dict = self._resolve_queue(config)
+                if queue_dict:
+                    try:
+                        calc.queue = queue_dict
+                    except Exception:
+                        # some calculator implementations expect attribute name 'queue' writable
+                        setattr(calc, 'queue', queue_dict)
+            except Exception:
+                pass
 
             # Call write_input to generate input file AND job_file via scheduler
             # xespresso's write_input method:
@@ -1048,24 +1107,65 @@ Files created in: <code>{full_path}</code>
             lines.append("# module load <your-quantum-espresso-module>")
         lines.append("")
 
-        # Get launcher from machine configuration
-        launcher = ""
+        # Get queue/launcher information
         nprocs = config.get("nprocs", 1)
-        machine = self.session_state.get("calc_machine")
+        queue = self._resolve_queue(config)
 
-        if machine and hasattr(machine, "launcher") and machine.launcher:
-            # Use launcher from machine config
-            launcher = machine.launcher
-            # Replace {nprocs} placeholder if present
+        # Determine scheduler type
+        scheduler = (queue.get("scheduler") if isinstance(queue, dict) else None) or "direct"
+
+        # Determine launcher/template
+        launcher = None
+        if isinstance(queue, dict) and queue.get("launcher"):
+            launcher = queue.get("launcher")
             if "{nprocs}" in launcher:
                 launcher = launcher.replace("{nprocs}", str(nprocs))
-            launcher = launcher + " "
-        elif nprocs > 1:
-            # Fallback to default mpirun launcher
-            launcher = f"mpirun -np {nprocs} "
+        else:
+            # Try session machine's launcher as fallback
+            try:
+                machine = self.session_state.get("calc_machine")
+                if machine and hasattr(machine, "launcher") and machine.launcher:
+                    launcher = machine.launcher
+                    if "{nprocs}" in launcher:
+                        launcher = launcher.replace("{nprocs}", str(nprocs))
+            except Exception:
+                launcher = None
+
+        # Final fallback launcher for multi-proc
+        if not launcher and nprocs > 1:
+            launcher = f"mpirun -np {nprocs}"
+
+        # Build job header depending on scheduler
+        if scheduler == "slurm":
+            lines.append("#SBATCH --job-name=xespresso_job")
+            lines.append(f"#SBATCH --nodes={queue.get('nodes', 1)}")
+            # support ntasks-per-node or tasks per node
+            ntasks = queue.get('ntasks_per_node') or queue.get('tasks_per_node') or queue.get('ntasks') or queue.get('ntasks_per_node', 1)
+            lines.append(f"#SBATCH --ntasks-per-node={ntasks}")
+            if queue.get('time'):
+                lines.append(f"#SBATCH --time={queue.get('time')}")
+            if queue.get('partition'):
+                lines.append(f"#SBATCH --partition={queue.get('partition')}")
+            lines.append("")
+            exec_cmd = f"srun {launcher} pw.x -in {prefix}.pwi > {prefix}.pwo" if launcher else f"srun pw.x -in {prefix}.pwi > {prefix}.pwo"
+        elif scheduler in ("pbs", " Torque", "pbspro"):
+            lines.append(f"#PBS -N xespresso_job")
+            lines.append(f"#PBS -l nodes={queue.get('nodes',1)}:ppn={queue.get('ntasks_per_node',1)}")
+            if queue.get('time'):
+                lines.append(f"#PBS -l walltime={queue.get('time')}")
+            if queue.get('queue'):
+                lines.append(f"#PBS -q {queue.get('queue')}")
+            lines.append("")
+            exec_cmd = f"{launcher} pw.x -in {prefix}.pwi > {prefix}.pwo" if launcher else f"mpirun -np {nprocs} pw.x -in {prefix}.pwi > {prefix}.pwo"
+        else:
+            # direct or unknown scheduler: just run the launcher + pw.x or plain pw.x
+            if launcher:
+                exec_cmd = f"{launcher} pw.x -in {prefix}.pwi > {prefix}.pwo"
+            else:
+                exec_cmd = f"pw.x -in {prefix}.pwi > {prefix}.pwo"
 
         # Execution command
-        lines.append(f"{launcher}pw.x -in {prefix}.pwi > {prefix}.pwo")
+        lines.append(exec_cmd)
         lines.append("")
 
         # Write the job file
@@ -1156,6 +1256,18 @@ Files created in: <code>{full_path}</code>
             # Defensive check for robustness (e.g., restored from old session state)
             if prepared_atoms.calc is None or prepared_atoms.calc != calc:
                 prepared_atoms.calc = calc
+
+            # Ensure calculator has queue information from config/session before execution
+            try:
+                cfg = self.session_state.get('workflow_config', {}) or {}
+                queue_dict = self._resolve_queue(cfg)
+                if queue_dict:
+                    try:
+                        calc.queue = queue_dict
+                    except Exception:
+                        setattr(calc, 'queue', queue_dict)
+            except Exception:
+                pass
             
             # Try to load existing results from output file if they exist
             # This allows ASE's built-in caching to work properly

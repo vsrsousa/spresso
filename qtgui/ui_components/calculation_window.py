@@ -9,10 +9,11 @@ import json
 import os
 import tempfile
 import threading
+from datetime import datetime
 from qtpy.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFormLayout,
     QComboBox, QLineEdit, QTextEdit, QPushButton, QCheckBox,
-    QTabWidget, QApplication, QMessageBox, QGroupBox, QScrollArea
+    QTabWidget, QApplication, QMessageBox, QGroupBox, QScrollArea, QListWidget
 )
 from qtpy.QtCore import Qt, QTimer
 
@@ -1321,12 +1322,41 @@ class CalculationWindow(QWidget):
         self.preview_status_label.setWordWrap(True)
         preview_layout.addWidget(self.preview_status_label)
 
-        # Input file display
-        self.preview_text = QTextEdit()
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setFontFamily("Monospace")
-        self.preview_text.setPlainText("Click 'Refresh Preview' to generate input files preview")
-        preview_layout.addWidget(self.preview_text)
+        # Working directory selector (label or combo if multiple runs exist)
+        self.preview_dir_label = QLabel("")
+        self.preview_dir_label.setWordWrap(True)
+        self.preview_dir_combo = QComboBox()
+        self.preview_dir_combo.setVisible(False)
+        try:
+            self.preview_dir_combo.currentTextChanged.connect(lambda p: self._on_preview_dir_selected(p))
+        except Exception:
+            pass
+        dir_row = QWidget()
+        dir_row_l = QHBoxLayout(dir_row)
+        dir_row_l.setContentsMargins(0, 0, 0, 0)
+        dir_row_l.addWidget(QLabel('Preview files from:'))
+        dir_row_l.addWidget(self.preview_dir_label, 1)
+        dir_row_l.addWidget(self.preview_dir_combo, 1)
+        preview_layout.addWidget(dir_row)
+
+        # Main preview layout: file list (left), file content (right)
+        main_preview_layout = QHBoxLayout()
+
+        self.file_list_widget = QListWidget()
+        self.file_list_widget.setMinimumWidth(200)
+        self.file_list_widget.itemClicked.connect(self._on_preview_file_selected)
+        main_preview_layout.addWidget(self.file_list_widget)
+
+        self.file_content_text = QTextEdit()
+        self.file_content_text.setReadOnly(True)
+        self.file_content_text.setFontFamily("Monospace")
+        main_preview_layout.addWidget(self.file_content_text, 1)
+
+        # Backwards compatibility: some code paths still write to preview_text
+        # so alias it to the new file content widget.
+        self.preview_text = self.file_content_text
+
+        preview_layout.addLayout(main_preview_layout)
 
         layout.addWidget(preview_group)
 
@@ -1480,63 +1510,307 @@ class CalculationWindow(QWidget):
             self.preview_cancel_btn.setEnabled(False)
 
     def _generate_full_preview(self, config):
-        """Generate the full input file preview in background thread."""
+        """Generate the full input file preview in background thread.
+
+        The dry-run writes files using xespresso. When a user-selected
+        working directory is available we prefer to copy the generated
+        files into that directory so the preview reflects where files
+        will be created.
+        """
         atoms = self.session_state.get('current_structure')
         self._preview_cancelled = False
         self.preview_cancel_btn.setEnabled(True)
 
+        # Determine working directory requested by user (main thread)
+        session_main = getattr(self, 'session_state', {}) or {}
+        user_wd_main = session_main.get('working_directory')
+
+        # Determine structure formula (if available) to organize files by structure
+        formula_main = None
+        try:
+            if atoms is not None and hasattr(atoms, 'get_chemical_formula'):
+                formula_main = atoms.get_chemical_formula()
+            else:
+                # Fallback: build a simple formula from symbols
+                if atoms is not None:
+                    syms = getattr(atoms, 'get_chemical_symbols', lambda: [])()
+                    if syms:
+                        from collections import Counter
+                        cnt = Counter(syms)
+                        formula_main = ''.join(f"{el}{cnt[el] if cnt[el]>1 else ''}" for el in sorted(cnt))
+        except Exception:
+            formula_main = None
+
+        # If working directory already contains candidate files under the formula or root, show them immediately
+        try:
+            if user_wd_main and os.path.isdir(user_wd_main):
+                preview_files = []
+                preview_texts = {}
+
+                # Prefer files inside structure folder if present
+                candidates_dirs = []
+                if formula_main:
+                    candidates_dirs.append(os.path.join(user_wd_main, formula_main))
+                candidates_dirs.append(user_wd_main)
+
+                shown = False
+                for cdir in candidates_dirs:
+                    if cdir and os.path.isdir(cdir):
+                        existing_files = sorted(os.listdir(cdir))
+                        candidates = [f for f in existing_files if f.endswith(('.pwi', '.asei', '.pw', '.in', '.sh')) or f == 'job_file']
+                        if candidates:
+                            for fname in candidates:
+                                fpath = os.path.join(cdir, fname)
+                                if os.path.isfile(fpath):
+                                    preview_files.append(fname)
+                                    if fname.endswith('.asei'):
+                                        preview_texts[fname] = '<ASE info file; not human-readable>'
+                                    else:
+                                        try:
+                                            with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
+                                                preview_texts[fname] = fh.read()
+                                        except Exception:
+                                            preview_texts[fname] = '<Unable to read file contents>'
+                            # Show the files from this candidate dir and stop
+                            try:
+                                self.file_list_widget.clear()
+                                for fn in preview_files:
+                                    self.file_list_widget.addItem(fn)
+                                self._preview_file_contents = preview_texts
+                                self.preview_dir_label.setText(f'Preview files from: {cdir}')
+                                self.preview_status_label.setText('Showing existing files in working directory')
+                                self.preview_status_label.setStyleSheet('color: blue;')
+                                if preview_files:
+                                    first = preview_files[0]
+                                    self.file_list_widget.setCurrentRow(0)
+                                    self.file_content_text.setPlainText(self._preview_file_contents.get(first, ''))
+                            except Exception:
+                                pass
+                            shown = True
+                            break
+                # if none shown, do nothing now — background dry-run will update
+        except Exception:
+            pass
+
         def generate_preview():
             try:
-                # Check if cancelled before starting
                 if self._preview_cancelled:
                     return
 
-                # Create temporary directory for dry run
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # Generate input files
-                    atoms_copy, calc = dry_run_calculation(atoms, config, label="preview")
+                # Determine working directory requested by user
+                session = getattr(self, 'session_state', {}) or {}
+                user_wd = session.get('working_directory')
 
-                    # Check if cancelled during calculation
-                    if self._preview_cancelled:
-                        return
-
-                    # Read the generated input file
-                    input_content = ""
+                # Choose a label for the dry-run (basename of working dir if provided)
+                label = 'preview'
+                if user_wd:
                     try:
-                        # Try to find the input file
-                        pwi_path = getattr(calc, 'pwi', None)
-                        if not pwi_path:
-                            # Try to construct the path
-                            prefix = getattr(calc, 'prefix', 'pw')
-                            directory = getattr(calc, 'directory', temp_dir)
-                            pwi_path = os.path.join(directory, f"{prefix}.pwi")
+                        label = os.path.basename(os.path.abspath(user_wd)) or 'preview'
+                    except Exception:
+                        label = 'preview'
 
-                        if os.path.exists(pwi_path):
-                            with open(pwi_path, 'r') as f:
-                                input_content = f.read()
-                        else:
-                            input_content = f"Input file not found at: {pwi_path}\n\nAvailable files in {temp_dir}:\n"
-                            for file in os.listdir(temp_dir):
-                                input_content += f"- {file}\n"
-                    except Exception as e:
-                        input_content = f"Error reading input file: {e}"
+                # If user working directory already contains candidate files, show them immediately
+                existing_files_shown = False
+                try:
+                    if user_wd and os.path.isdir(user_wd):
+                        existing_files = sorted(os.listdir(user_wd))
+                        # Consider only relevant files (common input and job files)
+                        candidates = [f for f in existing_files if f.endswith(('.pwi', '.asei', '.pw', '.in', '.sh')) or f == 'job_file']
+                        if candidates:
+                            preview_files = []
+                            preview_texts = {}
+                            for fname in candidates:
+                                fpath = os.path.join(user_wd, fname)
+                                if os.path.isfile(fpath):
+                                    preview_files.append(fname)
+                                    if fname.endswith('.asei'):
+                                        preview_texts[fname] = '<ASE info file; not human-readable>'
+                                    else:
+                                        try:
+                                            with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
+                                                preview_texts[fname] = fh.read()
+                                        except Exception:
+                                            preview_texts[fname] = '<Unable to read file contents>'
 
-                    # Check if cancelled before updating UI
-                    if self._preview_cancelled:
-                        return
+                            # Post immediate results to GUI before running dry-run
+                            def show_existing():
+                                if self._preview_cancelled:
+                                    return
+                                try:
+                                    # Populate UI with found files and directory selector
+                                    self._preview_file_contents = preview_texts
+                                    self._populate_preview_dirs([user_wd])
+                                    self.preview_status_label.setText('Showing existing files in working directory')
+                                    self.preview_status_label.setStyleSheet('color: blue;')
+                                    # Re-enable the refresh button now that we displayed files
+                                    try:
+                                        self.preview_refresh_btn.setEnabled(True)
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    pass
 
-                    # Update UI in main thread
-                    def update_ui():
-                        if not self._preview_cancelled:  # Double-check
-                            self.preview_text.setPlainText(input_content)
-                            self.preview_status_label.setText("✅ Preview generated successfully")
-                            self.preview_status_label.setStyleSheet("color: green;")
+                            QTimer.singleShot(0, show_existing)
+                            existing_files_shown = True
+                except Exception:
+                    existing_files_shown = False
+
+                # Run dry-run to generate inputs
+                try:
+                    from qtgui.calculations.preparation import dry_run_calculation as _dry_run
+                except Exception:
+                    _dry_run = globals().get('dry_run_calculation')
+
+                try:
+                    atoms_copy, calc = _dry_run(atoms, config, label=label, working_directory=user_wd)
+                except Exception as e:
+                    # If dry-run fails, show the error in the preview area
+                    if not self._preview_cancelled:
+                        def update_error_run():
+                            self.preview_text.setPlainText(f"Dry-run failed: {e}\n\nCheck configuration and pseudopotentials")
+                            self.preview_status_label.setText("❌ Dry-run failed")
+                            self.preview_status_label.setStyleSheet("color: red;")
                             self.preview_refresh_btn.setEnabled(True)
                             self.preview_cancel_btn.setEnabled(False)
+                        QTimer.singleShot(0, update_error_run)
+                    return
 
-                    # Schedule UI update
-                    from qtpy.QtCore import QTimer
-                    QTimer.singleShot(0, update_ui)
+                if self._preview_cancelled:
+                    return
+
+                # Determine source directory where dry-run wrote files
+                outdir = getattr(calc, 'directory', None) or getattr(calc, '_directory', None)
+
+                # If user specified a working directory, copy generated files there
+                show_dir = outdir
+                try:
+                    if user_wd:
+                        base_dir = os.path.abspath(user_wd)
+                        # Compute structure formula to group calculations
+                        formula = None
+                        try:
+                            if atoms is not None and hasattr(atoms, 'get_chemical_formula'):
+                                formula = atoms.get_chemical_formula()
+                            else:
+                                if atoms is not None:
+                                    syms = getattr(atoms, 'get_chemical_symbols', lambda: [])()
+                                    if syms:
+                                        from collections import Counter
+                                        cnt = Counter(syms)
+                                        formula = ''.join(f"{el}{cnt[el] if cnt[el]>1 else ''}" for el in sorted(cnt))
+                        except Exception:
+                            formula = None
+
+                        if formula:
+                            formula_dir = os.path.join(base_dir, formula)
+                        else:
+                            formula_dir = base_dir
+
+                        # Choose subdir per calculation type to avoid overwriting
+                        calc_type = (config.get('calc_type') if isinstance(config, dict) else None) or 'scf'
+                        target_dir = os.path.join(formula_dir, str(calc_type))
+                        if os.path.exists(target_dir):
+                            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                            target_dir = os.path.join(formula_dir, f"{calc_type}_{ts}")
+
+                        os.makedirs(target_dir, exist_ok=True)
+
+                        if outdir and os.path.isdir(outdir):
+                            # Prefer to move/rename the entire output directory into target_dir
+                            try:
+                                # If target doesn't exist, attempt fast rename
+                                if not os.path.exists(target_dir):
+                                    os.makedirs(os.path.dirname(target_dir), exist_ok=True)
+                                    try:
+                                        os.rename(outdir, target_dir)
+                                        show_dir = target_dir
+                                    except Exception:
+                                        # Fallback to shutil.move which may copy across filesystems
+                                        import shutil
+                                        shutil.move(outdir, target_dir)
+                                        show_dir = target_dir
+                                else:
+                                    # target exists: create timestamped dir and move
+                                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                    alt_target = os.path.join(formula_dir, f"{calc_type}_{ts}")
+                                    try:
+                                        os.rename(outdir, alt_target)
+                                        show_dir = alt_target
+                                    except Exception:
+                                        import shutil
+                                        shutil.move(outdir, alt_target)
+                                        show_dir = alt_target
+                            except Exception:
+                                # If move fails, fall back to showing original outdir
+                                show_dir = outdir
+                        else:
+                            show_dir = outdir
+                except Exception:
+                    show_dir = outdir
+
+                preview_files = []
+                preview_texts = {}
+                if show_dir and os.path.isdir(show_dir):
+                    for fname in sorted(os.listdir(show_dir)):
+                        fpath = os.path.join(show_dir, fname)
+                        if os.path.isfile(fpath):
+                            preview_files.append(fname)
+                            if fname.endswith('.asei'):
+                                preview_texts[fname] = '<ASE info file; not human-readable>'
+                            else:
+                                try:
+                                    with open(fpath, 'r', encoding='utf-8', errors='replace') as fh:
+                                        preview_texts[fname] = fh.read()
+                                except Exception:
+                                    preview_texts[fname] = '<Unable to read file contents>'
+
+                # Post results to GUI
+                def update_ui():
+                    if self._preview_cancelled:
+                        return
+                    try:
+                        self._preview_file_contents = preview_texts
+                        dir_to_show = show_dir or outdir or ''
+                        # Always populate the shown directory first
+                        try:
+                            if dir_to_show:
+                                self._populate_preview_dirs([dir_to_show])
+                        except Exception:
+                            try:
+                                self.preview_dir_label.setText(f'Preview files from: {dir_to_show}')
+                            except Exception:
+                                pass
+                        # If there are multiple runs under the same formula, offer selection
+                        try:
+                            if dir_to_show:
+                                parent = os.path.dirname(dir_to_show)
+                                calc_type_name = os.path.basename(dir_to_show)
+                                candidates = []
+                                if os.path.isdir(parent):
+                                    for name in sorted(os.listdir(parent)):
+                                        pth = os.path.join(parent, name)
+                                        if os.path.isdir(pth) and (name == calc_type_name or name.startswith(calc_type_name + '_')):
+                                            candidates.append(pth)
+                                if candidates and len(candidates) > 1:
+                                    # show list of all candidate runs
+                                    self._populate_preview_dirs(candidates)
+                        except Exception:
+                            pass
+                        self.preview_status_label.setText('✅ Preview generated')
+                        self.preview_status_label.setStyleSheet('color: green;')
+                        self.preview_refresh_btn.setEnabled(True)
+                        self.preview_cancel_btn.setEnabled(False)
+                        # If there are files, show first one
+                        if preview_files:
+                            first = preview_files[0]
+                            self.file_list_widget.setCurrentRow(0)
+                            self.file_content_text.setPlainText(self._preview_file_contents.get(first, ''))
+                        else:
+                            self.file_content_text.setPlainText('<No files generated>')
+                    except Exception as e:
+                        self.preview_text.setPlainText(f'Error updating preview UI: {e}')
+
+                QTimer.singleShot(0, update_ui)
 
             except Exception as e:
                 if not self._preview_cancelled:
@@ -1552,6 +1826,129 @@ class CalculationWindow(QWidget):
         # Start background thread
         self._preview_thread = threading.Thread(target=generate_preview, daemon=True)
         self._preview_thread.start()
+
+    def _on_preview_file_selected(self, item):
+        """Display the selected preview file content in the right-hand viewer."""
+        try:
+            # QListWidgetItem has .text(); allow passing a string as well
+            name = item.text() if hasattr(item, 'text') else str(item)
+            contents = getattr(self, '_preview_file_contents', {}) or {}
+            text = contents.get(name, '<No content available>')
+            # For ASE info files, provide a helpful note if content is missing
+            if name.endswith('.asei') and (not text or text == '<No content available>'):
+                text = '<ASE info file; not human-readable>'
+            # Set into the file content widget (backwards-compatible alias preview_text exists)
+            try:
+                self.file_content_text.setPlainText(text)
+            except Exception:
+                # Fallback to older attribute
+                self.preview_text.setPlainText(text)
+        except Exception:
+            # Swallow errors to avoid breaking UI handlers
+            pass
+
+    def _populate_preview_dirs(self, dirs):
+        """Populate the preview dir selector from a list of directory paths.
+
+        If a single directory is provided we show the label; if multiple,
+        we present a combo for the user to select which run to view.
+        """
+        try:
+            if not dirs:
+                try:
+                    self.preview_dir_label.setText("")
+                    self.preview_dir_combo.clear()
+                    self.preview_dir_combo.setVisible(False)
+                    self.preview_dir_label.setVisible(True)
+                except Exception:
+                    pass
+                return
+
+            # Normalize and remove non-existing
+            valid = [os.path.abspath(d) for d in dirs if d and os.path.isdir(d)]
+            if not valid:
+                try:
+                    self.preview_dir_label.setText("")
+                except Exception:
+                    pass
+                return
+
+            if len(valid) == 1:
+                path = valid[0]
+                try:
+                    self.preview_dir_label.setText(path)
+                    self.preview_dir_label.setVisible(True)
+                    self.preview_dir_combo.setVisible(False)
+                except Exception:
+                    pass
+                # populate files from this directory
+                try:
+                    files = sorted([f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))])
+                    self.file_list_widget.clear()
+                    for fn in files:
+                        self.file_list_widget.addItem(fn)
+                        # lazy-fill contents if not present
+                        if fn not in getattr(self, '_preview_file_contents', {}):
+                            try:
+                                if fn.endswith('.asei'):
+                                    self._preview_file_contents[fn] = '<ASE info file; not human-readable>'
+                                else:
+                                    with open(os.path.join(path, fn), 'r', encoding='utf-8', errors='replace') as fh:
+                                        self._preview_file_contents[fn] = fh.read()
+                            except Exception:
+                                self._preview_file_contents[fn] = '<Unable to read file contents>'
+                    # show first
+                    if files:
+                        self.file_list_widget.setCurrentRow(0)
+                        self.file_content_text.setPlainText(self._preview_file_contents.get(files[0], ''))
+                except Exception:
+                    pass
+                return
+
+            # Multiple valid dirs -> show combo
+            try:
+                self.preview_dir_combo.blockSignals(True)
+                self.preview_dir_combo.clear()
+                for p in valid:
+                    self.preview_dir_combo.addItem(p)
+                self.preview_dir_combo.setVisible(True)
+                self.preview_dir_label.setVisible(False)
+                self.preview_dir_combo.setCurrentIndex(0)
+                self.preview_dir_combo.blockSignals(False)
+                # trigger populate for first
+                self._on_preview_dir_selected(self.preview_dir_combo.currentText())
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _on_preview_dir_selected(self, path):
+        """Load files from the selected preview directory into the file list."""
+        try:
+            if not path or not os.path.isdir(path):
+                return
+            files = sorted([f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))])
+            self.file_list_widget.clear()
+            for fn in files:
+                self.file_list_widget.addItem(fn)
+                try:
+                    if fn.endswith('.asei'):
+                        self._preview_file_contents[fn] = '<ASE info file; not human-readable>'
+                    else:
+                        with open(os.path.join(path, fn), 'r', encoding='utf-8', errors='replace') as fh:
+                            self._preview_file_contents[fn] = fh.read()
+                except Exception:
+                    self._preview_file_contents[fn] = '<Unable to read file contents>'
+            if files:
+                self.file_list_widget.setCurrentRow(0)
+                self.file_content_text.setPlainText(self._preview_file_contents.get(files[0], ''))
+            # update label to show currently selected path in combo too
+            try:
+                self.preview_dir_label.setText(path)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _build_config_from_gui_state(self):
         """Build configuration dictionary from current GUI state."""

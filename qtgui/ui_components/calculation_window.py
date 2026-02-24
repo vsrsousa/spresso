@@ -77,7 +77,12 @@ except Exception:
     DRY_RUN_AVAILABLE = False
 
 
+from qtpy.QtCore import Signal
+
+
 class CalculationWindow(QWidget):
+    # Signal used to post preview generation results from worker thread
+    preview_generated = Signal(object)
     """Modeless calculation configuration window with required tabs."""
 
     def __init__(self, calc_name: str, session_state=None, parent=None):
@@ -144,40 +149,200 @@ class CalculationWindow(QWidget):
                 self.machine_combo.setCurrentText(cur)
         except Exception:
             pass
-        form.addRow('Machine:', self.machine_combo)
 
-        self.version_combo = QComboBox()
-        self.codes_combo = QComboBox()
-        row = QWidget(); row_l = QHBoxLayout(row); row_l.setContentsMargins(0,0,0,0)
-        row_l.addWidget(QLabel('Version:')); row_l.addWidget(self.version_combo)
-        row_l.addWidget(QLabel('Code:')); row_l.addWidget(self.codes_combo)
-        form.addRow(row)
-
-        self.test_conn_btn = QPushButton('Test Connection')
-        self.results_label = QLabel('')
-        self.results_label.setWordWrap(True)
-        form.addRow(self.test_conn_btn)
-        form.addRow(self.results_label)
-
+        # Populate machine form (continued)
         try:
-            self.test_conn_btn.clicked.connect(self._machine_test_connection)
+            form.addRow('Machine:', self.machine_combo)
+
+            self.version_combo = QComboBox()
+            self.codes_combo = QComboBox()
+            row = QWidget(); row_l = QHBoxLayout(row); row_l.setContentsMargins(0,0,0,0)
+            row_l.addWidget(QLabel('Version:')); row_l.addWidget(self.version_combo)
+            row_l.addWidget(QLabel('Code:')); row_l.addWidget(self.codes_combo)
+            form.addRow(row)
+
+            self.test_conn_btn = QPushButton('Test Connection')
+            self.results_label = QLabel('')
+            self.results_label.setWordWrap(True)
+            form.addRow(self.test_conn_btn)
+            form.addRow(self.results_label)
+
+            try:
+                self.test_conn_btn.clicked.connect(self._machine_test_connection)
+            except Exception:
+                pass
+
+            try:
+                self.machine_combo.currentTextChanged.connect(lambda name: self._load_codes_for_machine(name))
+            except Exception:
+                pass
+
+            # Load codes for the initially selected machine
+            try:
+                current_machine = self.machine_combo.currentText()
+                if current_machine:
+                    self._load_codes_for_machine(current_machine)
+            except Exception:
+                pass
+
+            self.tabs.addTab(w, 'Machine')
         except Exception:
+            # If populating the machine tab fails, skip adding it
+            try:
+                self.tabs.addTab(w, 'Machine')
+            except Exception:
+                pass
+
+    def _on_preview_generated(self, data):
+        """Handle preview results emitted from worker thread."""
+        try:
+            if not data:
+                return
+            # Existing files quick-show
+            if data.get('existing'):
+                try:
+                    self._preview_file_contents = data.get('preview_texts', {}) or {}
+                    dirs = data.get('dirs', []) or []
+                    if dirs:
+                        self._populate_preview_dirs(dirs)
+                    self.preview_status_label.setText('Showing existing files in working directory')
+                    self.preview_status_label.setStyleSheet('color: blue;')
+                    try:
+                        self.preview_refresh_btn.setEnabled(True)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                return
+
+            # Dry-run error
+            if 'dry_run_error' in data:
+                try:
+                    msg = data.get('dry_run_error')
+                    self.preview_text.setPlainText(f"Dry-run failed: {msg}\n\nCheck configuration and pseudopotentials")
+                    self.preview_status_label.setText("❌ Dry-run failed")
+                    self.preview_status_label.setStyleSheet("color: red;")
+                    self.preview_refresh_btn.setEnabled(True)
+                    self.preview_cancel_btn.setEnabled(False)
+                except Exception:
+                    pass
+                return
+
+            # General error
+            if 'error' in data:
+                try:
+                    msg = data.get('error')
+                    self.preview_text.setPlainText(f"Error generating preview:\n\n{msg}")
+                    self.preview_status_label.setText("❌ Preview generation failed")
+                    self.preview_status_label.setStyleSheet("color: red;")
+                    self.preview_refresh_btn.setEnabled(True)
+                    self.preview_cancel_btn.setEnabled(False)
+                except Exception:
+                    pass
+                return
+
+            # Final successful result
+            if data.get('result'):
+                try:
+                    preview_files = data.get('preview_files', []) or []
+                    preview_texts = data.get('preview_texts', {}) or {}
+                    show_dir = data.get('show_dir')
+                    outdir = data.get('outdir')
+                    self._apply_preview_results(preview_files, preview_texts, show_dir, outdir, data.get('calc_type'))
+                except Exception:
+                    pass
+
+        except Exception:
+            # swallow
             pass
 
+    def _apply_preview_results(self, preview_files, preview_texts, show_dir, outdir, calc_type=None):
+        """Apply preview generation results on the GUI thread."""
         try:
-            self.machine_combo.currentTextChanged.connect(lambda name: self._load_codes_for_machine(name))
-        except Exception:
-            pass
+            if getattr(self, '_preview_cancelled', False):
+                return
+            try:
+                self._preview_file_contents = preview_texts or {}
+            except Exception:
+                self._preview_file_contents = {}
 
-        # Load codes for the initially selected machine
-        try:
-            current_machine = self.machine_combo.currentText()
-            if current_machine:
-                self._load_codes_for_machine(current_machine)
-        except Exception:
-            pass
+            dir_to_show = show_dir or outdir or ''
+            # Always populate the shown directory first
+            try:
+                if dir_to_show:
+                    self._populate_preview_dirs([dir_to_show])
+            except Exception:
+                try:
+                    self.preview_dir_label.setText(f'Preview files from: {dir_to_show}')
+                except Exception:
+                    pass
 
-        self.tabs.addTab(w, 'Machine')
+            # If there are multiple runs under the same formula, offer selection
+            try:
+                if dir_to_show:
+                    parent = os.path.dirname(dir_to_show)
+                    calc_type_name = os.path.basename(dir_to_show)
+                    candidates = []
+                    if os.path.isdir(parent):
+                        # Prefer explicit calc_type if provided by the worker
+                        base = None
+                        try:
+                            if calc_type:
+                                base = str(calc_type).strip()
+                            else:
+                                base = (calc_type_name.split('_', 1)[0] if calc_type_name else '')
+                        except Exception:
+                            base = (calc_type_name.split('_', 1)[0] if calc_type_name else '')
+
+                        for name in sorted(os.listdir(parent)):
+                            pth = os.path.join(parent, name)
+                            if not os.path.isdir(pth):
+                                continue
+                            # Accept directories that match the base calc type (exact or timestamped)
+                            if base and (name == base or name.startswith(base + '_')):
+                                candidates.append(pth)
+                            # Also accept exact match (covers non-timestamped folder)
+                            elif name == calc_type_name:
+                                candidates.append(pth)
+                    if candidates and len(candidates) > 1:
+                        # show list of all candidate runs and ensure combo is visible
+                        self._populate_preview_dirs(candidates)
+                        try:
+                            self.preview_dir_combo.setVisible(True)
+                            self.preview_dir_combo.show()
+                            self.preview_dir_combo.repaint()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            self.preview_status_label.setText('✅ Preview generated')
+            self.preview_status_label.setStyleSheet('color: green;')
+            try:
+                self.preview_refresh_btn.setEnabled(True)
+            except Exception:
+                pass
+            try:
+                self.preview_cancel_btn.setEnabled(False)
+            except Exception:
+                pass
+
+            # If there are files, show first one
+            try:
+                if preview_files:
+                    first = preview_files[0]
+                    self.file_list_widget.setCurrentRow(0)
+                    self.file_content_text.setPlainText(self._preview_file_contents.get(first, ''))
+                else:
+                    self.file_content_text.setPlainText('<No files generated>')
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                self.preview_text.setPlainText(f'Error updating preview UI: {e}')
+            except Exception:
+                pass
+        # Machine tab population handled inside _build_machine_tab
 
     def _machine_test_connection(self):
         """Test the connection to the machine."""
@@ -1325,10 +1490,43 @@ class CalculationWindow(QWidget):
         # Working directory selector (label or combo if multiple runs exist)
         self.preview_dir_label = QLabel("")
         self.preview_dir_label.setWordWrap(True)
-        self.preview_dir_combo = QComboBox()
-        self.preview_dir_combo.setVisible(False)
+        # Hide the plain label by default — show the combo instead
         try:
-            self.preview_dir_combo.currentTextChanged.connect(lambda p: self._on_preview_dir_selected(p))
+            self.preview_dir_label.setVisible(False)
+        except Exception:
+            pass
+
+        self.preview_dir_combo = QComboBox()
+        # Always show the combo (may contain a placeholder)
+        try:
+            self.preview_dir_combo.setVisible(True)
+        except Exception:
+            pass
+        try:
+            # Connect index change so we can use the stored userData (real path)
+            # Use a dedicated handler to ensure selections load files immediately.
+            self.preview_dir_combo.currentIndexChanged.connect(self._on_preview_combo_index_changed)
+            try:
+                # Also connect activated to catch user activations on some backends
+                self.preview_dir_combo.activated.connect(self._on_preview_combo_index_changed)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        # Add a safe placeholder so the combo is visible even with no dirs
+        try:
+            self.preview_dir_combo.clear()
+            self.preview_dir_combo.addItem('No preview directories available', '')
+            try:
+                self.preview_dir_combo.model().item(0).setEnabled(False)
+            except Exception:
+                pass
+            try:
+                # Do not select the placeholder as an active selection
+                self.preview_dir_combo.setCurrentIndex(-1)
+            except Exception:
+                pass
         except Exception:
             pass
         dir_row = QWidget()
@@ -1355,6 +1553,11 @@ class CalculationWindow(QWidget):
         # Backwards compatibility: some code paths still write to preview_text
         # so alias it to the new file content widget.
         self.preview_text = self.file_content_text
+        try:
+            # Ensure worker thread can post results to UI safely
+            self.preview_generated.connect(self._on_preview_generated)
+        except Exception:
+            pass
 
         preview_layout.addLayout(main_preview_layout)
 
@@ -1372,6 +1575,58 @@ class CalculationWindow(QWidget):
             self._setup_preview_auto_update()
 
         self.tabs.addTab(w, 'Preview')
+
+        # Immediately populate preview dirs if session has a working_directory
+        try:
+            session = getattr(self, 'session_state', {}) or {}
+            user_wd = session.get('working_directory')
+            if user_wd and os.path.isdir(user_wd):
+                # Compute formula folder if available (same logic as preview generator)
+                atoms = session.get('current_structure')
+                formula = None
+                try:
+                    if atoms is not None and hasattr(atoms, 'get_chemical_formula'):
+                        formula = atoms.get_chemical_formula()
+                    else:
+                        if atoms is not None:
+                            syms = getattr(atoms, 'get_chemical_symbols', lambda: [])()
+                            if syms:
+                                from collections import Counter
+                                cnt = Counter(syms)
+                                formula = ''.join(f"{el}{cnt[el] if cnt[el]>1 else ''}" for el in sorted(cnt))
+                except Exception:
+                    formula = None
+
+                parent_dir = os.path.join(user_wd, formula) if formula else user_wd
+                if os.path.isdir(parent_dir):
+                    # Determine calc type (use window's calculation_type if present)
+                    calc_type = getattr(self, 'calculation_type', None) or 'scf'
+                    candidates = []
+                    for name in sorted(os.listdir(parent_dir)):
+                        pth = os.path.join(parent_dir, name)
+                        if not os.path.isdir(pth):
+                            continue
+                        # Match directories named like calc_type or calc_type_YYYYMMDD_HHMMSS
+                        if calc_type and (name == calc_type or name.startswith(calc_type + '_')):
+                            candidates.append(pth)
+                            continue
+                        # Also accept dirs that contain preview-like files
+                        try:
+                            for fn in os.listdir(pth):
+                                if fn.endswith(('.pwi', '.asei', '.pw', '.in', '.sh')) or fn == 'job_file':
+                                    candidates.append(pth)
+                                    break
+                        except Exception:
+                            pass
+
+                    if candidates:
+                        # Populate combo with discovered candidate run dirs
+                        try:
+                            self._populate_preview_dirs(candidates)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
 
     def _setup_preview_auto_update(self):
         """Set up automatic preview updates when settings change."""
@@ -1650,7 +1905,15 @@ class CalculationWindow(QWidget):
                                 except Exception:
                                     pass
 
-                            QTimer.singleShot(0, show_existing)
+                            # Post results to UI thread via signal (thread-safe)
+                            try:
+                                self.preview_generated.emit({
+                                    'existing': True,
+                                    'preview_texts': preview_texts,
+                                    'dirs': [user_wd]
+                                })
+                            except Exception:
+                                QTimer.singleShot(0, show_existing)
                             existing_files_shown = True
                 except Exception:
                     existing_files_shown = False
@@ -1666,13 +1929,17 @@ class CalculationWindow(QWidget):
                 except Exception as e:
                     # If dry-run fails, show the error in the preview area
                     if not self._preview_cancelled:
-                        def update_error_run():
-                            self.preview_text.setPlainText(f"Dry-run failed: {e}\n\nCheck configuration and pseudopotentials")
-                            self.preview_status_label.setText("❌ Dry-run failed")
-                            self.preview_status_label.setStyleSheet("color: red;")
-                            self.preview_refresh_btn.setEnabled(True)
-                            self.preview_cancel_btn.setEnabled(False)
-                        QTimer.singleShot(0, update_error_run)
+                        # Post dry-run error to UI thread
+                        try:
+                            self.preview_generated.emit({'dry_run_error': str(e)})
+                        except Exception:
+                            def update_error_run():
+                                self.preview_text.setPlainText(f"Dry-run failed: {e}\n\nCheck configuration and pseudopotentials")
+                                self.preview_status_label.setText("❌ Dry-run failed")
+                                self.preview_status_label.setStyleSheet("color: red;")
+                                self.preview_refresh_btn.setEnabled(True)
+                                self.preview_cancel_btn.setEnabled(False)
+                            QTimer.singleShot(0, update_error_run)
                     return
 
                 if self._preview_cancelled:
@@ -1787,10 +2054,16 @@ class CalculationWindow(QWidget):
                                 calc_type_name = os.path.basename(dir_to_show)
                                 candidates = []
                                 if os.path.isdir(parent):
-                                    for name in sorted(os.listdir(parent)):
-                                        pth = os.path.join(parent, name)
-                                        if os.path.isdir(pth) and (name == calc_type_name or name.startswith(calc_type_name + '_')):
-                                            candidates.append(pth)
+                                        # Derive a base calc type (e.g. 'scf' from 'scf_YYYYMMDD...')
+                                        base = (calc_type_name.split('_', 1)[0] if calc_type_name else '')
+                                        for name in sorted(os.listdir(parent)):
+                                            pth = os.path.join(parent, name)
+                                            if not os.path.isdir(pth):
+                                                continue
+                                            if base and (name == base or name.startswith(base + '_')):
+                                                candidates.append(pth)
+                                            elif name == calc_type_name:
+                                                candidates.append(pth)
                                 if candidates and len(candidates) > 1:
                                     # show list of all candidate runs
                                     self._populate_preview_dirs(candidates)
@@ -1810,18 +2083,33 @@ class CalculationWindow(QWidget):
                     except Exception as e:
                         self.preview_text.setPlainText(f'Error updating preview UI: {e}')
 
-                QTimer.singleShot(0, update_ui)
+                # Post final results to UI thread via signal (thread-safe)
+                try:
+                    self.preview_generated.emit({
+                        'result': True,
+                        'preview_files': preview_files,
+                        'preview_texts': preview_texts,
+                        'show_dir': show_dir,
+                        'outdir': outdir,
+                        'calc_type': (calc_type if 'calc_type' in locals() else None),
+                    })
+                except Exception:
+                    QTimer.singleShot(0, update_ui)
 
             except Exception as e:
                 if not self._preview_cancelled:
-                    def update_error():
-                        self.preview_text.setPlainText(f"Error generating preview:\n\n{str(e)}")
-                        self.preview_status_label.setText("❌ Preview generation failed")
-                        self.preview_status_label.setStyleSheet("color: red;")
-                        self.preview_refresh_btn.setEnabled(True)
-                        self.preview_cancel_btn.setEnabled(False)
+                    # Post exception to UI thread
+                    try:
+                        self.preview_generated.emit({'error': str(e)})
+                    except Exception:
+                        def update_error():
+                            self.preview_text.setPlainText(f"Error generating preview:\n\n{str(e)}")
+                            self.preview_status_label.setText("❌ Preview generation failed")
+                            self.preview_status_label.setStyleSheet("color: red;")
+                            self.preview_refresh_btn.setEnabled(True)
+                            self.preview_cancel_btn.setEnabled(False)
 
-                    QTimer.singleShot(0, update_error)
+                        QTimer.singleShot(0, update_error)
 
         # Start background thread
         self._preview_thread = threading.Thread(target=generate_preview, daemon=True)
@@ -1847,6 +2135,76 @@ class CalculationWindow(QWidget):
             # Swallow errors to avoid breaking UI handlers
             pass
 
+    def _on_preview_combo_index_changed(self, idx):
+        """Handle combobox index change/activation and load files for selected run.
+
+        idx may be -1 or correspond to the placeholder; in that case we clear the
+        file list. If a real path is selected we call `_on_preview_dir_selected`.
+        """
+        try:
+            # The signal may deliver an int index or the selected text (str),
+            # depending on the overloaded signal used by the Qt binding.
+            index = None
+            if isinstance(idx, int):
+                index = idx
+            elif isinstance(idx, str):
+                # find the index for this text
+                try:
+                    index = self.preview_dir_combo.findText(idx)
+                except Exception:
+                    index = -1
+            else:
+                # Unexpected type; bail out
+                return
+
+            if index is None or index < 0:
+                # nothing selected / placeholder
+                try:
+                    self.file_list_widget.clear()
+                    self.file_content_text.setPlainText('')
+                    self.preview_dir_label.setText('')
+                except Exception:
+                    pass
+                return
+
+            # Prefer stored userData, but fall back to displayed text if needed
+            try:
+                path = self.preview_dir_combo.itemData(index)
+            except Exception:
+                path = ''
+            if not path:
+                try:
+                    text = self.preview_dir_combo.itemText(index)
+                    # If the displayed text includes a timestamp like 'YYYY-MM-DD HH:MM:SS — name',
+                    # try to extract the trailing name part as a fallback path candidate.
+                    if '—' in text:
+                        candidate = text.split('—', 1)[1].strip()
+                    else:
+                        candidate = text
+                    # If candidate looks like an absolute or relative path, prefer it
+                    if os.path.isdir(candidate):
+                        path = candidate
+                except Exception:
+                    pass
+            if path and os.path.isdir(path):
+                try:
+                    # Ensure preview storage exists before loading files
+                    if not hasattr(self, '_preview_file_contents') or self._preview_file_contents is None:
+                        self._preview_file_contents = {}
+                    self._on_preview_dir_selected(path)
+                except Exception:
+                    pass
+            else:
+                # Clear file list when placeholder (null) is selected
+                try:
+                    self.file_list_widget.clear()
+                    self.file_content_text.setPlainText('')
+                    self.preview_dir_label.setText('')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _populate_preview_dirs(self, dirs):
         """Populate the preview dir selector from a list of directory paths.
 
@@ -1857,9 +2215,33 @@ class CalculationWindow(QWidget):
             if not dirs:
                 try:
                     self.preview_dir_label.setText("")
-                    self.preview_dir_combo.clear()
-                    self.preview_dir_combo.setVisible(False)
-                    self.preview_dir_label.setVisible(True)
+                    try:
+                        self.preview_dir_combo.blockSignals(True)
+                    except Exception:
+                        pass
+                    try:
+                        self.preview_dir_combo.clear()
+                    except Exception:
+                        pass
+                    # Always show combo; provide a disabled placeholder entry
+                    try:
+                        self.preview_dir_combo.addItem('No preview directories available', '')
+                        try:
+                            # model() may not exist in minimal Qt builds; guard it
+                            self.preview_dir_combo.model().item(0).setEnabled(False)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    try:
+                        self.preview_dir_combo.setVisible(True)
+                        self.preview_dir_label.setVisible(False)
+                    except Exception:
+                        pass
+                    try:
+                        self.preview_dir_combo.blockSignals(False)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 return
@@ -1876,47 +2258,90 @@ class CalculationWindow(QWidget):
             if len(valid) == 1:
                 path = valid[0]
                 try:
-                    self.preview_dir_label.setText(path)
-                    self.preview_dir_label.setVisible(True)
-                    self.preview_dir_combo.setVisible(False)
+                    # Populate combo with a placeholder first, then the single directory
+                    try:
+                        self.preview_dir_combo.blockSignals(True)
+                    except Exception:
+                        pass
+                    try:
+                        self.preview_dir_combo.clear()
+                        # placeholder (null selection)
+                        self.preview_dir_combo.addItem('— Select run (none) —', '')
+                        # actual directory
+                        self.preview_dir_combo.addItem(os.path.basename(path) or path, path)
+                        # show placeholder by default (do not auto-load files)
+                        try:
+                            self.preview_dir_combo.setCurrentIndex(0)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    try:
+                        self.preview_dir_combo.setVisible(True)
+                        self.preview_dir_label.setVisible(False)
+                    except Exception:
+                        pass
+                    try:
+                        self.preview_dir_combo.blockSignals(False)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
-                # populate files from this directory
-                try:
-                    files = sorted([f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))])
-                    self.file_list_widget.clear()
-                    for fn in files:
-                        self.file_list_widget.addItem(fn)
-                        # lazy-fill contents if not present
-                        if fn not in getattr(self, '_preview_file_contents', {}):
-                            try:
-                                if fn.endswith('.asei'):
-                                    self._preview_file_contents[fn] = '<ASE info file; not human-readable>'
-                                else:
-                                    with open(os.path.join(path, fn), 'r', encoding='utf-8', errors='replace') as fh:
-                                        self._preview_file_contents[fn] = fh.read()
-                            except Exception:
-                                self._preview_file_contents[fn] = '<Unable to read file contents>'
-                    # show first
-                    if files:
-                        self.file_list_widget.setCurrentRow(0)
-                        self.file_content_text.setPlainText(self._preview_file_contents.get(files[0], ''))
-                except Exception:
-                    pass
+                # Do NOT auto-populate files for a single existing directory; wait for user selection
                 return
 
-            # Multiple valid dirs -> show combo
+            # Multiple valid dirs -> show combo ordered by modification time (newest first)
             try:
-                self.preview_dir_combo.blockSignals(True)
-                self.preview_dir_combo.clear()
-                for p in valid:
-                    self.preview_dir_combo.addItem(p)
-                self.preview_dir_combo.setVisible(True)
-                self.preview_dir_label.setVisible(False)
-                self.preview_dir_combo.setCurrentIndex(0)
-                self.preview_dir_combo.blockSignals(False)
-                # trigger populate for first
-                self._on_preview_dir_selected(self.preview_dir_combo.currentText())
+                # sort by modification time (newest first)
+                try:
+                    valid_sorted = sorted(valid, key=lambda p: os.path.getmtime(p), reverse=True)
+                except Exception:
+                    valid_sorted = valid
+
+                # Ensure combo is cleared and not emitting while we populate
+                try:
+                    self.preview_dir_combo.blockSignals(True)
+                except Exception:
+                    pass
+                try:
+                    self.preview_dir_combo.clear()
+                except Exception:
+                    pass
+                from datetime import datetime
+                # Add placeholder as first, then real entries (newest first)
+                try:
+                    self.preview_dir_combo.blockSignals(True)
+                except Exception:
+                    pass
+                try:
+                    self.preview_dir_combo.clear()
+                    # placeholder null option
+                    self.preview_dir_combo.addItem('— Select run (none) —', '')
+                    for p in valid_sorted:
+                        try:
+                            mtime = datetime.fromtimestamp(os.path.getmtime(p)).strftime('%Y-%m-%d %H:%M:%S')
+                            label = f"{mtime} — {os.path.basename(p) or p}"
+                        except Exception:
+                            label = os.path.basename(p) or p
+                        # store real path in itemData so we can retrieve it reliably
+                        self.preview_dir_combo.addItem(label, p)
+                    # Make combo visible and refresh the widget so layouts update
+                    try:
+                        self.preview_dir_combo.setVisible(True)
+                        self.preview_dir_combo.show()
+                        self.preview_dir_label.setVisible(False)
+                    except Exception:
+                        pass
+                    # Keep placeholder selected (index 0); do not auto-load first real dir
+                    try:
+                        self.preview_dir_combo.setCurrentIndex(0)
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        self.preview_dir_combo.blockSignals(False)
+                    except Exception:
+                        pass
             except Exception:
                 pass
         except Exception:
@@ -1927,6 +2352,9 @@ class CalculationWindow(QWidget):
         try:
             if not path or not os.path.isdir(path):
                 return
+            # Ensure preview storage exists
+            if not hasattr(self, '_preview_file_contents') or self._preview_file_contents is None:
+                self._preview_file_contents = {}
             files = sorted([f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))])
             self.file_list_widget.clear()
             for fn in files:

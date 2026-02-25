@@ -68,10 +68,6 @@ class WorkflowTask:
         t = data.get("type", "task")
         mapping = {
             "scf": ScfTask,
-            "relax": RelaxTask if "RelaxTask" in globals() else WorkflowTask,
-            "convergence": ConvergenceTask if "ConvergenceTask" in globals() else WorkflowTask,
-            "neb": NebTask if "NebTask" in globals() else WorkflowTask,
-            "pp": PpTask if "PpTask" in globals() else WorkflowTask,
         }
         klass = mapping.get(t, WorkflowTask)
         inputs = data.get("inputs", {}) or {}
@@ -176,75 +172,6 @@ class ScfTask(WorkflowTask):
         except Exception:
             pass
 
-        return self.outputs
-
-
-@dataclass
-class RelaxTask(WorkflowTask):
-    type: str = "relax"
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        # For simplicity reuse SCF setup then mark as relax
-        scf = ScfTask(name=self.name + "_inner", params=self.params, inputs=self.inputs)
-        out = scf.run(context)
-        # In a fuller implementation we'd call Espresso with calculation='relax'
-        self.outputs = out
-        self.status = scf.status
-        try:
-            self._record_provenance(self.outputs.get("atoms"), self.outputs.get("calculator"), self.outputs.get("energy"), context, calc_type="relax")
-        except Exception:
-            pass
-        return self.outputs
-
-
-@dataclass
-class ConvergenceTask(WorkflowTask):
-    type: str = "convergence"
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        # Minimal placeholder: run a single SCF as a step in convergence
-        scf = ScfTask(name=self.name + "_conv", params=self.params, inputs=self.inputs)
-        out = scf.run(context)
-        self.outputs = out
-        self.status = scf.status
-        try:
-            self._record_provenance(self.outputs.get("atoms"), self.outputs.get("calculator"), self.outputs.get("energy"), context, calc_type="convergence")
-        except Exception:
-            pass
-        return self.outputs
-
-
-@dataclass
-class NebTask(WorkflowTask):
-    type: str = "neb"
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        # Placeholder NEB sequence: ensure initial and final exist then record
-        scf = ScfTask(name=self.name + "_neb_scf", params=self.params, inputs=self.inputs)
-        out = scf.run(context)
-        self.outputs = out
-        self.status = scf.status
-        try:
-            self._record_provenance(self.outputs.get("atoms"), self.outputs.get("calculator"), self.outputs.get("energy"), context, calc_type="neb")
-        except Exception:
-            pass
-        return self.outputs
-
-
-@dataclass
-class PpTask(WorkflowTask):
-    type: str = "pp"
-
-    def run(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        # Post-processing placeholder
-        scf = ScfTask(name=self.name + "_pp_scf", params=self.params, inputs=self.inputs)
-        out = scf.run(context)
-        self.outputs = out
-        self.status = scf.status
-        try:
-            self._record_provenance(self.outputs.get("atoms"), self.outputs.get("calculator"), self.outputs.get("energy"), context, calc_type="pp")
-        except Exception:
-            pass
         return self.outputs
 
 

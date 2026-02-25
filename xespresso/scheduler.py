@@ -47,7 +47,12 @@ def set_queue(calc, package=None, parallel=None, queue=None, command=None):
     calc.queue = queue
     package = package or calc.package
     parallel = parallel or calc.parallel
-    command = command or os.environ.get("ASE_ESPRESSO_COMMAND", "")
+    
+    # Get command - priority:
+    # 1. Explicit command argument
+    # 2. ASE_ESPRESSO_COMMAND environment variable
+    # 3. calc.command (default from Espresso class)
+    command = command or os.environ.get("ASE_ESPRESSO_COMMAND", "") or calc.command
 
     # Replace placeholders
     # Support expanding launcher placeholders such as {nprocs}
@@ -67,8 +72,6 @@ def set_queue(calc, package=None, parallel=None, queue=None, command=None):
     if "PARALLEL" in command:
         command = command.replace("PARALLEL", parallel)
 
-    logger.debug(f"Espresso command: {command}")
-
     # Default to local direct scheduler if none is defined
     if not queue or "scheduler" not in queue:
         queue = {
@@ -76,7 +79,6 @@ def set_queue(calc, package=None, parallel=None, queue=None, command=None):
             "scheduler": "direct"
         }
         calc.queue = queue
-        logger.debug("No scheduler defined. Defaulting to local direct execution.")
 
     # Validate SLURM only for local execution
     if queue.get("scheduler") == "slurm" and queue.get("execution", "local") == "local":

@@ -1,0 +1,209 @@
+"""
+ESTRUTURA FINAL - DATABASE + PROVENANCE INTEGRATION
+====================================================
+
+Arquivos NOVOS adicionados ao xespresso:
+"""
+
+# File structure created:
+
+"""
+xespresso/
+├── db/                                   [NEW MODULE]
+│   ├── __init__.py                      - Exports: ProvenanceDB, DatabaseWorkflow, queries
+│   ├── provenance.py                    - SQLite-based provenance database (4 tables)
+│   ├── database_workflow.py              - Integration wrapper + caching logic
+│   └── queries.py                       - Analysis + query functions
+│
+examples/
+└── database_workflow_example.py          - Complete working example
+
+docs/
+└── DATABASE_AND_PROVENANCE.md           - Full documentation
+
+
+ARQUIVOS NA SEQUÊNCIA DE DEPENDÊNCIA
+====================================
+
+1. xespresso/db/provenance.py (CORE)
+   └─ Não depende de nada (apenas sqlite3)
+   └─ Responsável: tables + insert/query para provenance
+
+2. xespresso/db/database_workflow.py (WRAPPER)
+   └─ Depende de: provenance.py + simple_workflow.py
+   └─ Responsável: caching + parameter inheritance
+
+3. xespresso/db/queries.py (UTILITIES)
+   └─ Depende de: provenance.py
+   └─ Responsável: analysis + export
+
+4. xespresso/db/__init__.py (PACKAGE)
+   └─ Exports: ProvenanceDB, DatabaseWorkflow, query functions
+
+5. examples/database_workflow_example.py (DEMO)
+   └─ Mostra uso completo do sistema
+
+
+CLASSES PRINCIPAIS
+==================
+
+ProvenanceDB (provenance.py)
+────────────────────────────
+Methods:
+  - __init__(db_path)
+  - _create_tables()
+  - log_calculation(calc_hash, input_id, output_id, energy, ...)
+  - log_execution(calc_id, machine, wall_time, version, ...)
+  - log_derivation(source_id, derived_id, method, energy_change)
+  - log_dependency(calc_id, depends_on, type, reason)
+  - query_by_hash(calc_hash)
+  - query_by_structure(struct_id)
+  - query_executions(calc_id)
+  - query_derivations(struct_id)
+  - query_all_by_protocol(protocol)
+  - query_all_by_method(method)
+  - get_calculation_history(struct_id)  [returns lineage]
+  - close()
+
+
+DatabaseWorkflow (database_workflow.py)
+───────────────────────────────────────
+Methods:
+  - __init__(db_path, provenance_path)
+  - _compute_calculation_hash(atoms, params)  [based on QE params only, not machine]
+  - get_structure_with_params(struct_id)
+  - get_or_calculate(atoms, params, method, input_id, force_recalc=False)
+    └─ CORE: Retorna cache ou executa
+  - run_properties_on_structure(struct_id, type, override_params=None)
+    └─ CORE: Herda parâmetros de convergência
+  - log_structure_derivation(source_id, derived_id, method, energy_change)
+  - get_structure_lineage(struct_id)
+  - validate_consistency(struct_id)
+  - close()
+
+
+Funções de Query (queries.py)
+─────────────────────────────
+  - get_structure_history(provenance_db, struct_id)
+  - get_all_derivatives(provenance_db, struct_id)
+  - validate_consistency(provenance_db, struct_id)
+  - query_by_protocol(provenance_db, protocol)
+  - query_by_element(ase_db, provenance_db, element)
+  - export_to_dataframe(ase_db, provenance_db, filter_protocol=None)
+  - get_calculation_stats(provenance_db)
+  - compare_structures(ase_db, id1, id2)
+
+
+ESQUEMA DO BANCO PROVENANCE.DB
+==============================
+
+Tabela: calculations
+    id (PK)
+    calculation_hash (UNIQUE)
+    input_structure_id (FK)
+    output_structure_id (FK)
+    energy
+    convergence_steps
+    convergence_params (JSON)
+    calculation_method
+    timestamp
+    Índices: hash, input_id, output_id, timestamp
+
+Tabela: execution_history
+    id (PK)
+    calculation_id (FK)
+    machine
+    wall_time
+    xespresso_version
+    qe_version
+    execution_timestamp
+    Índices: calculation_id, machine
+
+Tabela: derivations
+    id (PK)
+    source_structure_id (FK)
+    derived_structure_id (FK)
+    derivation_method
+    energy_change
+    derivation_timestamp
+    Índices: source_id, derived_id
+
+Tabela: dependencies
+    id (PK)
+    calculation_id (FK)
+    depends_on (FK)
+    dependency_type
+    reason
+    Índices: calculation_id, depends_on
+
+
+COMO USAR
+=========
+
+1. IMPORTAR:
+
+    from xespresso.db import DatabaseWorkflow, get_structure_history
+
+2. INICIALIZAR:
+
+    db = DatabaseWorkflow()
+
+3. EXECUTAR/CACHEAR:
+
+    result, from_cache = db.get_or_calculate(
+        atoms,
+        {'protocol': 'moderate', 'machine': 'medusa'},
+        calculation_method='scf'
+    )
+
+4. DERIVAÇÕES:
+
+    db.log_structure_derivation(
+        source_structure_id=1,
+        derived_structure_id=2,
+        derivation_method='vc-relax',
+        energy_change=-0.123
+    )
+
+5. PROPRIEDADES EM ESTRUTURA OTIMIZADA:
+
+    phonon, _ = db.run_properties_on_structure(
+        structure_id=2,
+        calc_type='phonon'
+    )
+
+6. ANÁLISE:
+
+    history = get_structure_history(db.provenance, 2)
+    df = export_to_dataframe(db.db, db.provenance)
+    stats = get_calculation_stats(db.provenance)
+
+
+VANTAGENS PRINCIPAIS
+====================
+
+✅ SEM REDUNDÂNCIA
+   - Mesmo cálculo não é executado 2x
+   - Cache baseado em parâmetros QE (não máquina)
+
+✅ CONSISTÊNCIA CIENTÍFICA
+   - Parâmetros de convergência herdados
+   - Validação automática
+
+✅ RASTREABILIDADE COMPLETA
+   - Histórico completo de cálculos
+   - Máquinas usadas em cada um
+   - Dependências between calculations
+
+✅ ANÁLISE EM LARGA ESCALA
+   - Export para pandas DataFrame
+   - Filter por protocol/element/method
+   - Estatísticas automáticas
+
+✅ REPRODUTIBILIDADE
+   - Provenance trail para publicações
+   - Audit trail completo
+   - Versões de software registradas
+"""
+
+print(__doc__)

@@ -96,6 +96,7 @@ class RemoteExecutionMixin:
 
         search_dirs = []
         control = self.calc.parameters.get("input_data", {}).get("CONTROL", {})
+        
         if "pseudo_dir" in control:
             search_dirs.append(control["pseudo_dir"])
         if "ESPRESSO_PSEUDO" in os.environ:
@@ -230,6 +231,8 @@ class RemoteExecutionMixin:
                     self.calc.last_job_id = job_id
                     # Store the actual remote path for monitoring
                     self.calc.last_remote_path = self.remote_path
+                    # Store remote connection for RemoteJobMonitor to access after execute() finishes
+                    self.calc.remote = self.remote
                     return stdout, stderr
                 else:
                     if hasattr(self, "logger"):
@@ -248,6 +251,8 @@ class RemoteExecutionMixin:
                     self.calc.last_job_id = f"PID:{pid}"
                     # Store the actual remote path for monitoring
                     self.calc.last_remote_path = self.remote_path
+                    # Store remote connection for RemoteJobMonitor to access after execute() finishes
+                    self.calc.remote = self.remote
                     return stdout, stderr
                 else:
                     if hasattr(self, "logger"):

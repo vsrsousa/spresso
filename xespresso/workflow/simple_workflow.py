@@ -33,6 +33,9 @@ PRESETS = {
         'kspacing': 0.5,  # Angstrom^-1
         'mixing_beta': 0.7,
         'electron_maxstep': 100,
+        'occupations': 'smearing',  # Required for smearing
+        'smearing': 'cold',  # Better than gaussian for metals
+        'degauss': 0.02,  # Ry
     },
     'moderate': {
         'ecutwfc': 50.0,
@@ -41,6 +44,9 @@ PRESETS = {
         'kspacing': 0.3,  # Angstrom^-1
         'mixing_beta': 0.5,
         'electron_maxstep': 200,
+        'occupations': 'smearing',  # Required for smearing
+        'smearing': 'cold',  # Better than gaussian for metals
+        'degauss': 0.015,  # Ry
     },
     'accurate': {
         'ecutwfc': 80.0,
@@ -49,6 +55,9 @@ PRESETS = {
         'kspacing': 0.15,  # Angstrom^-1
         'mixing_beta': 0.3,
         'electron_maxstep': 300,
+        'occupations': 'smearing',  # Required for smearing
+        'smearing': 'cold',  # Better than gaussian for metals
+        'degauss': 0.01,  # Ry (tighter for accurate)
     }
 }
 
@@ -343,11 +352,49 @@ class CalculationWorkflow:
                     if 'input_ntyp' not in self.input_data:
                         self.input_data['input_ntyp'] = {}
                     self.input_data['input_ntyp'].update(config['input_ntyp'])
+                # Set nspin=2 for magnetic calculation
+                self.input_data['nspin'] = 2
             elif magnetic_config in ['antiferro', 'antiferromagnetic']:
                 # Simple antiferromagnetic configuration
                 # For antiferromagnetic, we need to determine sublattices
-                # Simple approach: alternate atoms
+                # Check if we have enough atoms for alternating configuration
                 n_atoms = len(self.atoms)
+                symbols = self.atoms.get_chemical_symbols()
+                unique_symbols = set(symbols)
+                
+                # Count atoms of each element
+                symbol_counts = {s: symbols.count(s) for s in unique_symbols}
+                
+                # Check if antiferro is feasible with current structure
+                # If we have only 1 atom of a kind, we need to expand to proper BCC structure
+                needs_expansion = any(count < 2 for count in symbol_counts.values()) and len(unique_symbols) == 1
+                
+                if needs_expansion:
+                    # For BCC structure with antiferro, we need 2 atoms at proper positions
+                    # Átomo 1: (0, 0, 0) - corner
+                    # Átomo 2: (a/2, a/2, a/2) - body center
+                    logger.info(f"Antiferromagnetic BCC requires proper 2-atom structure. Reconstructing...")
+                    
+                    # Get cell parameters from current (primitive) cell
+                    cell = self.atoms.get_cell()
+                    cell_volume = self.atoms.get_volume()
+                    
+                    # For BCC, the conventional cell is 2x the primitive cell
+                    # Create proper BCC with 2 atoms
+                    symbol = symbols[0]  # Get element symbol
+                    
+                    # Create new atoms with proper BCC structure
+                    bcc_atoms = Atoms(
+                        symbols=[symbol, symbol],
+                        positions=[[0, 0, 0], [cell[0, 0]/2, cell[1, 1]/2, cell[2, 2]/2]],
+                        cell=cell,
+                        pbc=True
+                    )
+                    self.atoms = bcc_atoms
+                    logger.info(f"  BCC structure reconstructed: {symbol} at (0,0,0) and ({cell[0, 0]/2:.4f}, {cell[1, 1]/2:.4f}, {cell[2, 2]/2:.4f})")
+                    n_atoms = len(self.atoms)
+                
+                # Now create sublattices from alternating atoms
                 sublattice1 = list(range(0, n_atoms, 2))
                 sublattice2 = list(range(1, n_atoms, 2))
                 
@@ -363,6 +410,8 @@ class CalculationWorkflow:
                     if 'input_ntyp' not in self.input_data:
                         self.input_data['input_ntyp'] = {}
                     self.input_data['input_ntyp'].update(config['input_ntyp'])
+                # Set nspin=2 for magnetic calculation
+                self.input_data['nspin'] = 2
             else:
                 raise ValueError(
                     f"Unknown magnetic configuration: '{magnetic_config}'. "
@@ -394,6 +443,9 @@ class CalculationWorkflow:
                 self.input_data['qe_version'] = config.get('qe_version')
             if 'lda_plus_u' in config:
                 self.input_data['lda_plus_u'] = config['lda_plus_u']
+            
+            # Set nspin=2 for polarized magnetic calculation
+            self.input_data['nspin'] = 2
         else:
             raise TypeError(
                 f"magnetic_config must be str or dict, got {type(magnetic_config)}"

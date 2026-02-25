@@ -522,6 +522,251 @@ class CalculationWorkflow:
             # Default to gamma point if no k-spacing specified
             return (1, 1, 1)
     
+    def _check_convergence(self, calc: Espresso, calculation_type: str = 'scf') -> dict:
+        """
+        Check if calculation converged and inform user.
+        
+        Args:
+            calc: Espresso calculator object
+            calculation_type: 'scf', 'relax', 'vc-relax', etc
+            
+        Returns:
+            dict: Convergence status information with keys:
+                - job_done: bool, JOB DONE found in output
+                - scf_converged: bool, convergence achieved
+                - scf_iterations: int or None, number of SCF cycles
+                - final_energy: float or None, in Ry
+                - message: str, formatted status message
+        """
+        import re
+        
+        convergence_info = {
+            'job_done': False,
+            'scf_converged': False,
+            'scf_iterations': None,
+            'final_energy': None,
+            'message': None,
+        }
+        
+        try:
+            output = calc.results.get('output', '')
+            if not output:
+                convergence_info['message'] = "⚠ No output available to check convergence"
+                print("\n" + "="*70)
+                print(f"CALCULATION STATUS: {calculation_type.upper()}")
+                print("="*70)
+                print(convergence_info['message'])
+                print("="*70)
+                return convergence_info
+            
+            # Check basic markers
+            convergence_info['job_done'] = 'JOB DONE' in output
+            convergence_info['scf_converged'] = 'convergence has been achieved' in output
+            
+            # Extract SCF iterations
+            scf_match = re.search(r'number of scf cycles\s*=\s*(\d+)', output)
+            if scf_match:
+                convergence_info['scf_iterations'] = int(scf_match.group(1))
+            
+            # Extract final energy
+            energy_match = re.search(r'Final energy\s*=\s*(-?\d+\.\d+)\s*Ry', output)
+            if energy_match:
+                convergence_info['final_energy'] = float(energy_match.group(1))
+            
+            # Generate status message
+            if convergence_info['job_done'] and convergence_info['scf_converged']:
+                convergence_info['message'] = (
+                    f"✓ {calculation_type.upper()} calculation CONVERGED successfully"
+                )
+            elif convergence_info['job_done'] and not convergence_info['scf_converged']:
+                convergence_info['message'] = (
+                    f"⚠ WARNING: {calculation_type.upper()} completed but SCF did NOT converge!\n"
+                    f"  Iterations: {convergence_info['scf_iterations']} | "
+                    f"Try increasing electron_maxstep or decreasing conv_thr"
+                )
+            else:
+                convergence_info['message'] = (
+                    f"✗ {calculation_type.upper()} calculation FAILED or incomplete"
+                )
+            
+            # Print status to user
+            print("\n" + "="*70)
+            print(f"CALCULATION STATUS: {calculation_type.upper()}")
+            print("="*70)
+            print(f"Job completed (JOB DONE):    {convergence_info['job_done']}")
+            print(f"SCF converged:               {convergence_info['scf_converged']}")
+            print(f"SCF iterations:              {convergence_info['scf_iterations']}")
+            print(f"Final energy (Ry):           {convergence_info['final_energy']}")
+            print("-"*70)
+            print(convergence_info['message'])
+            print("="*70)
+            
+        except Exception as e:
+            logger.warning(f"Could not parse convergence info: {e}")
+            convergence_info['message'] = f"⚠ Could not verify convergence: {e}"
+            print(f"\n⚠ Warning: {convergence_info['message']}")
+        
+        return convergence_info
+
+    def _monitor_remote_job(self, calc: Espresso, job_id: str, timeout: int = 3600, poll_interval: int = 30) -> dict:
+        """
+        Monitor SLURM job status and detect stuck/failed jobs.
+        
+        Args:
+            calc: Espresso calculator object
+            job_id: SLURM job ID
+            timeout: Maximum time to wait in seconds (default 3600s = 1 hour)
+            poll_interval: Time between status checks in seconds (default 30s)
+            
+        Returns:
+            dict: Job status info with keys:
+                - job_id: str, SLURM job ID
+                - state: str, final job state (RUNNING, COMPLETED, FAILED, etc)
+                - elapsed_time: int, seconds elapsed
+                - pending_time: int, seconds spent in PENDING state
+                - reason: str, status reason or error message
+                - success: bool, whether job completed successfully
+                - message: str, formatted status message
+        """
+        import time
+        import subprocess
+        
+        job_status = {
+            'job_id': job_id,
+            'state': None,
+            'elapsed_time': 0,
+            'pending_time': 0,
+            'reason': None,
+            'success': False,
+            'message': None,
+        }
+        
+        start_time = time.time()
+        pending_start = None
+        
+        print(f"\n{'='*70}")
+        print(f"REMOTE JOB MONITORING: {job_id}")
+        print(f"{'='*70}")
+        print(f"Timeout: {timeout}s | Poll interval: {poll_interval}s")
+        print(f"{'-'*70}")
+        
+        try:
+            while True:
+                elapsed = int(time.time() - start_time)
+                
+                # Check if timeout exceeded
+                if elapsed > timeout:
+                    job_status['elapsed_time'] = elapsed
+                    job_status['message'] = (
+                        f"✗ JOB TIMEOUT: {job_id} exceeded {timeout}s limit\n"
+                        f"  Job may still be running on remote. Check manually with: squeue -j {job_id}"
+                    )
+                    print(f"\n{job_status['message']}")
+                    return job_status
+                
+                # Query SLURM status
+                try:
+                    result = subprocess.run(
+                        ['squeue', '-j', job_id, '-h', '-o', '%T,%r,%M'],
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    
+                    if result.returncode != 0:
+                        # Job not found (probably completed)
+                        job_status['state'] = 'COMPLETED'
+                        job_status['elapsed_time'] = elapsed
+                        job_status['success'] = True
+                        job_status['message'] = f"✓ JOB {job_id} completed (no longer in queue)"
+                        print(f"\n{job_status['message']}")
+                        return job_status
+                    
+                    # Parse squeue output: STATE,REASON,ELAPSED
+                    output = result.stdout.strip()
+                    if output:
+                        parts = output.split(',')
+                        state = parts[0].strip() if len(parts) > 0 else 'UNKNOWN'
+                        reason = parts[1].strip() if len(parts) > 1 else ''
+                        elapsed_str = parts[2].strip() if len(parts) > 2 else ''
+                        
+                        job_status['state'] = state
+                        job_status['reason'] = reason
+                        job_status['elapsed_time'] = elapsed
+                        
+                        # Print status update
+                        status_line = f"[{elapsed:5d}s] State: {state:10s} | Reason: {reason:20s}"
+                        print(f"\r{status_line}", end='', flush=True)
+                        
+                        # Check for problematic states
+                        if state == 'FAILED':
+                            job_status['message'] = (
+                                f"✗ JOB FAILED: {job_id}\n"
+                                f"  Reason: {reason}\n"
+                                f"  Check output for details: {reason}"
+                            )
+                            print(f"\n\n{job_status['message']}")
+                            return job_status
+                        
+                        elif state == 'CANCELLED':
+                            job_status['message'] = (
+                                f"✗ JOB CANCELLED: {job_id}\n"
+                                f"  Reason: {reason}"
+                            )
+                            print(f"\n\n{job_status['message']}")
+                            return job_status
+                        
+                        elif state == 'PENDING':
+                            if pending_start is None:
+                                pending_start = time.time()
+                            pending_time = int(time.time() - pending_start)
+                            job_status['pending_time'] = pending_time
+                            
+                            # Alert if pending for too long
+                            if pending_time > 120:  # 2 minutes
+                                print(f"\n\n⚠ WARNING: Job {job_id} stuck in PENDING for {pending_time}s")
+                                print(f"  Reason: {reason}")
+                                print(f"  Possible causes:")
+                                print(f"    - Compute node is down")
+                                print(f"    - Resource limit reached")
+                                print(f"    - Queue misconfiguration")
+                                print(f"  Manual check: squeue -j {job_id}")
+                                print(f"  To cancel: scancel {job_id}")
+                                
+                                # Continue monitoring but alert user
+                                user_input = input(f"\nContinue waiting? (y/n): ")
+                                if user_input.lower() != 'y':
+                                    # Try to cancel job
+                                    subprocess.run(['scancel', job_id], capture_output=True)
+                                    job_status['message'] = f"✗ JOB CANCELLED BY USER: {job_id}"
+                                    return job_status
+                        
+                        elif state == 'RUNNING':
+                            pending_start = None  # Reset pending timer
+                        
+                        elif state == 'COMPLETED':
+                            job_status['success'] = True
+                            job_status['message'] = f"✓ JOB {job_id} completed successfully"
+                            print(f"\n\n{job_status['message']}")
+                            return job_status
+                
+                except subprocess.TimeoutExpired:
+                    print(f"\n⚠ Warning: squeue command timed out")
+                except Exception as e:
+                    logger.warning(f"Error querying job status: {e}")
+                
+                # Wait before next poll
+                time.sleep(poll_interval)
+        
+        except KeyboardInterrupt:
+            print(f"\n\n⚠ Monitoring interrupted by user")
+            job_status['message'] = f"User interrupted monitoring for job {job_id}"
+            return job_status
+        except Exception as e:
+            logger.error(f"Error during remote job monitoring: {e}")
+            job_status['message'] = f"Error monitoring job: {e}"
+            return job_status
+
     def run_scf(
         self,
         label: str = 'scf',
@@ -589,20 +834,30 @@ class CalculationWorkflow:
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
                 calc.remote = calc.scheduler.remote
             
-            # Step 3: Wait for remote job completion
-            logger.info(f"Remote job {calc.last_job_id} submitted. Waiting for completion...")
-            monitor = RemoteJobMonitor(calc)
+            # Step 3: Monitor SLURM job status (detect stuck jobs)
+            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
+            job_id = calc.last_job_id
             timeout = self.queue.get('job_timeout', 3600)
-            if monitor.wait(timeout=timeout, poll_interval=10):
+            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
+            
+            if not job_monitor_result['success']:
+                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
+            
+            # Step 4: Job completed in queue, now fetch output using RemoteJobMonitor
+            monitor = RemoteJobMonitor(calc)
+            if monitor.wait(timeout=60, poll_interval=5):  # Short timeout since job already completed
                 monitor.retrieve_output()
-                logger.info("Remote job completed and output retrieved.")
-                # Step 4: Read results
+                logger.info("Remote job output retrieved.")
+                # Step 5: Read results
                 calc.read_results()
             else:
-                raise RuntimeError(f"Remote job {calc.last_job_id} timed out after {timeout}s")
+                raise RuntimeError(f"Failed to retrieve output for job {job_id}")
         else:
             # Local or remote blocking: use normal run() with retry logic
             calc.run(atoms=self.atoms)
+        
+        # Check convergence and inform user
+        self._check_convergence(calc, calculation_type='scf')
         
         return calc
     
@@ -680,20 +935,30 @@ class CalculationWorkflow:
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
                 calc.remote = calc.scheduler.remote
             
-            # Step 3: Wait for remote job completion
-            logger.info(f"Remote job {calc.last_job_id} submitted. Waiting for completion...")
-            monitor = RemoteJobMonitor(calc)
+            # Step 3: Monitor SLURM job status (detect stuck jobs)
+            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
+            job_id = calc.last_job_id
             timeout = self.queue.get('job_timeout', 3600)
-            if monitor.wait(timeout=timeout, poll_interval=10):
+            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
+            
+            if not job_monitor_result['success']:
+                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
+            
+            # Step 4: Job completed in queue, now fetch output using RemoteJobMonitor
+            monitor = RemoteJobMonitor(calc)
+            if monitor.wait(timeout=60, poll_interval=5):  # Short timeout since job already completed
                 monitor.retrieve_output()
-                logger.info("Remote job completed and output retrieved.")
-                # Step 4: Read results
+                logger.info("Remote job output retrieved.")
+                # Step 5: Read results
                 calc.read_results()
             else:
-                raise RuntimeError(f"Remote job {calc.last_job_id} timed out after {timeout}s")
+                raise RuntimeError(f"Failed to retrieve output for job {job_id}")
         else:
             # Local or remote blocking: use normal run() with retry logic
             calc.run(atoms=self.atoms)
+        
+        # Check convergence and inform user
+        self._check_convergence(calc, calculation_type=relax_type)
         
         return calc
     

@@ -1329,6 +1329,182 @@ class CalculationWorkflow:
         
         return calc
     
+    def run_projwfc(
+        self,
+        nscf_label: str = 'nscf',
+        projwfc_label: str = 'projwfc',
+        Emin: Optional[float] = None,
+        Emax: Optional[float] = None,
+        DeltaE: float = 0.01,
+        degauss: Optional[float] = None,
+        ngauss: int = 0,
+        lsym: int = 1,
+        pawproj: int = 0,
+        filpdos: Optional[str] = None,
+    ):
+        """
+        Run Projections on Atomic Wavefunctions (PROJWFC) post-processing.
+        
+        This computes the local and orbital-projected density of states (PDOS)
+        from a prior NSCF calculation. Useful for understanding which atoms
+        and orbitals contribute to the electronic structure, especially
+        important for magnetic systems and strongly correlated materials.
+        
+        Note: The package changes from 'pw' (SCF/NSCF) to 'projwfc' for this calculation.
+        
+        Args:
+            nscf_label: Directory of the NSCF calculation (default 'nscf')
+            projwfc_label: Output directory label (default 'projwfc')
+            Emin: Minimum energy for PDOS (eV relative to Fermi). If None, uses -30 eV
+            Emax: Maximum energy for PDOS (eV relative to Fermi). If None, uses +10 eV
+            DeltaE: Energy grid spacing (eV, default 0.01)
+            degauss: Gaussian broadening (eV). If None, uses preset value
+            ngauss: Gaussian broadening type (0=Methfessel-Paxton, 1=Fermi-Dirac)
+            lsym: Symmetrize projections (0=no, 1=yes). Default 1
+            pawproj: PAW projector type (0=Rydberg, 1=m_j dependent). Default 0
+            filpdos: Prefix for output PDOS files. If None, uses nscf prefix
+            
+        Returns:
+            EspressoProjwfc: Post-processing calculator with PDOS results
+            
+        Notes:
+            - For magnetic systems: Projections include spin-polarized contributions
+            - PDOS shows which atoms/orbitals contribute at each energy
+            - Essential for validating magnetic orderings and orbital occupations
+            - Output files: {prefix}.pdos_* (one per orbital symmetry type)
+            
+        Example:
+            >>> # SCF + NSCF for transition metal oxide
+            >>> scf_calc = workflow.run_scf(label='scf')
+            >>> workflow.atoms = scf_calc.atoms
+            >>> nscf_calc = workflow.run_nscf(label='nscf', kpts=(12, 12, 12))
+            
+            >>> # PROJWFC for orbital-resolved analysis
+            >>> projwfc_result = workflow.run_projwfc(
+            ...     nscf_label='nscf',
+            ...     Emin=-30,
+            ...     Emax=10,
+            ...     DeltaE=0.01
+            ... )
+            
+            >>> # Analyze PDOS
+            >>> from xespresso.dos import DOS
+            >>> dos = DOS(label='nscf', prefix='nscf')
+            >>> dos.read_pdos()
+            >>> dos.plot_pdos(Emin=-30, Emax=10, smearing=[0.01])
+        """
+        from xespresso.post.projwfc import EspressoProjwfc
+        
+        logger.info(f"Starting PROJWFC post-processing from {nscf_label}...")
+        
+        # Check if NSCF calculation directory exists
+        nscf_path = Path(nscf_label)
+        if not nscf_path.exists():
+            raise FileNotFoundError(
+                f"NSCF calculation directory '{nscf_label}' not found. "
+                f"Please run NSCF first: workflow.run_nscf(label='{nscf_label}')"
+            )
+        
+        # Extract prefix from NSCF directory path
+        nscf_prefix = nscf_label.split('/')[-1] if '/' in nscf_label else nscf_label
+        
+        # Detect if system is magnetic by checking input_data
+        nspin = self.input_data.get('nspin', 1)
+        is_magnetic = nspin > 1
+        
+        # Set default energy windows if not specified
+        if Emin is None:
+            Emin = -30.0  # 30 eV below Fermi level
+        if Emax is None:
+            Emax = 10.0   # 10 eV above Fermi level
+        
+        # Use degauss from preset if not specified
+        if degauss is None:
+            degauss = self.input_data.get('degauss', 0.01)
+        
+        # Set output filename if not specified
+        if filpdos is None:
+            filpdos = nscf_prefix
+        
+        # Prepare PROJWFC parameters
+        projwfc_params = {
+            'Emin': Emin,
+            'Emax': Emax,
+            'DeltaE': DeltaE,
+            'degauss': degauss,
+            'ngauss': ngauss,
+            'lsym': lsym,
+            'pawproj': pawproj,
+            'filpdos': filpdos,
+        }
+        
+        # Log system analysis
+        print("\n" + "="*70)
+        print("PROJWFC (PDOS) CALCULATION - ORBITAL ANALYSIS")
+        print("="*70)
+        print(f"NSCF source: {nscf_label}")
+        print(f"Magnetic system (nspin={nspin}): {is_magnetic}")
+        if is_magnetic:
+            if nspin == 2:
+                print(f"  → Collinear magnetism: separate spin-up/down projections")
+            elif nspin == 4:
+                print(f"  → Non-collinear magnetism: spinor projections")
+        print("\nPROJWFC Parameters:")
+        print(f"  Energy window: [{Emin}, {Emax}] eV (relative to Fermi)")
+        print(f"  Grid spacing (DeltaE): {DeltaE} eV")
+        print(f"  Broadening (degauss): {degauss} eV")
+        print(f"  Broadening type (ngauss): {ngauss}")
+        print(f"  Symmetry projection (lsym): {lsym}")
+        print(f"  PAW projector (pawproj): {pawproj}")
+        print(f"  Output prefix (filpdos): {filpdos}")
+        
+        if is_magnetic:
+            print("\n" + "-"*70)
+            print("Orbital-Projected Analysis:")
+            print("  PDOS will show contributions from:")
+            print("    • Individual atoms (site-projected)")
+            print("    • Different orbitals (s, p, d, f, etc.)")
+            print("    • Spin-up and spin-down for magnetic systems")
+            print("  Useful for validating magnetic orderings in transition metals")
+        else:
+            print("\n" + "-"*70)
+            print("Orbital-Projected Analysis:")
+            print("  PDOS will decompose electronic structure by:")
+            print("    • Atomic sites")
+            print("    • Orbital angular momentum (s, p, d, f)")
+        print("="*70 + "\n")
+        
+        logger.info(
+            f"PROJWFC parameters: Emin={Emin} eV, Emax={Emax} eV, DeltaE={DeltaE} eV, "
+            f"degauss={degauss} eV, ngauss={ngauss}, lsym={lsym}, "
+            f"pawproj={pawproj}, filpdos={filpdos}, magnetic={is_magnetic}"
+        )
+        
+        # Create PROJWFC post-processor (note: package changes from 'pw' to 'projwfc')
+        projwfc_calc = EspressoProjwfc(
+            parent_directory=nscf_label,
+            prefix=nscf_prefix,
+            queue=self.queue,
+            parallel=self.queue.get('parallel', '') if self.queue else '',
+            **projwfc_params
+        )
+        
+        # Execute PROJWFC calculation
+        projwfc_calc.run()
+        
+        logger.info(f"PROJWFC calculation completed. Results in {projwfc_calc.directory}/")
+        
+        # Provide next steps information
+        logger.info(
+            f"Projected DOS (PDOS) calculated. Use xespresso.dos.DOS class to analyze:\n"
+            f"  - read_pdos() to load projection data\n"
+            f"  - plot_pdos() to visualize orbital contributions\n"
+            f"  - Compare site/orbital contributions to validate electronic structure\n"
+            f"  - For magnetic systems: analyze spin-up vs spin-down projections"
+        )
+        
+        return projwfc_calc
+    
     def _estimate_nbnd(self) -> int:
         """
         Estimate number of bands needed for band structure calculations.

@@ -861,6 +861,159 @@ class CalculationWorkflow:
         
         return calc
     
+    def run_nscf(
+        self,
+        label: str = 'nscf',
+        kpts: tuple = None,
+        nbnd: int = None,
+        wf_collect: bool = True,
+        npools: int = None,
+        **calc_kwargs
+    ) -> Espresso:
+        """
+        Run a non-self-consistent field (NSCF) calculation for band structure.
+        
+        NSCF reads the charge density from a previous SCF calculation and computes
+        electronic structure on a denser k-point mesh without updating electron density.
+        Essential for Wannier interpolation and band structure analysis.
+        
+        Args:
+            label: Directory/label for the calculation
+            kpts: K-point mesh tuple (e.g., (12, 12, 12) for dense mesh)
+                  If None, uses self.kpts from initialization
+            nbnd: Number of bands to compute (must be > n_electrons/2)
+                  If None, uses preset value or estimates from pseudopotentials
+            wf_collect: If True, collect wavefunctions on each k-point (required for Wannier)
+            npools: Number of k-point pools for parallelization (e.g., -npools 4)
+                    Allows distributing k-points across processes
+            **calc_kwargs: Additional Espresso calculator parameters
+            
+        Returns:
+            Espresso: Calculator object with NSCF results
+            
+        Notes:
+            - Must run SCF first to generate charge density
+            - Generates prefix.save/wavefunction.* files (can be large!)
+            - Set wf_collect=True for Wannier calculations
+            - High nbnd increases memory but necessary for accurate interpolation
+        """
+        if kpts is None:
+            kpts = self._get_kpts()
+        
+        if nbnd is None:
+            # Estimate nbnd from pseudopotentials if not specified
+            nbnd = self._estimate_nbnd()
+        
+        # Set ESPRESSO_PSEUDO if we have pseudopotentials_config
+        if self.pseudopotentials_base_path:
+            os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
+        
+        # Prepare input_data (copy from preset)
+        input_data = self.input_data.copy()
+        
+        # NSCF-specific parameters
+        input_data['nbnd'] = nbnd  # Override with larger value for band structure
+        
+        if wf_collect:
+            input_data['wf_collect'] = True  # Collect wavefunctions for post-processing
+        
+        if npools is not None:
+            # Note: -npools is a command-line argument, not in &control
+            # Will be passed as extra kwargs to Espresso
+            calc_kwargs['npools'] = npools
+        
+        # Prepare parameters
+        params = {
+            'pseudopotentials': self.pseudopotentials,
+            'label': label,
+            'calculation': 'nscf',
+            'input_data': input_data,
+            'kpts': kpts,
+        }
+        
+        # Add ecutwfc and ecutrho at top level
+        params['ecutwfc'] = input_data.get('ecutwfc', 50.0)
+        params['ecutrho'] = input_data.get('ecutrho', 400.0)
+        
+        # Set pseudo_dir when using pseudopotentials_config
+        if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
+            params['input_data']['pseudo_dir'] = './pseudo'
+        
+        # Add queue configuration if provided
+        if self.queue is not None:
+            params['queue'] = self.queue
+        
+        # Merge with extra kwargs
+        params.update(self.extra_kwargs)
+        params.update(calc_kwargs)
+        
+        # Create calculator
+        calc = Espresso(**params)
+        self.atoms.calc = calc
+        self.last_calc = calc  # Track last calculator for monitoring
+        
+        # If remote non-blocking: control execution steps to avoid retry loop
+        if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
+            logger.info("Remote non-blocking: executing NSCF with automatic job monitoring...")
+            
+            # Step 1: Write input
+            calc.write_input(self.atoms)
+            calc.atoms = self.atoms
+            
+            # Step 2: Execute (submits job remotely)
+            calc.execute()
+            
+            # IMPORTANT: Store remote connection on calc for RemoteJobMonitor to access
+            if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
+                calc.remote = calc.scheduler.remote
+            
+            # Step 3: Monitor SLURM job status
+            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
+            job_id = calc.last_job_id
+            timeout = self.queue.get('job_timeout', 7200)  # NSCF may take longer
+            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
+            
+            if not job_monitor_result['success']:
+                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
+            
+            # Step 4: Fetch output
+            monitor = RemoteJobMonitor(calc)
+            if monitor.wait(timeout=60, poll_interval=5):
+                monitor.retrieve_output()
+                logger.info("Remote NSCF output retrieved.")
+                calc.read_results()
+            else:
+                raise RuntimeError(f"Failed to retrieve NSCF output for job {job_id}")
+        else:
+            # Local or remote blocking: use normal run()
+            calc.run(atoms=self.atoms)
+        
+        # Check convergence and inform user
+        self._check_convergence(calc, calculation_type='nscf')
+        
+        logger.info(f"NSCF calculation completed. Wavefunctions saved in {label}/")
+        if wf_collect:
+            logger.info(f"  wf_collect=True: Wavefunctions available for post-processing (Wannier, bands, etc)")
+        
+        return calc
+    
+    def _estimate_nbnd(self) -> int:
+        """
+        Estimate number of bands needed for band structure calculations.
+        
+        Uses pseudopotential valence electrons + buffer for unoccupied states.
+        
+        Returns:
+            int: Recommended nbnd value
+        """
+        from xespresso.workflow.wannier_workflow import suggest_nbnd_from_pseudos
+        
+        # Use the existing helper from wannier_workflow
+        nbnd = suggest_nbnd_from_pseudos(self.pseudopotentials, buffer=20)
+        logger.info(f"Estimated nbnd: {nbnd}")
+        
+        return nbnd
+    
     def run_relax(
         self,
         label: str = 'relax',

@@ -13,7 +13,7 @@ logging.getLogger('paramiko').setLevel(logging.WARNING)
 logging.getLogger('xespresso.xio').setLevel(logging.WARNING)
 
 from ase.build import bulk
-from xespresso.workflow.simple_workflow import CalculationWorkflow
+from xespresso.workflow.calculation_workflow import CalculationWorkflow
 
 print("\n" + "="*80)
 print("FINAL TEST: Remote Non-Blocking Execution with Fixed Connection Storage")

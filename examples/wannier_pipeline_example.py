@@ -13,7 +13,7 @@ Adjust paths, pseudopotential mapping and machine configuration as needed.
 """
 from pathlib import Path
 
-from xespresso.workflow.simple_workflow import CalculationWorkflow
+from xespresso.workflow.calculation_workflow import CalculationWorkflow
 from xespresso.workflow.wannier_workflow import (
     run_pw2wannier,
     run_wannier90,

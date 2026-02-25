@@ -16,8 +16,8 @@ from xespresso import CalculationWorkflow
 
 atoms = bulk("Si", cubic=True)
 
-with patch('xespresso.workflow.simple_workflow.load_machine') as mock_load_machine, \
-     patch('xespresso.workflow.simple_workflow.load_pseudopotentials_config') as mock_load_pseudo:
+with patch('xespresso.workflow.calculation_workflow.load_machine') as mock_load_machine, \
+     patch('xespresso.workflow.calculation_workflow.load_pseudopotentials_config') as mock_load_pseudo:
     
     mock_machine = {
         'execution': 'remote',
@@ -49,7 +49,7 @@ with patch('xespresso.workflow.simple_workflow.load_machine') as mock_load_machi
     with patch.object(Espresso, 'write_input') as mock_write_input, \
          patch.object(Espresso, 'execute') as mock_execute, \
          patch.object(Espresso, 'last_job_id', '12345', create=True), \
-         patch('xespresso.workflow.simple_workflow.RemoteJobMonitor') as mock_monitor_class:
+         patch('xespresso.workflow.calculation_workflow.RemoteJobMonitor') as mock_monitor_class:
         
         mock_monitor = Mock()
         mock_monitor.wait = Mock(return_value=True)

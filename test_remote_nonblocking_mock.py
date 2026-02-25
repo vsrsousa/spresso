@@ -36,11 +36,11 @@ def test_remote_nonblocking_no_repetition():
         atoms = bulk("Si", cubic=True)
         
         # Mock the machine loading
-        with patch('xespresso.workflow.simple_workflow.load_machine') as mock_load_machine:
+        with patch('xespresso.workflow.calculation_workflow.load_machine') as mock_load_machine:
             mock_load_machine.return_value = mock_machine
             
             # Mock pseudopotentials config
-            with patch('xespresso.workflow.simple_workflow.load_pseudopotentials_config') as mock_load_pseudo:
+            with patch('xespresso.workflow.calculation_workflow.load_pseudopotentials_config') as mock_load_pseudo:
                 mock_pseudo_config = Mock()
                 mock_pseudo_config.base_path = tmpdir
                 mock_pseudo_config.get_pseudopotential = Mock(return_value=Mock(filename='Si.pbe.UPF'))
@@ -169,8 +169,8 @@ def test_workflow_integration():
         atoms = bulk("Si", cubic=True)
         
         # Create minimal mock config
-        with patch('xespresso.workflow.simple_workflow.load_machine') as mock_load_machine, \
-             patch('xespresso.workflow.simple_workflow.load_pseudopotentials_config') as mock_load_pseudo:
+        with patch('xespresso.workflow.calculation_workflow.load_machine') as mock_load_machine, \
+             patch('xespresso.workflow.calculation_workflow.load_pseudopotentials_config') as mock_load_pseudo:
             
             mock_machine = {
                 'execution': 'remote',

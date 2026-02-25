@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)-8s [%(name)s]: %(me
 
 from ase.build import bulk
 from xespresso import Espresso
-from xespresso.workflow.simple_workflow import CalculationWorkflow
+from xespresso.workflow.calculation_workflow import CalculationWorkflow
 
 print("\n" + "="*70)
 print("TEST: Final Fix - Store remote connection in calc.remote")

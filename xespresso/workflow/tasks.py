@@ -7,7 +7,7 @@ from pathlib import Path
 from ase import Atoms
 
 from xespresso import Espresso
-from xespresso.workflow.simple_workflow import PRESETS
+from xespresso.workflow.calculation_workflow import PRESETS
 from xespresso.provenance import ProvenanceDB
 from ase import io as ase_io
 from pathlib import Path

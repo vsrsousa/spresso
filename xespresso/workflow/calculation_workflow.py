@@ -997,6 +997,338 @@ class CalculationWorkflow:
         
         return calc
     
+    def run_dos(
+        self,
+        nscf_label: str = 'nscf',
+        dos_label: str = 'dos',
+        Emin: Optional[float] = None,
+        Emax: Optional[float] = None,
+        DeltaE: float = 0.01,
+        degauss: Optional[float] = None,
+        ngauss: int = 0,
+        pdos: bool = False,
+    ):
+        """
+        Run Density of States (DOS) calculation with spin polarization support.
+        
+        This is a post-processing step that requires a prior NSCF calculation.
+        The DOS is calculated from the electron density converged in NSCF.
+        
+        For magnetic systems (nspin=2 or nspin=4), automatically produces 
+        spin-polarized DOS showing up and down electron contributions separately,
+        allowing analysis of magnetic ordering and site-projected properties.
+        
+        Note: The package changes from 'pw' (SCF/NSCF) to 'dos' for this calculation.
+        
+        Args:
+            nscf_label: Directory of the NSCF calculation (default 'nscf')
+            dos_label: Save results in this directory (default 'dos')
+            Emin: Minimum energy for DOS (eV relative to Fermi). If None, uses -30 eV
+            Emax: Maximum energy for DOS (eV relative to Fermi). If None, uses +10 eV
+            DeltaE: Energy grid spacing (eV, default 0.01)
+            degauss: Gaussian broadening (eV). If None, uses preset value
+            ngauss: Gaussian broadening type (0=cold, 1=Fermi-Dirac). Default 0
+            pdos: If True, compute local/projected DOS by atomic site (not orbital)
+            
+        Returns:
+            EspressoDos: Post-processing calculator with DOS results
+            
+        Notes:
+            - For magnetic systems: DOS includes spin-polarized contributions
+            - PDOS useful for analyzing magnetic ordering in transition metals
+            - Total DOS = DOS(up) + DOS(down) for magnetic systems
+            
+        Example:
+            >>> # SCF + NSCF for magnetic system
+            >>> scf_calc = workflow.run_scf(label='scf')  # nspin=2
+            >>> workflow.atoms = scf_calc.atoms
+            >>> nscf_calc = workflow.run_nscf(label='nscf', kpts=(12, 12, 12))
+            
+            >>> # DOS post-processing (separates spin-up and spin-down)
+            >>> dos_result = workflow.run_dos(
+            ...     nscf_label='nscf',
+            ...     Emin=-30,
+            ...     Emax=10,
+            ...     pdos=False  # Set True for projected DOS
+            ... )
+            
+            >>> # Plot spin-polarized DOS
+            >>> from xespresso.dos import DOS
+            >>> dos = DOS(label='nscf', prefix='nscf')
+            >>> dos.read_dos()
+            >>> dos.plot_dos(Emin=-30, Emax=10, smearing=[0.01])
+        """
+        from xespresso.post.dos import EspressoDos
+        import re
+        
+        logger.info(f"Starting DOS post-processing from {nscf_label}...")
+        
+        # Check if NSCF calculation directory exists
+        nscf_path = Path(nscf_label)
+        if not nscf_path.exists():
+            raise FileNotFoundError(
+                f"NSCF calculation directory '{nscf_label}' not found. "
+                f"Please run NSCF first: workflow.run_nscf(label='{nscf_label}')"
+            )
+        
+        # Extract prefix from NSCF directory path
+        nscf_prefix = nscf_label.split('/')[-1] if '/' in nscf_label else nscf_label
+        
+        # Detect if system is magnetic by checking input_data
+        nspin = self.input_data.get('nspin', 1)
+        is_magnetic = nspin > 1
+        
+        # Set default energy windows if not specified
+        if Emin is None:
+            Emin = -30.0  # 30 eV below Fermi level
+        if Emax is None:
+            Emax = 10.0   # 10 eV above Fermi level
+        
+        # Use degauss from preset if not specified
+        if degauss is None:
+            degauss = self.input_data.get('degauss', 0.01)
+        
+        # Prepare DOS parameters
+        dos_params = {
+            'Emin': Emin,
+            'Emax': Emax,
+            'DeltaE': DeltaE,
+            'degauss': degauss,
+            'ngauss': ngauss,
+        }
+        
+        # Log system analysis
+        print("\n" + "="*70)
+        print("DOS CALCULATION - MAGNETIC SYSTEM ANALYSIS")
+        print("="*70)
+        print(f"NSCF source: {nscf_label}")
+        print(f"Magnetic system (nspin={nspin}): {is_magnetic}")
+        if is_magnetic:
+            if nspin == 2:
+                print(f"  → Collinear magnetism: spin-up and spin-down electrons")
+            elif nspin == 4:
+                print(f"  → Non-collinear magnetism: full spinor calculation")
+        print("\nDOS Parameters:")
+        print(f"  Energy window: [{Emin}, {Emax}] eV (relative to Fermi)")
+        print(f"  Grid spacing (DeltaE): {DeltaE} eV")
+        print(f"  Broadening (degauss): {degauss} eV")
+        print(f"  Broadening type (ngauss): {ngauss} (0=Methfessel-Paxton)")
+        print(f"  PDOS (projected): {pdos}")
+        
+        if is_magnetic:
+            print("\n" + "-"*70)
+            print("Spin-Polarized Analysis:")
+            print("  DOS file will contain separate contributions for:")
+            print("    • Spin-UP electrons")
+            print("    • Spin-DOWN electrons")
+            print("    • Total DOS = DOS(↑) + DOS(↓)")
+            if pdos:
+                print("  Site-projected contributions available for each atom")
+        print("="*70 + "\n")
+        
+        logger.info(
+            f"DOS parameters: Emin={Emin} eV, Emax={Emax} eV, DeltaE={DeltaE} eV, "
+            f"degauss={degauss} eV, ngauss={ngauss}, "
+            f"magnetic={is_magnetic}, pdos={pdos}"
+        )
+        
+        # Create DOS post-processor (note: package changes from 'pw' to 'dos')
+        dos_calc = EspressoDos(
+            parent_directory=nscf_label,
+            prefix=nscf_prefix,
+            queue=self.queue,
+            parallel=self.queue.get('parallel', '') if self.queue else '',
+            **dos_params
+        )
+        
+        # Execute DOS calculation
+        dos_calc.run()
+        
+        logger.info(f"DOS calculation completed. Results in {dos_calc.directory}/")
+        
+        # Provide next steps information
+        if is_magnetic:
+            logger.info(
+                f"Spin-polarized DOS calculated. Use xespresso.dos.DOS class to analyze:\n"
+                f"  - Compare DOS(up) vs DOS(down) to validate magnetic ordering\n"
+                f"  - Site projections show local magnetization\n"
+                f"  - Orbital decomposition available with PDOS"
+            )
+        else:
+            logger.info(f"DOS output can be plotted using xespresso.dos.DOS class")
+        
+        return dos_calc
+    
+    def run_bands(
+        self,
+        label: str = 'bands',
+        bandpath_type: str = 'auto',
+        mode: str = 'explicit',
+        **calc_kwargs
+    ):
+        """
+        Run band structure calculation along high-symmetry k-path.
+        
+        This calculates the electronic band structure using the charge density 
+        converged from SCF/NSCF. Automatically generates or uses a high-symmetry 
+        k-point path based on crystal symmetry.
+        
+        Args:
+            label: Directory/label for the calculation (default 'bands')
+            bandpath_type: How to generate k-point path:
+                - 'auto': Automatic from cell.bandpath() (default, recommended)
+                - 'custom': User provides custom k-path (not yet implemented)
+            mode: Calculation mode:
+                - 'explicit': Calculate at explicit k-points along path (default)
+                - 'interpolated': Interpolate from NSCF (not yet implemented)
+            **calc_kwargs: Additional parameters for the calculator
+            
+        Returns:
+            Espresso: Calculator with band structure results
+            
+        Notes:
+            - Reuses charge density from SCF/NSCF (same label without /bands)
+            - For magnetic systems: respects nspin, produces magnetized bands
+            - Automatic detection of high-symmetry points (Γ, X, W, L, K, U, etc)
+            - Standard path: Al example gives GXWKGLUWLK,UX (50 k-points)
+            
+        Example:
+            >>> # SCF calculation
+            >>> scf = workflow.run_scf(label='scf')
+            >>> 
+            >>> # Band structure along auto-generated path
+            >>> bands = workflow.run_bands(label='bands')
+            >>> 
+            >>> # For magnetic system (automatically respects nspin=2)
+            >>> bands_mag = workflow.run_bands(label='bands_mag')
+            >>> # Shows band splitting from magnetic moment
+            
+            >>> # Extract and plot
+            >>> try:
+            ...     bs = bands.band_structure()
+            ...     bs.reference = bands.get_fermi_level()
+            ...     bs.plot()
+            ... except:
+            ...     print("Use xespresso plotting utilities")
+        """
+        logger.info(f"Starting band structure calculation...")
+        
+        # Generate band path from crystal symmetry
+        if bandpath_type == 'auto':
+            bandpath = self.atoms.cell.bandpath()
+            logger.info(f"Auto-generated band path from crystal symmetry:")
+            logger.info(f"  Path: {bandpath.path}")
+            logger.info(f"  High-symmetry points: {list(bandpath.special_points.keys())}")
+            logger.info(f"  Total k-points: {len(bandpath.kpts)}")
+            kpts = bandpath
+        else:
+            raise NotImplementedError(
+                f"bandpath_type='{bandpath_type}' not yet implemented. "
+                f"Use 'auto' for automatic generation from cell symmetry."
+            )
+        
+        # Set ESPRESSO_PSEUDO if we have pseudopotentials_config
+        if self.pseudopotentials_base_path:
+            os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
+        
+        # Prepare input_data (copy from preset)
+        input_data = self.input_data.copy()
+        
+        # Prepare parameters
+        params = {
+            'pseudopotentials': self.pseudopotentials,
+            'label': label,
+            'calculation': 'bands',  # High-symmetry k-path calculation
+            'input_data': input_data,
+            'kpts': kpts,
+        }
+        
+        # Add ecutwfc and ecutrho at top level
+        params['ecutwfc'] = input_data.get('ecutwfc', 50.0)
+        params['ecutrho'] = input_data.get('ecutrho', 400.0)
+        
+        # Set pseudo_dir when using pseudopotentials_config
+        if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
+            params['input_data']['pseudo_dir'] = './pseudo'
+        
+        # Add queue configuration if provided
+        if self.queue is not None:
+            params['queue'] = self.queue
+        
+        # Merge with extra kwargs
+        params.update(self.extra_kwargs)
+        params.update(calc_kwargs)
+        
+        # Create calculator for band structure
+        calc = Espresso(**params)
+        self.atoms.calc = calc
+        self.last_calc = calc  # Track last calculator for monitoring
+        
+        # Run calculation (local or remote)
+        if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
+            logger.info("Remote non-blocking: executing band structure with automatic job monitoring...")
+            
+            # Step 1: Write input
+            calc.write_input(self.atoms)
+            calc.atoms = self.atoms
+            
+            # Step 2: Execute (submits job remotely)
+            calc.execute()
+            
+            # Store remote connection on calc for RemoteJobMonitor to access
+            if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
+                calc.remote = calc.scheduler.remote
+            
+            # Step 3: Monitor SLURM job status
+            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
+            job_id = calc.last_job_id
+            timeout = self.queue.get('job_timeout', 3600)  # 1 hour for bands
+            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
+            
+            if not job_monitor_result['success']:
+                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
+            
+            # Step 4: Fetch output
+            monitor = RemoteJobMonitor(calc)
+            if monitor.wait(timeout=60, poll_interval=5):
+                monitor.retrieve_output()
+                logger.info("Remote band structure output retrieved.")
+                calc.read_results()
+            else:
+                raise RuntimeError(f"Failed to retrieve band structure output for job {job_id}")
+        else:
+            # Local or remote blocking: use normal run()
+            calc.run(atoms=self.atoms)
+        
+        # Check convergence
+        self._check_convergence(calc, calculation_type='bands')
+        
+        # Report magnetic band structure info
+        nspin = self.input_data.get('nspin', 1)
+        is_magnetic = nspin > 1
+        
+        print("\n" + "="*70)
+        print("BAND STRUCTURE CALCULATION COMPLETED")
+        print("="*70)
+        print(f"Calculation: {label}/")
+        print(f"High-symmetry path: {bandpath.path}")
+        print(f"K-points calculated: {len(bandpath.kpts)}")
+        if is_magnetic:
+            if nspin == 2:
+                print(f"Spin-polarized bands: YES (nspin=2, collinear)")
+                print(f"  → Separate band structures for spin-up and spin-down")
+            elif nspin == 4:
+                print(f"Non-collinear bands: YES (nspin=4)")
+                print(f"  → Full spinor band structure")
+        else:
+            print(f"Magnetic bands: No (nspin=1)")
+        print("="*70)
+        
+        logger.info(f"Band structure calculation completed in {label}/")
+        logger.info(f"Use Espresso.band_structure() to extract BandPath object")
+        
+        return calc
+    
     def _estimate_nbnd(self) -> int:
         """
         Estimate number of bands needed for band structure calculations.

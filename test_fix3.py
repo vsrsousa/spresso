@@ -16,8 +16,8 @@ print("=" * 70)
 atoms = bulk("Si", cubic=True)
 
 with tempfile.TemporaryDirectory() as tmpdir:
-    with patch('xespresso.workflow.simple_workflow.load_machine') as mock_load_machine, \
-         patch('xespresso.workflow.simple_workflow.load_pseudopotentials_config') as mock_load_pseudo:
+    with patch('xespresso.workflow.calculation_workflow.load_machine') as mock_load_machine, \
+         patch('xespresso.workflow.calculation_workflow.load_pseudopotentials_config') as mock_load_pseudo:
         
         mock_machine = {
             'execution': 'remote',

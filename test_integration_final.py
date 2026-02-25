@@ -57,8 +57,8 @@ def test_complete_solution():
         
         atoms = bulk("Si", cubic=True)
         
-        with patch('xespresso.workflow.simple_workflow.load_machine') as mock_load_machine, \
-             patch('xespresso.workflow.simple_workflow.load_pseudopotentials_config') as mock_load_pseudo:
+        with patch('xespresso.workflow.calculation_workflow.load_machine') as mock_load_machine, \
+             patch('xespresso.workflow.calculation_workflow.load_pseudopotentials_config') as mock_load_pseudo:
             
             mock_machine = {
                 'execution': 'remote',
@@ -89,8 +89,8 @@ def test_complete_solution():
         # 3. Test manual execution flow (no file repetition)
         print("\n[3/4] Testing manual execution flow (no file repetition)...")
         
-        with patch('xespresso.workflow.simple_workflow.load_machine') as mock_load_machine, \
-             patch('xespresso.workflow.simple_workflow.load_pseudopotentials_config') as mock_load_pseudo:
+        with patch('xespresso.workflow.calculation_workflow.load_machine') as mock_load_machine, \
+             patch('xespresso.workflow.calculation_workflow.load_pseudopotentials_config') as mock_load_pseudo:
             
             # Setup mocks again for workflow
             mock_machine = {

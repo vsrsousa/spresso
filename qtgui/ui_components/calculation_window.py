@@ -18,7 +18,7 @@ from qtpy.QtWidgets import (
 from qtpy.QtCore import Qt, QTimer
 
 try:
-    from xespresso.workflow.simple_workflow import PRESETS
+    from xespresso.workflow.calculation_workflow import PRESETS
 except Exception:
     PRESETS = {}
 

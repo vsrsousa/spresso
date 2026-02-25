@@ -13,7 +13,7 @@ from typing import Dict, Optional, Union
 import ase.db
 from ase import Atoms
 
-from xespresso.workflow.simple_workflow import CalculationWorkflow
+from xespresso.workflow.calculation_workflow import CalculationWorkflow
 from xespresso.db.provenance import ProvenanceDB
 
 logger = logging.getLogger(__name__)

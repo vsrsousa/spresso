@@ -144,7 +144,7 @@ class CalculationConfigWidget(QWidget):
         proto_row.addWidget(QLabel('Protocol:'))
         self.protocol_combo = QComboBox()
         try:
-            from xespresso.workflow.simple_workflow import PRESETS
+            from xespresso.workflow.calculation_workflow import PRESETS
             self._PRESETS = PRESETS
             # Preserve meaningful ordering: fast, moderate, accurate
             desired = ['fast', 'moderate', 'accurate']

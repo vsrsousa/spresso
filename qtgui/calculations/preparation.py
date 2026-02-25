@@ -16,6 +16,8 @@ from qtgui.calculations.base import BaseCalculationPreparation
 import logging
 import re
 import os
+from xespresso.machines import load_machine
+from xespresso.codes import load_codes_config
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +280,39 @@ class CalculationPreparation(BaseCalculationPreparation):
         else:
             # Default to gamma point
             calc_params["kpts"] = (1, 1, 1)
+
+        # If user selected a machine by name, try to load its queue config
+        # and merge it into calc_params. This allows GUI to store a simple
+        # machine name and have the proper queue dict resolved here.
+        machine_name = config.get("machine") or config.get("machine_name")
+        if machine_name and "queue" not in calc_params:
+            try:
+                mq = load_machine(machine_name)
+                if mq:
+                    logger.info(f"Loaded machine '{machine_name}' -> merging queue config")
+                    # mq is a queue dict (as produced by load_machine)
+                    calc_params["queue"] = mq
+            except Exception:
+                logger.debug(f"Failed to load machine configuration for: {machine_name}")
+
+        # If user or machine provides codes configuration, try to load it
+        # and ensure modules / environment are propagated to the queue.
+        codes_machine = config.get("codes_machine") or machine_name
+        try:
+            if codes_machine:
+                codes_cfg = load_codes_config(codes_machine)
+                if codes_cfg:
+                    # If codes config suggests modules to load, attach them
+                    modules = getattr(codes_cfg, "modules", None)
+                    if modules:
+                        if "queue" not in calc_params or calc_params["queue"] is None:
+                            calc_params["queue"] = {"use_modules": True, "modules": modules}
+                        else:
+                            calc_params["queue"]["use_modules"] = True
+                            calc_params["queue"]["modules"] = modules
+                        logger.info(f"Attached modules from codes config: {modules}")
+        except Exception:
+            logger.debug(f"Could not load codes config for: {codes_machine}")
 
         # Add queue configuration if present (for job submission)
         if "queue" in config and config["queue"]:

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Job Submission Page for xespresso PySide6 GUI.
 
@@ -6,6 +7,7 @@ This page handles file browsing, dry run, and job submission.
 
 import os
 import logging
+from datetime import datetime
 
 from qtpy.QtWidgets import (
     QWidget,
@@ -168,7 +170,7 @@ class JobSubmissionPage(QWidget):
         main_layout = QVBoxLayout(self)
 
         # Header (Job Monitor button removed - now available in toolbar)
-        header_label = QLabel("<h2>🚀 Job Submission & File Management</h2>")
+        header_label = QLabel("<h2>Job Submission & File Management</h2>")
         header_label.setTextFormat(Qt.RichText)
         main_layout.addWidget(header_label)
 
@@ -205,21 +207,28 @@ class JobSubmissionPage(QWidget):
         run_tab = QWidget()
         run_layout = QVBoxLayout(run_tab)
         self._setup_run_tab(run_layout)
-        tabs.addTab(run_tab, "🚀 Run Calculation")
+        tabs.addTab(run_tab, "Run Calculation")
 
         main_layout.addWidget(tabs)
 
     def _setup_browser_tab(self, layout):
         """Setup the file browser tab."""
-        # Working directory
+        # Working directory and subfolder selection
         workdir_layout = QHBoxLayout()
-        workdir_layout.addWidget(QLabel("📁 Working Directory:"))
+        workdir_layout.addWidget(QLabel("Working Directory:"))
         self.workdir_label = QLabel("")
         workdir_layout.addWidget(self.workdir_label, 1)
 
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.clicked.connect(self._refresh_browser)
-        workdir_layout.addWidget(refresh_btn)
+        # Subfolder selection
+        self.subfolder_combo = QComboBox()
+        self.subfolder_combo.setEditable(True)
+        self.subfolder_combo.currentTextChanged.connect(self._on_subfolder_changed)
+        workdir_layout.addWidget(QLabel("Subfolder:"))
+        workdir_layout.addWidget(self.subfolder_combo)
+
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self._refresh_browser)
+        workdir_layout.addWidget(self.refresh_btn)
         layout.addLayout(workdir_layout)
 
         # Splitter for tree and content
@@ -258,6 +267,7 @@ class JobSubmissionPage(QWidget):
         layout.addWidget(splitter)
 
         # Update browser
+        # Initial population
         self._refresh_browser()
 
     def _setup_dry_run_tab(self, layout):
@@ -406,7 +416,7 @@ class JobSubmissionPage(QWidget):
         scroll_layout.addWidget(output_group)
 
         # Run Button
-        run_btn = QPushButton("🚀 Run Calculation")
+        run_btn = QPushButton("Run Calculation")
         run_btn.clicked.connect(self._run_calculation)
         scroll_layout.addWidget(run_btn)
 
@@ -435,21 +445,62 @@ class JobSubmissionPage(QWidget):
     def _refresh_browser(self):
         """Refresh the file browser.
 
-        This method scans the working directory and displays its contents.
-        Strategy:
-        1. Show all first-level directories and files
-        2. For directories, recursively scan for calculation files
-        3. Display calculation files as children of their parent directories
         """
-        workdir = self.session_state.get("working_directory", os.path.expanduser("~"))
-        self.workdir_label.setText(workdir)
+        """Refresh the file browser.
+
+        This method scans the working directory and displays its contents.
+        Shows subfolder names and allows user to select subfolder.
+        """
+        try:
+            default_wd = os.path.expanduser("~")
+        except Exception:
+            default_wd = os.getcwd()
+        workdir = self.session_state.get("working_directory", default_wd)
+
+        # Scan for subfolders
+        subfolders = []
+        if os.path.exists(workdir):
+            for item in sorted(os.listdir(workdir)):
+                item_path = os.path.join(workdir, item)
+                if os.path.isdir(item_path) and not item.startswith("."):
+                    subfolders.append(item)
+        self.subfolder_combo.clear()
+        self.subfolder_combo.addItem("")  # Empty for root
+        for sub in subfolders:
+            self.subfolder_combo.addItem(sub)
+
+        # If no explicit selection, default to first subfolder to show subdirectories
+        if not self.subfolder_combo.currentText() and subfolders:
+            # index 0 is empty root, so select 1; block signals to avoid re-entrancy
+            try:
+                self.subfolder_combo.blockSignals(True)
+                self.subfolder_combo.setCurrentIndex(1)
+            except Exception:
+                pass
+            finally:
+                try:
+                    self.subfolder_combo.blockSignals(False)
+                except Exception:
+                    pass
+
+        # Use selected subfolder for file tree
+        selected_subfolder = self.subfolder_combo.currentText()
+        if selected_subfolder:
+            browse_dir = os.path.join(workdir, selected_subfolder)
+        else:
+            browse_dir = workdir
+
+        # Show the actual browse directory in the label (helps user know which subfolder is shown)
+        try:
+            self.workdir_label.setText(browse_dir)
+        except Exception:
+            self.workdir_label.setText(workdir)
 
         self.file_tree.clear()
-        # Clear the file content viewer when refreshing
         self.file_content.clear()
         self.file_info_label.setText("")
 
-        if not os.path.exists(workdir):
+        if not os.path.exists(browse_dir):
             return
 
         # QE input/output file extensions
@@ -486,111 +537,77 @@ class JobSubmissionPage(QWidget):
         max_items_per_dir = 100  # Limit items per directory to prevent UI slowdown
 
         try:
-            # Get all items in the working directory
-            try:
-                items = sorted(os.listdir(workdir))
-            except (OSError, IOError) as e:
-                self.file_info_label.setText(f"Error reading directory: {e}")
-                return
-
-            # Process each top-level item
-            for item_name in items:
-                item_path = os.path.join(workdir, item_name)
-
-                # Skip hidden items
-                if item_name.startswith("."):
-                    continue
-
-                # Skip common large directories
-                if item_name in ("node_modules", "__pycache__", ".git", "venv", "env"):
-                    continue
-
-                if os.path.isdir(item_path):
-                    # Add directory to tree
-                    dir_item = QTreeWidgetItem([item_name + "/"])
-                    dir_item.setData(0, Qt.UserRole, item_path)
-
-                    # Scan directory recursively for calculation files
-                    calc_folders = []
-                    try:
-                        for root, dirs, files in os.walk(item_path, topdown=True):
-                            # Limit depth to 3 levels below each top-level directory
-                            depth = root[len(item_path) :].count(os.sep)
-                            if depth >= 3:
-                                dirs[:] = []
-                                continue
-
-                            # Prune hidden and large directories
-                            dirs[:] = [
-                                d
-                                for d in dirs
-                                if not d.startswith(".")
-                                and d
-                                not in (
-                                    "node_modules",
-                                    "__pycache__",
-                                    ".git",
-                                    "venv",
-                                    "env",
-                                )
-                            ]
-
-                            # Check if this directory has calculation files
-                            calc_files = [
-                                f
-                                for f in files
-                                if (
-                                    f.endswith(input_extensions)
-                                    or f == "job_file"
-                                    or f.endswith(output_extensions)
-                                )
-                            ]
-
-                            if calc_files:
-                                rel_path = os.path.relpath(root, item_path)
-                                calc_folders.append((rel_path, root, calc_files))
-
-                                # Limit items to prevent slowdown
-                                if len(calc_folders) >= max_items_per_dir:
-                                    break
-                    except (OSError, IOError):
-                        pass  # Skip directories we can't read
-
-                    # Add calculation folders as children
-                    if calc_folders:
-                        for rel_path, abs_path, calc_files in calc_folders:
-                            if rel_path == ".":
-                                # Files are directly in this directory
-                                subfolder_item = dir_item
-                            else:
-                                # Files are in a subdirectory
-                                subfolder_item = QTreeWidgetItem([rel_path])
-                                subfolder_item.setData(0, Qt.UserRole, abs_path)
-                                dir_item.addChild(subfolder_item)
-
-                            # Add files as children
-                            for f in calc_files[:max_items_per_dir]:
-                                file_item = QTreeWidgetItem([f])
-                                file_item.setData(
-                                    0, Qt.UserRole, os.path.join(abs_path, f)
-                                )
-                                subfolder_item.addChild(file_item)
-
-                    self.file_tree.addTopLevelItem(dir_item)
-
-                elif os.path.isfile(item_path):
-                    # Add files at the root level if they're relevant
-                    if (
-                        item_name.endswith(input_extensions)
-                        or item_name == "job_file"
-                        or item_name.endswith(output_extensions)
-                    ):
-                        file_item = QTreeWidgetItem([item_name])
-                        file_item.setData(0, Qt.UserRole, item_path)
-                        self.file_tree.addTopLevelItem(file_item)
-
+            items = sorted(os.listdir(browse_dir))
         except (OSError, IOError) as e:
-            self.file_info_label.setText(f"Error scanning: {e}")
+            self.file_info_label.setText(f"Error reading directory: {e}")
+            return
+
+        for item_name in items:
+            item_path = os.path.join(browse_dir, item_name)
+            if item_name.startswith("."):
+                continue
+            if item_name in ("node_modules", "__pycache__", ".git", "venv", "env"):
+                continue
+            if os.path.isdir(item_path):
+                # include modification time for directory to help pick versions
+                try:
+                    mtime = datetime.fromtimestamp(os.path.getmtime(item_path)).strftime("%Y-%m-%d %H:%M:%S")
+                    dir_label = f"{item_name}/  ({mtime})"
+                except Exception:
+                    dir_label = item_name + "/"
+                dir_item = QTreeWidgetItem([dir_label])
+                dir_item.setData(0, Qt.UserRole, item_path)
+                calc_folders = []
+                try:
+                    for root, dirs, files in os.walk(item_path, topdown=True):
+                        depth = root[len(item_path):].count(os.sep)
+                        if depth >= 3:
+                            dirs[:] = []
+                            continue
+                        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("node_modules", "__pycache__", ".git", "venv", "env")]
+                        calc_files = [f for f in files if (f.endswith(input_extensions) or f == "job_file" or f.endswith(output_extensions))]
+                        if calc_files:
+                            rel_path = os.path.relpath(root, item_path)
+                            calc_folders.append((rel_path, root, calc_files))
+                            if len(calc_folders) >= max_items_per_dir:
+                                break
+                        # keep UI responsive on long directory walks
+                        QApplication.processEvents()
+                except (OSError, IOError):
+                    pass
+                if calc_folders:
+                    for rel_path, abs_path, calc_files in calc_folders:
+                        if rel_path == ".":
+                            subfolder_item = dir_item
+                        else:
+                            subfolder_item = QTreeWidgetItem([rel_path])
+                            subfolder_item.setData(0, Qt.UserRole, abs_path)
+                            dir_item.addChild(subfolder_item)
+                        for f in calc_files[:max_items_per_dir]:
+                            try:
+                                fpath = os.path.join(abs_path, f)
+                                ts = datetime.fromtimestamp(os.path.getmtime(fpath)).strftime("%Y-%m-%d %H:%M:%S")
+                                file_label = f"{f}  ({ts})"
+                            except Exception:
+                                file_label = f
+                            file_item = QTreeWidgetItem([file_label])
+                            file_item.setData(0, Qt.UserRole, os.path.join(abs_path, f))
+                            subfolder_item.addChild(file_item)
+                self.file_tree.addTopLevelItem(dir_item)
+            elif os.path.isfile(item_path):
+                if (item_name.endswith(input_extensions) or item_name == "job_file" or item_name.endswith(output_extensions)):
+                    try:
+                        ts = datetime.fromtimestamp(os.path.getmtime(item_path)).strftime("%Y-%m-%d %H:%M:%S")
+                        label = f"{item_name}  ({ts})"
+                    except Exception:
+                        label = item_name
+                    file_item = QTreeWidgetItem([label])
+                    file_item.setData(0, Qt.UserRole, item_path)
+                    self.file_tree.addTopLevelItem(file_item)
+        # Ensure UI events processed so buttons remain responsive after refresh
+        QApplication.processEvents()
+    def _on_subfolder_changed(self, subfolder):
+        self._refresh_browser()
 
     def _on_file_selected(self, item, column):
         """Handle file selection."""
@@ -615,7 +632,11 @@ class JobSubmissionPage(QWidget):
         """Update dry run configuration display."""
         self._update_status_and_config()
 
-        workdir = self.session_state.get("working_directory", os.path.expanduser("~"))
+        try:
+            default_wd = os.path.expanduser("~")
+        except Exception:
+            default_wd = os.getcwd()
+        workdir = self.session_state.get("working_directory", default_wd)
         self.output_dir_label.setText(workdir)
 
         config = self.session_state.get("workflow_config", {})
@@ -636,7 +657,11 @@ class JobSubmissionPage(QWidget):
         """Update run configuration display."""
         self._update_status_and_config(run_tab=True)
 
-        workdir = self.session_state.get("working_directory", os.path.expanduser("~"))
+        try:
+            default_wd = os.path.expanduser("~")
+        except Exception:
+            default_wd = os.getcwd()
+        workdir = self.session_state.get("working_directory", default_wd)
         self.run_output_dir_label.setText(workdir)
 
         config = self.session_state.get("workflow_config", {})
@@ -794,7 +819,11 @@ class JobSubmissionPage(QWidget):
             )
             return
 
-        workdir = self.session_state.get("working_directory", os.path.expanduser("~"))
+        try:
+            default_wd = os.path.expanduser("~")
+        except Exception:
+            default_wd = os.getcwd()
+        workdir = self.session_state.get("working_directory", default_wd)
         label = self.label_edit.text()
 
         if not label:
@@ -842,17 +871,88 @@ class JobSubmissionPage(QWidget):
             calc.prefix = prefix
 
             # Ensure calculator has queue info before write_input so xespresso
-            # can generate the scheduler job_file according to selected scheduler
+            # can generate the scheduler job_file according to selected scheduler.
+            # Build queue dict by merging explicit config queue, session machine
+            # settings and detected codes so machine/code information is available.
             try:
-                queue_dict = self._resolve_queue(config)
-                if queue_dict:
+                # Start with explicit queue from GUI config (highest precedence)
+                queue_dict = {}
+                try:
+                    cfg_queue = config.get("queue") if isinstance(config, dict) else None
+                    if isinstance(cfg_queue, dict):
+                        queue_dict.update(cfg_queue)
+                except Exception:
+                    cfg_queue = None
+
+                # Merge session machine queue if present
+                try:
+                    mq = self.session_state.get("calc_machine") or self.session_state.get("current_machine")
+                    if mq is not None:
+                        if hasattr(mq, "to_queue"):
+                            mqueue = mq.to_queue()
+                        elif isinstance(mq, dict):
+                            mqueue = mq
+                        else:
+                            mqueue = None
+                        if isinstance(mqueue, dict):
+                            # Only fill missing keys from machine
+                            for k, v in mqueue.items():
+                                queue_dict.setdefault(k, v)
+                            # Ensure common scheduler fields are present
+                            for k in ("env_setup", "launcher", "scheduler", "execution", "nprocs", "remote_host", "remote_user", "remote_dir"):
+                                if k in mqueue and k not in queue_dict:
+                                    queue_dict[k] = mqueue.get(k)
+                except Exception:
+                    pass
+
+                # Attach detected code executable/path if available in session
+                try:
+                    codes_map = self.session_state.get("current_codes") or {}
+                    code_path = None
+                    if isinstance(codes_map, dict):
+                        code_path = codes_map.get(selected_code) or codes_map.get(f"{selected_code}.x")
+                    # Also allow workflow config to carry detected codes
+                    if not code_path and isinstance(config, dict):
+                        detected = config.get("detected_codes") or {}
+                        if isinstance(detected, dict):
+                            code_path = detected.get(selected_code)
+                    if code_path:
+                        # pass executable path to queue for scheduler templates
+                        queue_dict.setdefault("executable", code_path)
+                        # Normalize package name: remove path and extension (e.g., /usr/bin/pw.x -> pw)
+                        try:
+                            base = os.path.basename(code_path)
+                            pkg = os.path.splitext(base)[0]
+                            selected_package = pkg
+                        except Exception:
+                            selected_package = selected_code
+                    else:
+                        selected_package = selected_code
+                except Exception:
+                    selected_package = selected_code
+
+                # Normalize queue to dict and attach to calc
+                if not isinstance(queue_dict, dict):
+                    queue_dict = dict(queue_dict) if queue_dict else {}
+
+                try:
+                    calc.queue = queue_dict
+                except Exception:
                     try:
-                        calc.queue = queue_dict
+                        setattr(calc, "queue", queue_dict)
                     except Exception:
-                        # some calculator implementations expect attribute name 'queue' writable
-                        setattr(calc, 'queue', queue_dict)
+                        pass
+
+                # Ensure calculator knows the package name
+                try:
+                    calc.package = selected_package
+                except Exception:
+                    try:
+                        setattr(calc, "package", selected_package)
+                    except Exception:
+                        pass
             except Exception:
-                pass
+                queue_dict = {}
 
             # Call write_input to generate input file AND job_file via scheduler
             # xespresso's write_input method:
@@ -883,7 +983,7 @@ class JobSubmissionPage(QWidget):
 
             self.dry_run_results.setText(
                 f"""
-✅ <b>Files generated successfully!</b>
+<b>Files generated successfully!</b>
 
 Files created in: <code>{full_path}</code>
 
@@ -962,7 +1062,7 @@ Files created in: <code>{full_path}</code>
             prefix: Calculation prefix (used for outdir)
 
         Returns:
-            dict: Input data dictionary formatted for xespresso's write_espresso_in
+            dict: Input data dictionary formatted for xespresso write_espresso_in
         """
 
         def ensure_input_ntyp(input_data):
@@ -1209,7 +1309,11 @@ Files created in: <code>{full_path}</code>
             )
             return
 
-        workdir = self.session_state.get("working_directory", os.path.expanduser("~"))
+        try:
+            default_wd = os.path.expanduser("~")
+        except Exception:
+            default_wd = os.getcwd()
+        workdir = self.session_state.get("working_directory", default_wd)
         label = self.run_label_edit.text()
 
         if not label:
@@ -1577,7 +1681,11 @@ and check on your jobs later.
         so tests that inspect the source can verify correct API usage.
         """
         # Use session state to obtain working directory for the monitor
-        workdir = self.session_state.get("working_directory", os.path.expanduser("~"))
+        try:
+            default_wd = os.path.expanduser("~")
+        except Exception:
+            default_wd = os.getcwd()
+        workdir = self.session_state.get("working_directory", default_wd)
 
         if self._job_monitor_ref is not None:
             try:
@@ -1605,7 +1713,11 @@ and check on your jobs later.
         # Ensure we reference session_state via .get() so tests that inspect
         # the source find the correct API usage within the first chunk of
         # the method's source.
-        workdir = self.session_state.get("working_directory", os.path.expanduser("~"))
+        try:
+            default_wd = os.path.expanduser("~")
+        except Exception:
+            default_wd = os.getcwd()
+        workdir = self.session_state.get("working_directory", default_wd)
         # Use the main app's job monitor reference
         if self._job_monitor_ref is not None:
             self._job_monitor_ref.add_job(job_info)

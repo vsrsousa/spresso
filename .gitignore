@@ -150,3 +150,10 @@ t1_label/
 t_save_label/
 Co4Gd2/
 test/
+
+# Test artifacts and temporary directories
+nscf/
+Co4Gd2/
+preview/
+.provenance/
+

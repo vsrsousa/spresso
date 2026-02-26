@@ -134,19 +134,21 @@ def parse_upf_header(filepath: str) -> Dict[str, any]:
     Parse UPF file header to extract metadata.
     
     Handles case variations in element symbols (Fe, FE, fe -> Fe).
+    Extracts suggested cutoff energy if available.
     
     Args:
         filepath: Path to UPF file
     
     Returns:
-        Dictionary with extracted information (element, z_valence, functional, etc.)
+        Dictionary with extracted information (element, z_valence, functional, 
+        suggested_ecutwfc, etc.)
     """
     info = {}
     
     try:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
-            # Read first 100 lines (header is usually at the top)
-            lines = [f.readline() for _ in range(100)]
+            # Read first 150 lines (header is usually at the top)
+            lines = [f.readline() for _ in range(150)]
             content = ''.join(lines)
             
             # Extract element symbol (case-insensitive)
@@ -162,6 +164,15 @@ def parse_upf_header(filepath: str) -> Dict[str, any]:
             z_match = re.search(r'z_valence\s*=\s*["\']?([\d.]+)["\']?', content, re.IGNORECASE)
             if z_match:
                 info['z_valence'] = float(z_match.group(1))
+            
+            # Extract suggested cutoff energy (in Ry)
+            # UPF v2 format: suggested_ecutwfc="40.0" or similar
+            ecut_match = re.search(r'suggested_ecutwfc\s*=\s*["\']?([\d.]+)["\']?', content, re.IGNORECASE)
+            if ecut_match:
+                try:
+                    info['suggested_ecutwfc'] = float(ecut_match.group(1))
+                except (ValueError, IndexError):
+                    pass
             
             # Extract functional
             functional_match = re.search(r'functional\s*=\s*["\']?([A-Za-z0-9-]+)["\']?', content, re.IGNORECASE)
@@ -182,7 +193,7 @@ def parse_upf_header(filepath: str) -> Dict[str, any]:
                 info['type'] = 'Norm-conserving'
     
     except Exception as e:
-        # If parsing fails, return empty dict
+        # If parsing fails, return empty dict (gracefully handle errors)
         pass
     
     return info

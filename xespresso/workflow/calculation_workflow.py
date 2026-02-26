@@ -149,6 +149,7 @@ class CalculationWorkflow:
         self.extra_kwargs = kwargs
         self.expand_cell = expand_cell
         self.pseudopotentials_base_path = None  # Will be set if loading from config
+        self._pseudo_config = None  # Will store config object if loaded from config
         
         # Handle pseudopotentials: either config name or explicit dict (config takes precedence)
         if pseudopotentials_config is not None:
@@ -204,6 +205,9 @@ class CalculationWorkflow:
         
         # Remove kspacing from input_data as it will be converted to kpts
         self.kspacing = self.input_data.pop('kspacing', None)
+        
+        # Ensure ecutwfc meets pseudopotential recommendations
+        self._adjust_ecutwfc_for_pseudos()
     
     def _load_pseudopotentials_from_config(self, config_name: str) -> Dict[str, str]:
         """
@@ -265,7 +269,78 @@ class CalculationWorkflow:
                 f"Available elements: {available}"
             )
         
+        # Store config object for later access to suggested_ecutwfc
+        self._pseudo_config = config
+        
         return pseudopotentials
+    
+    def _get_min_ecut_from_pseudos(self) -> Optional[float]:
+        """
+        Get the minimum suggested ecutwfc from all pseudopotentials in this workflow.
+        
+        Returns the MAXIMUM suggested_ecutwfc from all elements in the structure,
+        ensuring compatibility with all pseudopotentials.
+        
+        Returns:
+            Maximum suggested ecutwfc in Ry, or None if not available from any pseudo
+        """
+        max_suggested_ecut = None
+        
+        # Try to get from config object first (if loaded from config)
+        if self._pseudo_config is not None:
+            elements_in_atoms = set(self.atoms.get_chemical_symbols())
+            for element in elements_in_atoms:
+                pseudo_obj = self._pseudo_config.get_pseudopotential(element)
+                if pseudo_obj and hasattr(pseudo_obj, 'suggested_ecutwfc') and pseudo_obj.suggested_ecutwfc:
+                    ecut = pseudo_obj.suggested_ecutwfc
+                    if max_suggested_ecut is None or ecut > max_suggested_ecut:
+                        max_suggested_ecut = ecut
+                        logger.debug(f"Element {element}: suggested_ecutwfc = {ecut} Ry")
+        
+        if max_suggested_ecut is not None:
+            logger.info(f"Minimum required ecutwfc from pseudopotentials: {max_suggested_ecut} Ry")
+        else:
+            logger.debug("No suggested_ecutwfc information available from pseudopotentials")
+        
+        return max_suggested_ecut
+    
+    def _adjust_ecutwfc_for_pseudos(self):
+        """
+        Adjust ecutwfc in input_data to ensure it meets pseudopotential recommendations.
+        
+        If the current ecutwfc is below the maximum suggested value from pseudopotentials,
+        increase it to meet the requirement and log a warning.
+        """
+        min_ecut = self._get_min_ecut_from_pseudos()
+        
+        if min_ecut is None:
+            # No suggested values available, use preset as-is
+            return
+        
+        current_ecut = self.input_data.get('ecutwfc', self.preset.get('ecutwfc'))
+        
+        if current_ecut < min_ecut:
+            logger.warning(
+                f"Protocol '{self.protocol}' specifies ecutwfc={current_ecut} Ry, "
+                f"but pseudopotentials require at least {min_ecut} Ry. "
+                f"Adjusting ecutwfc to {min_ecut} Ry to ensure physical correctness."
+            )
+            self.input_data['ecutwfc'] = min_ecut
+            
+            # Also adjust ecutrho to maintain the ratio
+            # Standard ratio is ecutrho = 4 * ecutwfc
+            original_ecutwfc = self.preset.get('ecutwfc')
+            original_ecutrho = self.preset.get('ecutrho')
+            if original_ecutwfc and original_ecutrho:
+                ratio = original_ecutrho / original_ecutwfc
+                adjusted_ecutrho = min_ecut * ratio
+                logger.info(f"Also adjusting ecutrho to {adjusted_ecutrho} Ry (ratio={ratio:.1f})")
+                self.input_data['ecutrho'] = adjusted_ecutrho
+        else:
+            logger.debug(
+                f"ecutwfc={current_ecut} Ry meets pseudopotential requirement (min: {min_ecut} Ry)"
+            )
+    
     def _merge_code_modules_into_queue(self, machine_name: str, code_version: str):
         """
         Load code configuration for a specific machine and version,

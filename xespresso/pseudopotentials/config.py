@@ -21,6 +21,7 @@ class Pseudopotential:
         functional: Exchange-correlation functional (e.g., 'PBE', 'LDA', 'PBEsol')
         type: Pseudopotential type (e.g., 'ultrasoft', 'paw', 'norm-conserving')
         z_valence: Number of valence electrons
+        suggested_ecutwfc: Suggested planewave cutoff energy in Ry (from UPF file)
     """
     element: str
     filename: str
@@ -28,6 +29,7 @@ class Pseudopotential:
     functional: Optional[str] = None
     type: Optional[str] = None
     z_valence: Optional[float] = None
+    suggested_ecutwfc: Optional[float] = None
     
     def to_dict(self) -> Dict:
         """Convert to dictionary."""

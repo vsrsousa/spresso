@@ -164,6 +164,284 @@ class ConvergenceWorkflow:
             f"  kspacing range: {self.kspacing_range}"
         )
     
+    @classmethod
+    def optimize_parameters(
+        cls,
+        atoms: Atoms,
+        pseudopotentials: Dict[str, str],
+        precision: str = 'medium',
+        convergence_criteria_list: Optional[List[str]] = None,
+        convergence_criteria: Optional[Dict] = None,
+        queue: Optional[Dict] = None,
+        verbose: bool = True,
+        **kwargs
+    ) -> Dict:
+        """
+        Optimize DFT parameters using independent convergence runs.
+        
+        This method performs two independent convergence studies:
+        1. First: Converge ecutwfc using coarse kspacing (for efficiency)
+        2. Second: Converge kspacing using lower ecutwfc (not final converged value)
+        
+        This approach is more efficient than testing all parameter combinations.
+        
+        Args:
+            atoms: ASE Atoms object with structure
+            pseudopotentials: Dict mapping element symbols to UPF files
+            precision: Precision level ('low', 'medium', 'high', 'ultra')
+            convergence_criteria_list: List of criteria to check
+            convergence_criteria: Dict with custom tolerances
+            queue: Queue configuration for job submission
+            verbose: Print progress information
+            **kwargs: Additional parameters for CalculationWorkflow
+            
+        Returns:
+            Dict with optimal parameters and convergence information
+            
+        Example:
+            >>> optimal = ConvergenceWorkflow.optimize_parameters(
+            ...     atoms=atoms,
+            ...     pseudopotentials={'Si': 'Si.UPF'},
+            ...     precision='medium'
+            ... )
+            >>> print(f"Optimal ecutwfc: {optimal['ecutwfc']} Ry")
+            >>> print(f"Optimal kspacing: {optimal['kspacing']} Å⁻¹")
+        """
+        print("\n" + "="*80)
+        print("INDEPENDENT PARAMETER OPTIMIZATION")
+        print("="*80)
+        print(f"Structure: {atoms.get_chemical_formula()}")
+        print(f"Precision level: {precision}")
+        print()
+        
+        # Get parameter ranges for the precision level
+        base_ecutwfc_range, base_kspacing_range = cls._get_ranges_for_precision_static(precision)
+        
+        # Adjust ranges based on pseudopotentials and structure
+        temp_workflow = cls(atoms, pseudopotentials, precision=precision)
+        ecutwfc_range, kspacing_range = temp_workflow._adjust_ranges_for_pseudopotentials(
+            precision, pseudopotentials, atoms
+        )
+        
+        # Get convergence criteria
+        if convergence_criteria_list is None:
+            convergence_criteria_list = temp_workflow._get_default_convergence_criteria_list(precision)
+        if convergence_criteria is None:
+            convergence_criteria = temp_workflow._get_default_convergence_criteria(precision)
+            
+        print(f"Parameter ranges:")
+        print(f"  ecutwfc: {ecutwfc_range}")
+        print(f"  kspacing: {kspacing_range}")
+        print(f"Convergence criteria: {convergence_criteria_list}")
+        print()
+        
+        # Phase 1: Converge ecutwfc using coarse kspacing
+        print("PHASE 1: Converging ecutwfc (using coarse kspacing)")
+        print("-" * 50)
+        
+        # Use the coarsest kspacing for ecutwfc convergence (most efficient)
+        coarse_kspacing = max(kspacing_range)  # Largest kspacing = coarsest grid
+        
+        converged_ecutwfc = None
+        ecutwfc_results = []
+        
+        for ecutwfc in ecutwfc_range:
+            if verbose:
+                print(f"  Testing ecutwfc = {ecutwfc} Ry (kspacing = {coarse_kspacing} Å⁻¹)")
+            
+            # Create workflow for this parameter combination
+            workflow = CalculationWorkflow(
+                atoms=atoms,
+                pseudopotentials=pseudopotentials,
+                protocol='moderate',
+                kspacing=coarse_kspacing,
+                queue=queue,
+                **kwargs
+            )
+            
+            # Override ecutwfc
+            workflow.input_data['ecutwfc'] = ecutwfc
+            
+            # Run calculation
+            try:
+                if 'geometry' in convergence_criteria_list:
+                    calc = workflow.run_geometry_optimization(label=f'ecut_conv_{ecutwfc}')
+                    energy = calc.get_potential_energy() / len(atoms)
+                    max_force = None  # Would need to extract from geometry opt
+                else:
+                    calc = workflow.run_scf(label=f'ecut_conv_{ecutwfc}')
+                    energy = calc.get_potential_energy() / len(atoms)
+                    max_force = None  # SCF doesn't give forces
+                
+                ecutwfc_results.append({
+                    'ecutwfc': ecutwfc,
+                    'kspacing': coarse_kspacing,
+                    'energy_per_atom': energy,
+                    'max_force': max_force
+                })
+                
+                if verbose:
+                    print(".4f"                    print()
+                
+            except Exception as e:
+                print(f"    Error: {e}")
+                continue
+        
+        # Find converged ecutwfc (compare consecutive values)
+        df_ecut = pd.DataFrame(ecutwfc_results)
+        if len(df_ecut) >= 2:
+            for i in range(1, len(df_ecut)):
+                prev_energy = df_ecut.iloc[i-1]['energy_per_atom']
+                curr_energy = df_ecut.iloc[i]['energy_per_atom']
+                energy_diff = abs(curr_energy - prev_energy)
+                
+                if energy_diff <= convergence_criteria['energy_tolerance']:
+                    converged_ecutwfc = df_ecut.iloc[i]['ecutwfc']
+                    if verbose:
+                        print(f"✓ ecutwfc converged at {converged_ecutwfc} Ry")
+                        print(".4f"                    break
+        else:
+            # If only one value, use it
+            converged_ecutwfc = df_ecut.iloc[0]['ecutwfc'] if len(df_ecut) > 0 else ecutwfc_range[0]
+            if verbose:
+                print(f"⚠ Only one ecutwfc value tested, using {converged_ecutwfc} Ry")
+        
+        if converged_ecutwfc is None:
+            # Use the highest ecutwfc if no convergence found
+            converged_ecutwfc = max(ecutwfc_range)
+            if verbose:
+                print(f"⚠ No convergence found, using highest ecutwfc: {converged_ecutwfc} Ry")
+        
+        print()
+        
+        # Phase 2: Converge kspacing using lower ecutwfc
+        print("PHASE 2: Converging kspacing (using lower ecutwfc)")
+        print("-" * 50)
+        
+        # Use a lower ecutwfc for kspacing convergence (not the final converged value)
+        # This saves computational time while still getting reasonable convergence
+        lower_ecutwfc = min(ecutwfc_range)  # Use the lowest ecutwfc for efficiency
+        
+        if verbose:
+            print(f"  Using ecutwfc = {lower_ecutwfc} Ry for kspacing convergence")
+        
+        converged_kspacing = None
+        kspacing_results = []
+        
+        for kspacing in kspacing_range:
+            if verbose:
+                print(f"  Testing kspacing = {kspacing} Å⁻¹ (ecutwfc = {lower_ecutwfc} Ry)")
+            
+            # Create workflow for this parameter combination
+            workflow = CalculationWorkflow(
+                atoms=atoms,
+                pseudopotentials=pseudopotentials,
+                protocol='moderate',
+                kspacing=kspacing,
+                queue=queue,
+                **kwargs
+            )
+            
+            # Override ecutwfc
+            workflow.input_data['ecutwfc'] = lower_ecutwfc
+            
+            # Run calculation
+            try:
+                if 'geometry' in convergence_criteria_list:
+                    calc = workflow.run_geometry_optimization(label=f'ksp_conv_{kspacing:.3f}')
+                    energy = calc.get_potential_energy() / len(atoms)
+                    max_force = None
+                else:
+                    calc = workflow.run_scf(label=f'ksp_conv_{kspacing:.3f}')
+                    energy = calc.get_potential_energy() / len(atoms)
+                    max_force = None
+                
+                kspacing_results.append({
+                    'ecutwfc': lower_ecutwfc,
+                    'kspacing': kspacing,
+                    'energy_per_atom': energy,
+                    'max_force': max_force
+                })
+                
+                if verbose:
+                    print(".4f"                    print()
+                
+            except Exception as e:
+                print(f"    Error: {e}")
+                continue
+        
+        # Find converged kspacing (compare consecutive values)
+        df_ksp = pd.DataFrame(kspacing_results)
+        if len(df_ksp) >= 2:
+            # Sort by kspacing (finest first for comparison)
+            df_ksp = df_ksp.sort_values('kspacing')
+            
+            for i in range(1, len(df_ksp)):
+                prev_energy = df_ksp.iloc[i-1]['energy_per_atom']
+                curr_energy = df_ksp.iloc[i]['energy_per_atom']
+                energy_diff = abs(curr_energy - prev_energy)
+                
+                if energy_diff <= convergence_criteria['energy_tolerance']:
+                    converged_kspacing = df_ksp.iloc[i]['kspacing']
+                    if verbose:
+                        print(f"✓ kspacing converged at {converged_kspacing} Å⁻¹")
+                        print(".4f"                    break
+        else:
+            # If only one value, use it
+            converged_kspacing = df_ksp.iloc[0]['kspacing'] if len(df_ksp) > 0 else min(kspacing_range)
+            if verbose:
+                print(f"⚠ Only one kspacing value tested, using {converged_kspacing} Å⁻¹")
+        
+        if converged_kspacing is None:
+            # Use the finest kspacing if no convergence found
+            converged_kspacing = min(kspacing_range)
+            if verbose:
+                print(f"⚠ No convergence found, using finest kspacing: {converged_kspacing} Å⁻¹")
+        
+        print()
+        print("OPTIMIZATION COMPLETE")
+        print("-" * 50)
+        print(f"Optimal parameters:")
+        print(f"  ecutwfc: {converged_ecutwfc} Ry")
+        print(f"  kspacing: {converged_kspacing} Å⁻¹")
+        print()
+        
+        # Return results
+        return {
+            'ecutwfc': converged_ecutwfc,
+            'kspacing': converged_kspacing,
+            'precision': precision,
+            'convergence_criteria': convergence_criteria_list,
+            'ecutwfc_convergence_data': ecutwfc_results,
+            'kspacing_convergence_data': kspacing_results,
+            'method': 'independent_runs'
+        }
+    
+    @staticmethod
+    def _get_ranges_for_precision_static(precision: str) -> Tuple[List[float], List[float]]:
+        """
+        Static version of _get_ranges_for_precision for use in classmethod.
+        """
+        precision = precision.lower()
+        
+        if precision == 'low':
+            ecutwfc_range = [30, 40, 50]
+            kspacing_range = [0.5, 0.4, 0.3]
+        elif precision == 'medium':
+            ecutwfc_range = [40, 50, 60, 70]
+            kspacing_range = [0.4, 0.3, 0.25, 0.2]
+        elif precision == 'high':
+            ecutwfc_range = [50, 60, 70, 80, 90]
+            kspacing_range = [0.3, 0.25, 0.2, 0.15, 0.12]
+        elif precision == 'ultra':
+            ecutwfc_range = [60, 80, 100, 120, 140]
+            kspacing_range = [0.25, 0.2, 0.15, 0.12, 0.1]
+        else:
+            raise ValueError(f"Unknown precision level: {precision}. "
+                           "Choose from 'low', 'medium', 'high', 'ultra'")
+        
+        return ecutwfc_range, kspacing_range
+    
     def _get_default_convergence_criteria(self, precision: Optional[str]) -> Dict:
         """
         Get default convergence criteria tolerances based on precision level.

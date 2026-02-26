@@ -116,16 +116,27 @@ def extract_type_from_filename(filename: str) -> Optional[str]:
         Pseudopotential type (e.g., 'ultrasoft', 'paw', 'norm-conserving')
     """
     basename = os.path.basename(filename).lower()
-    
-    if 'paw' in basename or 'kjpaw' in basename:
+
+    # Prefer explicit ONCV/ONCVPSP markers first (norm-conserving)
+    if re.search(r'oncv|oncvpsp|oncv_psp|oncvp', basename):
+        return 'Norm-conserving'
+
+    # Common norm-conserving markers
+    if re.search(r'\b(nc|norm-conserving|normconserving)\b', basename):
+        return 'Norm-conserving'
+
+    # PAW markers (includes KJPaw/psl.kjpaw variants)
+    if re.search(r'\b(paw|kjpaw|atompaw|psl\.kjpaw)\b', basename):
         return 'PAW'
-    elif 'uspp' in basename or 'rrkjus' in basename:
+
+    # Ultrasoft / USPP markers
+    if re.search(r'\b(uspp|rrkjus|uspp\.f|uspp|uspp_)\b', basename) or 'us.' in basename:
         return 'Ultrasoft'
-    elif 'oncv' in basename or 'oncvpsp' in basename:
-        return 'Norm-conserving'
-    elif 'nc' in basename:
-        return 'Norm-conserving'
-    
+
+    # Fallback checks
+    if 'ultrasoft' in basename or 'rrkj' in basename:
+        return 'Ultrasoft'
+
     return None
 
 
@@ -211,12 +222,25 @@ def parse_upf_header(filepath: str) -> Dict[str, any]:
             if 'type' not in info:
                 content_upper = content.upper()
                 # Order matters: check PAW first (most specific), then ultrasoft, then NC
-                if 'PROJECTOR AUGMENTED' in content_upper or ('PAW' in content_upper and 'PAWXML' not in content_upper):
+                # XML-like or descriptive markers
+                if re.search(r'PROJECTOR\s+AUGMENTED|\bPAW\b', content_upper) and 'PAWXML' not in content_upper:
                     info['type'] = 'PAW'
-                elif 'ULTRASOFT' in content_upper or 'RRKJUS' in content_upper:
+                elif re.search(r'ULTRASOFT|RRKJUS|USPP', content_upper):
                     info['type'] = 'Ultrasoft'
-                elif 'NORM-CONSERVING' in content_upper or 'ONCV' in content_upper:
+                elif re.search(r'NORM-?CONSERVING|ONCV|ONCVPSP|ONCV_PSP|ONCVPSP', content_upper):
                     info['type'] = 'Norm-conserving'
+
+            # Additional lookups: some UPF variants include 'pseudo_type' or similar attributes
+            if 'type' not in info:
+                extra_match = re.search(r'(pseudo[-_ ]?type|pseudotype|pseudo_type)\s*=\s*["\']?([^"\'\s>]+)', content, re.IGNORECASE)
+                if extra_match:
+                    pseudo_type = extra_match.group(2).strip().upper()
+                    if 'PAW' in pseudo_type:
+                        info['type'] = 'PAW'
+                    elif 'US' in pseudo_type or 'ULTRASOFT' in pseudo_type or 'USPP' in pseudo_type:
+                        info['type'] = 'Ultrasoft'
+                    elif 'NC' in pseudo_type or 'NORM' in pseudo_type or 'ONCV' in pseudo_type:
+                        info['type'] = 'Norm-conserving'
     
     except Exception as e:
         # If parsing fails, return empty dict (gracefully handle errors)

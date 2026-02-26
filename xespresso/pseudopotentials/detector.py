@@ -183,14 +183,31 @@ def parse_upf_header(filepath: str) -> Dict[str, any]:
                 elif 'LDA' in functional:
                     info['functional'] = 'LDA'
             
-            # Extract pseudopotential type (case-insensitive search)
-            content_upper = content.upper()
-            if 'PROJECTOR AUGMENTED' in content_upper or 'PAW' in content_upper:
-                info['type'] = 'PAW'
-            elif 'ULTRASOFT' in content_upper or 'US' in content_upper:
-                info['type'] = 'Ultrasoft'
-            elif 'NORM-CONSERVING' in content_upper or 'NC' in content_upper:
-                info['type'] = 'Norm-conserving'
+            # Extract pseudopotential type from header
+            # UPF files use XML-like headers with type attribute
+            # Look for patterns like: type="PAW", type="ultrasoft", type="NC"
+            
+            # First try XML-style type attribute (most reliable)
+            type_match = re.search(r'type\s*=\s*["\']([^"\']+)["\']', content, re.IGNORECASE)
+            if type_match:
+                pseudo_type = type_match.group(1).strip().upper()
+                if 'PAW' in pseudo_type or 'PROJECTOR' in pseudo_type:
+                    info['type'] = 'PAW'
+                elif 'US' in pseudo_type or 'ULTRASOFT' in pseudo_type:
+                    info['type'] = 'Ultrasoft'
+                elif 'NC' in pseudo_type or 'NORM' in pseudo_type:
+                    info['type'] = 'Norm-conserving'
+            
+            # If not found in type attribute, search descriptive text markers
+            if 'type' not in info:
+                content_upper = content.upper()
+                # Order matters: check PAW first (most specific), then ultrasoft, then NC
+                if 'PROJECTOR AUGMENTED' in content_upper or ('PAW' in content_upper and 'PAWXML' not in content_upper):
+                    info['type'] = 'PAW'
+                elif 'ULTRASOFT' in content_upper or 'RRKJUS' in content_upper:
+                    info['type'] = 'Ultrasoft'
+                elif 'NORM-CONSERVING' in content_upper or 'ONCV' in content_upper:
+                    info['type'] = 'Norm-conserving'
     
     except Exception as e:
         # If parsing fails, return empty dict (gracefully handle errors)

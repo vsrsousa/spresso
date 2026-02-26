@@ -304,12 +304,65 @@ class CalculationWorkflow:
         
         return max_suggested_ecut
     
+    def _get_ecutrho_ratio_for_pseudos(self) -> float:
+        """
+        Determine the appropriate ecutrho/ecutwfc ratio based on pseudopotential types.
+        
+        - Norm-Conserving (NC): ratio = 4.0
+        - Ultrasoft (US): ratio >= 8.0
+        - PAW: ratio >= 8.0
+        
+        Returns the MAXIMUM ratio needed to ensure compatibility with all pseudopotentials.
+        
+        Returns:
+            Ratio (ecutrho/ecutwfc) - default 4.0 if no pseudo_config
+        """
+        if self._pseudo_config is None:
+            return 4.0  # Default ratio for NC pseudos
+        
+        max_ratio = 4.0  # Start with NC ratio
+        
+        try:
+            elements_in_atoms = set(self.atoms.get_chemical_symbols())
+            for element in elements_in_atoms:
+                pseudo_obj = self._pseudo_config.get_pseudopotential(element)
+                if pseudo_obj and hasattr(pseudo_obj, 'type') and pseudo_obj.type:
+                    pseudo_type = pseudo_obj.type.upper()
+                    
+                    # Determine ratio based on pseudopotential type
+                    if 'PAW' in pseudo_type or 'PROJECTOR' in pseudo_type:
+                        ratio = 8.0
+                        type_label = 'PAW'
+                    elif 'ULTRASOFT' in pseudo_type or 'US' in pseudo_type:
+                        ratio = 8.0
+                        type_label = 'Ultrasoft'
+                    elif 'NORM-CONSERVING' in pseudo_type or 'NC' in pseudo_type or 'ONCV' in pseudo_type:
+                        ratio = 4.0
+                        type_label = 'Norm-Conserving'
+                    else:
+                        # Unknown type, use conservative ratio (8.0 is safer)
+                        ratio = 8.0
+                        type_label = f"Unknown ({pseudo_obj.type})"
+                    
+                    max_ratio = max(max_ratio, ratio)
+                    logger.debug(f"Element {element}: type={type_label}, ratio={ratio}")
+                else:
+                    logger.debug(f"Element {element}: no type info available")
+        except Exception as e:
+            logger.debug(f"Could not determine ecutrho ratio from pseudos: {e}")
+        
+        if max_ratio > 4.0:
+            logger.info(f"Using ecutrho/ecutwfc ratio: {max_ratio} (Ultrasoft/PAW pseudopotentials detected)")
+        
+        return max_ratio
+    
     def _adjust_ecutwfc_for_pseudos(self):
         """
         Adjust ecutwfc in input_data to ensure it meets pseudopotential recommendations.
         
         If the current ecutwfc is below the maximum suggested value from pseudopotentials,
         increase it to meet the requirement and log a warning.
+        Also adjusts ecutrho based on the pseudopotential type.
         """
         min_ecut = self._get_min_ecut_from_pseudos()
         
@@ -327,15 +380,11 @@ class CalculationWorkflow:
             )
             self.input_data['ecutwfc'] = min_ecut
             
-            # Also adjust ecutrho to maintain the ratio
-            # Standard ratio is ecutrho = 4 * ecutwfc
-            original_ecutwfc = self.preset.get('ecutwfc')
-            original_ecutrho = self.preset.get('ecutrho')
-            if original_ecutwfc and original_ecutrho:
-                ratio = original_ecutrho / original_ecutwfc
-                adjusted_ecutrho = min_ecut * ratio
-                logger.info(f"Also adjusting ecutrho to {adjusted_ecutrho} Ry (ratio={ratio:.1f})")
-                self.input_data['ecutrho'] = adjusted_ecutrho
+            # Adjust ecutrho based on pseudopotential type
+            ratio = self._get_ecutrho_ratio_for_pseudos()
+            adjusted_ecutrho = min_ecut * ratio
+            logger.info(f"Adjusting ecutrho to {adjusted_ecutrho} Ry (ratio={ratio})")
+            self.input_data['ecutrho'] = adjusted_ecutrho
         else:
             logger.debug(
                 f"ecutwfc={current_ecut} Ry meets pseudopotential requirement (min: {min_ecut} Ry)"

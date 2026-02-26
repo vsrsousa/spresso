@@ -664,17 +664,21 @@ class CalculationWorkflow:
                     print(f"\n{job_status['message']}")
                     return job_status
                 
-                # Query SLURM status
+                # Query SLURM status on remote system
                 try:
-                    result = subprocess.run(
-                        ['squeue', '-j', job_id, '-h', '-o', '%T,%r,%M'],
-                        capture_output=True,
-                        text=True,
-                        timeout=10
+                    # Get remote connection from calc
+                    remote_conn = getattr(calc, 'remote', None)
+                    if remote_conn is None:
+                        raise ValueError("No remote connection available for job monitoring")
+                    
+                    # Execute squeue on remote system
+                    stdout, stderr = remote_conn.run_command(
+                        f"squeue -j {job_id} -h -o '%T,%r,%M'"
                     )
                     
-                    if result.returncode != 0:
-                        # Job not found (probably completed)
+                    # Check if job is still in queue
+                    if not stdout.strip():
+                        # Job not found in queue (probably completed)
                         job_status['state'] = 'COMPLETED'
                         job_status['elapsed_time'] = elapsed
                         job_status['success'] = True
@@ -683,7 +687,7 @@ class CalculationWorkflow:
                         return job_status
                     
                     # Parse squeue output: STATE,REASON,ELAPSED
-                    output = result.stdout.strip()
+                    output = stdout.strip()
                     if output:
                         parts = output.split(',')
                         state = parts[0].strip() if len(parts) > 0 else 'UNKNOWN'
@@ -736,8 +740,11 @@ class CalculationWorkflow:
                                 # Continue monitoring but alert user
                                 user_input = input(f"\nContinue waiting? (y/n): ")
                                 if user_input.lower() != 'y':
-                                    # Try to cancel job
-                                    subprocess.run(['scancel', job_id], capture_output=True)
+                                    # Try to cancel job remotely
+                                    try:
+                                        remote_conn.run_command(f"scancel {job_id}")
+                                    except Exception as cancel_e:
+                                        logger.warning(f"Failed to cancel job remotely: {cancel_e}")
                                     job_status['message'] = f"✗ JOB CANCELLED BY USER: {job_id}"
                                     return job_status
                         

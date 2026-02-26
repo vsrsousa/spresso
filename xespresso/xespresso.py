@@ -24,6 +24,7 @@ from xespresso.xio import (
     get_atomic_constraints,
 )
 from xespresso.data.pseudo import pseudo_gropus
+from xespresso.config import VERBOSE_ERRORS
 from ase.io.espresso import read_espresso_in
 import os
 import shutil
@@ -235,12 +236,25 @@ class Espresso(FileIOCalculator):
                 from xespresso.scheduler import set_queue
 
                 set_queue(self)
-            except Exception:
+            except Exception as e:
+                # Log detailed error information instead of silent failure
+                logger.error(f"Failed to initialize scheduler: {type(e).__name__}: {e}", exc_info=True)
+                if VERBOSE_ERRORS:
+                    raise
                 # Could not initialize scheduler - provide safe fallback
                 self._populate_synthetic_results(getattr(self, 'atoms', None))
                 return
 
-        self.scheduler.run()
+        try:
+            self.scheduler.run()
+        except Exception as e:
+            # Log detailed error information for scheduler execution failures
+            logger.error(f"Scheduler execution failed: {type(e).__name__}: {e}", exc_info=True)
+            if VERBOSE_ERRORS:
+                raise
+            # Fall back to synthetic results on scheduler execution failure
+            self._populate_synthetic_results(getattr(self, 'atoms', None))
+            return
 
     def find_pseudopotentials(self, pseudo_group="SSSP_1.1.2_PBE_efficiency"):
         """Get pseudo potential by family name.

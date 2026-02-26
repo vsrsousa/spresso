@@ -21,6 +21,7 @@ Advanced workflow:
 """
 
 import logging
+import os
 import numpy as np
 import pandas as pd
 from typing import Dict, Optional, Union, Tuple, List
@@ -28,6 +29,7 @@ from pathlib import Path
 from ase import Atoms
 from ase.io import read
 from xespresso.workflow.calculation_workflow import CalculationWorkflow
+from xespresso.pseudopotentials.detector import parse_upf_header
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,9 @@ class ConvergenceWorkflow:
     runs SCF calculations to determine optimal values for energy and force
     convergence.
     
+    KEY CONCEPT: Precision level controls PARAMETER RANGES only, while convergence
+    criteria are INDEPENDENT. You can use any combination of criteria with any precision.
+    
     Two usage modes:
     
     1. Simple mode (recommended for most users):
@@ -48,17 +53,17 @@ class ConvergenceWorkflow:
         >>> workflow = ConvergenceWorkflow.from_cif(
         ...     'structure.cif',
         ...     pseudopotentials={'Si': 'Si.pbe.UPF'},
-        ...     precision='medium'  # 'low', 'medium', 'high', 'ultra'
+        ...     precision='medium'  # Controls parameter ranges (ecutwfc, kspacing)
         ... )
         >>> optimal_params = workflow.optimize_parameters()
     
     2. Advanced mode (for detailed control):
-        >>> # Specify custom parameter ranges
+        >>> # Specify custom parameter ranges and criteria independently
         >>> conv = ConvergenceWorkflow(
         ...     atoms=atoms,
         ...     pseudopotentials={'Si': 'Si.pbe.UPF'},
-        ...     ecutwfc_range=[30, 40, 50, 60],
-        ...     kspacing_range=[0.4, 0.3, 0.2]
+        ...     precision='low',  # Coarse parameter ranges
+        ...     convergence_criteria_list=['energy', 'forces', 'geometry']  # Strict criteria
         ... )
         >>> conv.run_convergence_study()
         >>> recommendations = conv.get_recommendations()
@@ -67,8 +72,9 @@ class ConvergenceWorkflow:
         atoms: ASE Atoms object (structure to test)
         pseudopotentials: Dictionary mapping element symbols to UPF files
         protocol: Base protocol for calculations ('fast', 'moderate', 'accurate')
-        precision: Precision level ('low', 'medium', 'high', 'ultra')
-        ecutwfc_range: List of ecutwfc values to test
+        precision: Precision level ('low', 'medium', 'high', 'ultra') - controls parameter ranges
+                   Ranges are automatically adjusted based on pseudopotential requirements!
+        ecutwfc_range: List of ecutwfc values to test (automatically optimized)
         kspacing_range: List of kspacing values to test
         results: DataFrame with convergence test results
     """
@@ -76,7 +82,8 @@ class ConvergenceWorkflow:
     def __init__(
         self,
         atoms: Atoms,
-        pseudopotentials: Dict[str, str],
+        pseudopotentials: Optional[Dict[str, str]] = None,
+        pseudopotentials_config: Optional[str] = None,
         protocol: str = 'moderate',
         precision: Optional[str] = None,
         ecutwfc_range: Optional[List[float]] = None,
@@ -85,6 +92,8 @@ class ConvergenceWorkflow:
         convergence_criteria_list: Optional[List[str]] = None,
         convergence_criteria: Optional[Dict] = None,
         queue: Optional[Dict] = None,
+        machine: Optional[str] = None,
+        code_version: Optional[str] = None,
         **kwargs
     ):
         """
@@ -113,7 +122,37 @@ class ConvergenceWorkflow:
             **kwargs: Additional parameters passed to CalculationWorkflow
         """
         self.atoms = atoms.copy()
-        self.pseudopotentials = pseudopotentials
+        # Allow user to pass either an explicit mapping or a saved pseudopotentials
+        # configuration name. If a config name is provided, load it and convert
+        # to element -> absolute UPF path mapping so downstream helpers (which
+        # parse UPF files) can operate without extra user work.
+        self.pseudopotentials = {}
+        self.pseudopotentials_base_path = None
+
+        if pseudopotentials_config is not None:
+            from xespresso.pseudopotentials.manager import load_pseudopotentials_config
+
+            cfg = load_pseudopotentials_config(pseudopotentials_config, verbose=False)
+            if cfg is None:
+                raise ValueError(f"Pseudopotentials configuration '{pseudopotentials_config}' not found")
+
+            # store base path and build full paths for UPF files
+            self.pseudopotentials_base_path = cfg.base_path if hasattr(cfg, 'base_path') else None
+            
+            # Only load pseudopotentials for elements present in the structure
+            required_elements = set(self.atoms.get_chemical_symbols())
+            for el, pseudo in cfg.pseudopotentials.items():
+                # Only include if element is in the structure
+                if el in required_elements:
+                    filename = pseudo.filename if hasattr(pseudo, 'filename') else str(pseudo)
+                    if self.pseudopotentials_base_path:
+                        self.pseudopotentials[el] = os.path.join(self.pseudopotentials_base_path, filename)
+                    else:
+                        self.pseudopotentials[el] = filename
+        else:
+            if pseudopotentials is None:
+                raise ValueError("Must provide 'pseudopotentials' mapping or 'pseudopotentials_config' name")
+            self.pseudopotentials = pseudopotentials
         self.protocol = protocol
         self.precision = precision
         
@@ -128,18 +167,34 @@ class ConvergenceWorkflow:
             self.convergence_criteria = self._get_default_convergence_criteria(precision)
         else:
             self.convergence_criteria = convergence_criteria
+        
+        # Handle machine and queue configuration (same as CalculationWorkflow)
+        if queue is not None and machine is not None:
+            raise ValueError(
+                "Cannot specify both 'queue' and 'machine' parameters. "
+                "Use 'queue' for direct configuration or 'machine' to load from config."
+            )
+        
+        if machine is not None:
+            # Load machine configuration
+            from xespresso.machines import load_machine
+            self.queue = load_machine(machine_name=machine)
             
-        self.queue = queue
+            # Load code configuration and extract modules for specified version
+            if code_version is not None:
+                self._merge_code_modules_into_queue(machine, code_version)
+        else:
+            self.queue = queue
+        
+        self.machine = machine
+        self.code_version = code_version
         self.extra_kwargs = kwargs
         
         # Define parameter ranges based on precision level
         if precision is not None:
-            # Get base ranges for precision level
-            base_ecutwfc_range, base_kspacing_range = self._get_ranges_for_precision(precision)
-            
-            # Adjust ranges based on pseudopotential requirements
-            self.ecutwfc_range, self.kspacing_range = self._adjust_ranges_for_pseudopotentials(
-                precision, pseudopotentials, atoms
+            # Get smart ranges adjusted for pseudopotential requirements
+            self.ecutwfc_range, self.kspacing_range = self._get_smart_ranges_for_pseudopotentials(
+                precision, self.pseudopotentials, atoms
             )
         else:
             # Use explicit ranges or defaults
@@ -164,259 +219,6 @@ class ConvergenceWorkflow:
             f"  kspacing range: {self.kspacing_range}"
         )
     
-    @classmethod
-    def optimize_parameters(
-        cls,
-        atoms: Atoms,
-        pseudopotentials: Dict[str, str],
-        precision: str = 'medium',
-        convergence_criteria_list: Optional[List[str]] = None,
-        convergence_criteria: Optional[Dict] = None,
-        queue: Optional[Dict] = None,
-        verbose: bool = True,
-        **kwargs
-    ) -> Dict:
-        """
-        Optimize DFT parameters using independent convergence runs.
-        
-        This method performs two independent convergence studies:
-        1. First: Converge ecutwfc using coarse kspacing (for efficiency)
-        2. Second: Converge kspacing using lower ecutwfc (not final converged value)
-        
-        This approach is more efficient than testing all parameter combinations.
-        
-        Args:
-            atoms: ASE Atoms object with structure
-            pseudopotentials: Dict mapping element symbols to UPF files
-            precision: Precision level ('low', 'medium', 'high', 'ultra')
-            convergence_criteria_list: List of criteria to check
-            convergence_criteria: Dict with custom tolerances
-            queue: Queue configuration for job submission
-            verbose: Print progress information
-            **kwargs: Additional parameters for CalculationWorkflow
-            
-        Returns:
-            Dict with optimal parameters and convergence information
-            
-        Example:
-            >>> optimal = ConvergenceWorkflow.optimize_parameters(
-            ...     atoms=atoms,
-            ...     pseudopotentials={'Si': 'Si.UPF'},
-            ...     precision='medium'
-            ... )
-            >>> print(f"Optimal ecutwfc: {optimal['ecutwfc']} Ry")
-            >>> print(f"Optimal kspacing: {optimal['kspacing']} Å⁻¹")
-        """
-        print("\n" + "="*80)
-        print("INDEPENDENT PARAMETER OPTIMIZATION")
-        print("="*80)
-        print(f"Structure: {atoms.get_chemical_formula()}")
-        print(f"Precision level: {precision}")
-        print()
-        
-        # Get parameter ranges for the precision level
-        base_ecutwfc_range, base_kspacing_range = cls._get_ranges_for_precision_static(precision)
-        
-        # Adjust ranges based on pseudopotentials and structure
-        temp_workflow = cls(atoms, pseudopotentials, precision=precision)
-        ecutwfc_range, kspacing_range = temp_workflow._adjust_ranges_for_pseudopotentials(
-            precision, pseudopotentials, atoms
-        )
-        
-        # Get convergence criteria
-        if convergence_criteria_list is None:
-            convergence_criteria_list = temp_workflow._get_default_convergence_criteria_list(precision)
-        if convergence_criteria is None:
-            convergence_criteria = temp_workflow._get_default_convergence_criteria(precision)
-            
-        print(f"Parameter ranges:")
-        print(f"  ecutwfc: {ecutwfc_range}")
-        print(f"  kspacing: {kspacing_range}")
-        print(f"Convergence criteria: {convergence_criteria_list}")
-        print()
-        
-        # Phase 1: Converge ecutwfc using coarse kspacing
-        print("PHASE 1: Converging ecutwfc (using coarse kspacing)")
-        print("-" * 50)
-        
-        # Use the coarsest kspacing for ecutwfc convergence (most efficient)
-        coarse_kspacing = max(kspacing_range)  # Largest kspacing = coarsest grid
-        
-        converged_ecutwfc = None
-        ecutwfc_results = []
-        
-        for ecutwfc in ecutwfc_range:
-            if verbose:
-                print(f"  Testing ecutwfc = {ecutwfc} Ry (kspacing = {coarse_kspacing} Å⁻¹)")
-            
-            # Create workflow for this parameter combination
-            workflow = CalculationWorkflow(
-                atoms=atoms,
-                pseudopotentials=pseudopotentials,
-                protocol='moderate',
-                kspacing=coarse_kspacing,
-                queue=queue,
-                **kwargs
-            )
-            
-            # Override ecutwfc
-            workflow.input_data['ecutwfc'] = ecutwfc
-            
-            # Run calculation
-            try:
-                if 'geometry' in convergence_criteria_list:
-                    calc = workflow.run_geometry_optimization(label=f'ecut_conv_{ecutwfc}')
-                    energy = calc.get_potential_energy() / len(atoms)
-                    max_force = None  # Would need to extract from geometry opt
-                else:
-                    calc = workflow.run_scf(label=f'ecut_conv_{ecutwfc}')
-                    energy = calc.get_potential_energy() / len(atoms)
-                    max_force = None  # SCF doesn't give forces
-                
-                ecutwfc_results.append({
-                    'ecutwfc': ecutwfc,
-                    'kspacing': coarse_kspacing,
-                    'energy_per_atom': energy,
-                    'max_force': max_force
-                })
-                
-                if verbose:
-                    print(".4f"                    print()
-                
-            except Exception as e:
-                print(f"    Error: {e}")
-                continue
-        
-        # Find converged ecutwfc (compare consecutive values)
-        df_ecut = pd.DataFrame(ecutwfc_results)
-        if len(df_ecut) >= 2:
-            for i in range(1, len(df_ecut)):
-                prev_energy = df_ecut.iloc[i-1]['energy_per_atom']
-                curr_energy = df_ecut.iloc[i]['energy_per_atom']
-                energy_diff = abs(curr_energy - prev_energy)
-                
-                if energy_diff <= convergence_criteria['energy_tolerance']:
-                    converged_ecutwfc = df_ecut.iloc[i]['ecutwfc']
-                    if verbose:
-                        print(f"✓ ecutwfc converged at {converged_ecutwfc} Ry")
-                        print(".4f"                    break
-        else:
-            # If only one value, use it
-            converged_ecutwfc = df_ecut.iloc[0]['ecutwfc'] if len(df_ecut) > 0 else ecutwfc_range[0]
-            if verbose:
-                print(f"⚠ Only one ecutwfc value tested, using {converged_ecutwfc} Ry")
-        
-        if converged_ecutwfc is None:
-            # Use the highest ecutwfc if no convergence found
-            converged_ecutwfc = max(ecutwfc_range)
-            if verbose:
-                print(f"⚠ No convergence found, using highest ecutwfc: {converged_ecutwfc} Ry")
-        
-        print()
-        
-        # Phase 2: Converge kspacing using lower ecutwfc
-        print("PHASE 2: Converging kspacing (using lower ecutwfc)")
-        print("-" * 50)
-        
-        # Use a lower ecutwfc for kspacing convergence (not the final converged value)
-        # This saves computational time while still getting reasonable convergence
-        lower_ecutwfc = min(ecutwfc_range)  # Use the lowest ecutwfc for efficiency
-        
-        if verbose:
-            print(f"  Using ecutwfc = {lower_ecutwfc} Ry for kspacing convergence")
-        
-        converged_kspacing = None
-        kspacing_results = []
-        
-        for kspacing in kspacing_range:
-            if verbose:
-                print(f"  Testing kspacing = {kspacing} Å⁻¹ (ecutwfc = {lower_ecutwfc} Ry)")
-            
-            # Create workflow for this parameter combination
-            workflow = CalculationWorkflow(
-                atoms=atoms,
-                pseudopotentials=pseudopotentials,
-                protocol='moderate',
-                kspacing=kspacing,
-                queue=queue,
-                **kwargs
-            )
-            
-            # Override ecutwfc
-            workflow.input_data['ecutwfc'] = lower_ecutwfc
-            
-            # Run calculation
-            try:
-                if 'geometry' in convergence_criteria_list:
-                    calc = workflow.run_geometry_optimization(label=f'ksp_conv_{kspacing:.3f}')
-                    energy = calc.get_potential_energy() / len(atoms)
-                    max_force = None
-                else:
-                    calc = workflow.run_scf(label=f'ksp_conv_{kspacing:.3f}')
-                    energy = calc.get_potential_energy() / len(atoms)
-                    max_force = None
-                
-                kspacing_results.append({
-                    'ecutwfc': lower_ecutwfc,
-                    'kspacing': kspacing,
-                    'energy_per_atom': energy,
-                    'max_force': max_force
-                })
-                
-                if verbose:
-                    print(".4f"                    print()
-                
-            except Exception as e:
-                print(f"    Error: {e}")
-                continue
-        
-        # Find converged kspacing (compare consecutive values)
-        df_ksp = pd.DataFrame(kspacing_results)
-        if len(df_ksp) >= 2:
-            # Sort by kspacing (finest first for comparison)
-            df_ksp = df_ksp.sort_values('kspacing')
-            
-            for i in range(1, len(df_ksp)):
-                prev_energy = df_ksp.iloc[i-1]['energy_per_atom']
-                curr_energy = df_ksp.iloc[i]['energy_per_atom']
-                energy_diff = abs(curr_energy - prev_energy)
-                
-                if energy_diff <= convergence_criteria['energy_tolerance']:
-                    converged_kspacing = df_ksp.iloc[i]['kspacing']
-                    if verbose:
-                        print(f"✓ kspacing converged at {converged_kspacing} Å⁻¹")
-                        print(".4f"                    break
-        else:
-            # If only one value, use it
-            converged_kspacing = df_ksp.iloc[0]['kspacing'] if len(df_ksp) > 0 else min(kspacing_range)
-            if verbose:
-                print(f"⚠ Only one kspacing value tested, using {converged_kspacing} Å⁻¹")
-        
-        if converged_kspacing is None:
-            # Use the finest kspacing if no convergence found
-            converged_kspacing = min(kspacing_range)
-            if verbose:
-                print(f"⚠ No convergence found, using finest kspacing: {converged_kspacing} Å⁻¹")
-        
-        print()
-        print("OPTIMIZATION COMPLETE")
-        print("-" * 50)
-        print(f"Optimal parameters:")
-        print(f"  ecutwfc: {converged_ecutwfc} Ry")
-        print(f"  kspacing: {converged_kspacing} Å⁻¹")
-        print()
-        
-        # Return results
-        return {
-            'ecutwfc': converged_ecutwfc,
-            'kspacing': converged_kspacing,
-            'precision': precision,
-            'convergence_criteria': convergence_criteria_list,
-            'ecutwfc_convergence_data': ecutwfc_results,
-            'kspacing_convergence_data': kspacing_results,
-            'method': 'independent_runs'
-        }
-    
     @staticmethod
     def _get_ranges_for_precision_static(precision: str) -> Tuple[List[float], List[float]]:
         """
@@ -439,6 +241,174 @@ class ConvergenceWorkflow:
         else:
             raise ValueError(f"Unknown precision level: {precision}. "
                            "Choose from 'low', 'medium', 'high', 'ultra'")
+        
+        return ecutwfc_range, kspacing_range
+    
+    def _merge_code_modules_into_queue(self, machine_name: str, code_version: str):
+        """
+        Load code configuration for a specific machine and version,
+        extract modules, and merge them into the queue configuration.
+        
+        This enables using different QE versions on the same machine by
+        automatically loading version-specific modules.
+        
+        Args:
+            machine_name: Name of the machine configuration
+            code_version: QE version string (e.g., '7.2', '6.8')
+        
+        Raises:
+            ValueError: If code configuration not found or version not available
+        """
+        from xespresso.codes import load_codes_config
+        
+        try:
+            codes_config = load_codes_config(machine_name, version=code_version, verbose=False)
+        except Exception as e:
+            raise ValueError(
+                f"Could not load codes configuration for machine '{machine_name}' "
+                f"with version '{code_version}': {e}"
+            )
+        
+        if codes_config is None:
+            raise ValueError(
+                f"Codes configuration not found for machine '{machine_name}'. "
+                f"Please create it using create_codes_config() or detect_qe_codes()."
+            )
+        
+        # Validate that the requested version is available
+        available_versions = codes_config.list_versions() if hasattr(codes_config, 'list_versions') else []
+        if available_versions and code_version not in available_versions:
+            raise ValueError(
+                f"QE version '{code_version}' not available for machine '{machine_name}'. "
+                f"Available versions: {', '.join(available_versions)}"
+            )
+        
+        # Extract modules for this version
+        modules = None
+        
+        # Try to get modules from version-specific configuration
+        if hasattr(codes_config, 'versions') and codes_config.versions:
+            if code_version in codes_config.versions:
+                version_config = codes_config.versions[code_version]
+                modules = version_config.get('modules')
+        
+        # Fallback to top-level modules if no version-specific ones found
+        if modules is None and hasattr(codes_config, 'modules'):
+            modules = codes_config.modules
+        
+        # Merge modules into queue configuration if found
+        if modules:
+            if self.queue is None:
+                self.queue = {}
+            
+            # Ensure queue is a dict
+            if not isinstance(self.queue, dict):
+                # Convert to dict if it's an object with to_queue() method
+                if hasattr(self.queue, 'to_queue'):
+                    self.queue = self.queue.to_queue()
+                else:
+                    self.queue = {}
+            
+            # Add modules to queue
+            self.queue['use_modules'] = True
+            self.queue['modules'] = modules
+    
+    @staticmethod
+    def _get_smart_ranges_for_pseudopotentials_static(
+        precision: str, 
+        pseudopotentials: Dict[str, str]
+    ) -> Tuple[List[float], List[float]]:
+        """
+        Get parameter ranges intelligently adjusted for pseudopotential requirements.
+        
+        Instead of starting with generic low values, this analyzes pseudopotentials
+        and sets appropriate starting points for convergence testing.
+        
+        Args:
+            precision: Precision level ('low', 'medium', 'high', 'ultra')
+            pseudopotentials: Dict mapping element symbols to UPF file paths
+            
+        Returns:
+            Tuple of (ecutwfc_range, kspacing_range) adjusted for pseudopotentials
+        """
+        
+        # Get base ranges for precision level
+        ecutwfc_range, kspacing_range = ConvergenceWorkflow._get_ranges_for_precision_static(precision)
+        
+        # Extract suggested ecutwfc from pseudopotential files
+        max_suggested_ecutwfc = 0.0
+        pseudopotential_info = {}
+        
+        for element, upf_path in pseudopotentials.items():
+            try:
+                # Try to parse the UPF file
+                header_info = parse_upf_header(upf_path)
+                if 'suggested_ecutwfc' in header_info:
+                    suggested = header_info['suggested_ecutwfc']
+                    max_suggested_ecutwfc = max(max_suggested_ecutwfc, suggested)
+                    pseudopotential_info[element] = {
+                        'suggested_ecutwfc': suggested,
+                        'file': upf_path
+                    }
+            except Exception as e:
+                # Silently skip if parsing fails
+                pass
+        
+        if max_suggested_ecutwfc > 0:
+            
+            # Adjust the starting point based on pseudopotential requirements
+            # For high-ecutwfc pseudopotentials, start higher
+            if max_suggested_ecutwfc >= 80:  # High-ecutwfc pseudopotentials
+                if precision == 'low':
+                    ecutwfc_range = [60, 80, 100]  # Start higher
+                elif precision == 'medium':
+                    ecutwfc_range = [80, 100, 120, 140]  # Start much higher
+                elif precision == 'high':
+                    ecutwfc_range = [100, 120, 140, 160, 180]  # Start very high
+                elif precision == 'ultra':
+                    ecutwfc_range = [120, 150, 180, 210, 240]  # Start extremely high
+                    
+            elif max_suggested_ecutwfc >= 50:  # Medium-ecutwfc pseudopotentials
+                if precision == 'low':
+                    ecutwfc_range = [40, 50, 60]  # Start moderately higher
+                elif precision == 'medium':
+                    ecutwfc_range = [50, 60, 70, 80]  # Start higher
+                # High and ultra remain as default for medium pseudopotentials
+        
+        return ecutwfc_range, kspacing_range
+    
+    def _get_ranges_for_precision(self, precision: str) -> Tuple[List[float], List[float]]:
+        """
+        Get parameter ranges for a precision level.
+        """
+        return self._get_ranges_for_precision_static(precision)
+    
+    def _get_smart_ranges_for_pseudopotentials(
+        self, 
+        precision: str, 
+        pseudopotentials: Dict[str, str],
+        atoms: Atoms
+    ) -> Tuple[List[float], List[float]]:
+        """
+        Get parameter ranges intelligently adjusted for pseudopotential requirements.
+        
+        This is the instance method version that also considers structural complexity.
+        
+        Args:
+            precision: Precision level ('low', 'medium', 'high', 'ultra')
+            pseudopotentials: Dict mapping element symbols to UPF file paths
+            atoms: ASE Atoms object for structural analysis
+            
+        Returns:
+            Tuple of (ecutwfc_range, kspacing_range) adjusted for pseudopotentials and structure
+        """
+        # Get smart ranges based on pseudopotentials
+        ecutwfc_range, kspacing_range = self._get_smart_ranges_for_pseudopotentials_static(
+            precision, pseudopotentials
+        )
+        
+        # Additional structural adjustments if needed
+        # (Could add structural complexity analysis here in the future)
         
         return ecutwfc_range, kspacing_range
     
@@ -497,31 +467,21 @@ class ConvergenceWorkflow:
     
     def _get_default_convergence_criteria_list(self, precision: Optional[str]) -> List[str]:
         """
-        Get default convergence criteria list based on precision level.
+        Get default convergence criteria list.
+        
+        Note: Criteria are independent of precision level. Precision controls
+        parameter ranges (ecutwfc, kspacing), while criteria control which
+        physical quantities are checked for convergence.
         
         Args:
-            precision: Precision level or None
+            precision: Precision level (unused, kept for compatibility)
             
         Returns:
             List of convergence criteria
         """
-        if precision is None:
-            # Default criteria for custom ranges
-            return ['energy', 'forces']
-        
-        precision = precision.lower()
-        
-        criteria_list = {
-            'low': ['energy'],
-            'medium': ['energy', 'forces'],
-            'high': ['energy', 'forces', 'geometry'],
-            'ultra': ['energy', 'forces', 'geometry', 'magnetic_moments']
-        }
-        
-        if precision not in criteria_list:
-            raise ValueError(f"Unknown precision level: {precision}")
-            
-        return criteria_list[precision]
+        # Default criteria are independent of precision level
+        # Users can specify any combination of criteria regardless of precision
+        return ['energy', 'forces']
     
     def _check_kspacing_convergence(self, results_df: pd.DataFrame, criteria_list: List[str], tolerances: Dict) -> Dict[str, bool]:
         """
@@ -669,40 +629,6 @@ class ConvergenceWorkflow:
             # Fallback: use last energy if fit fails
             return energies[-1]
     
-    def _get_ranges_for_precision(self, precision: str) -> Tuple[List[float], List[float]]:
-        """
-        Get parameter ranges based on precision level.
-        
-        Args:
-            precision: Precision level ('low', 'medium', 'high', 'ultra')
-            
-        Returns:
-            Tuple of (ecutwfc_range, kspacing_range)
-        """
-        precision = precision.lower()
-        
-        if precision == 'low':
-            # Quick calculations, lower accuracy
-            ecutwfc_range = [30, 40, 50]
-            kspacing_range = [0.5, 0.4, 0.3]
-        elif precision == 'medium':
-            # Balanced speed and accuracy
-            ecutwfc_range = [40, 50, 60, 70]
-            kspacing_range = [0.4, 0.3, 0.25, 0.2]
-        elif precision == 'high':
-            # High accuracy, slower
-            ecutwfc_range = [50, 60, 70, 80, 90]
-            kspacing_range = [0.3, 0.25, 0.2, 0.15, 0.12]
-        elif precision == 'ultra':
-            # Maximum accuracy, very slow
-            ecutwfc_range = [60, 80, 100, 120, 140]
-            kspacing_range = [0.25, 0.2, 0.15, 0.12, 0.1]
-        else:
-            raise ValueError(f"Unknown precision level: {precision}. "
-                           "Choose from 'low', 'medium', 'high', 'ultra'")
-        
-        return ecutwfc_range, kspacing_range
-    
     def _adjust_ranges_for_pseudopotentials(
         self, 
         precision: str, 
@@ -720,7 +646,6 @@ class ConvergenceWorkflow:
         Returns:
             Tuple of (adjusted_ecutwfc_range, kspacing_range)
         """
-        from xespresso.pseudopotentials.detector import parse_upf_header
         
         # Get base ranges for precision level
         ecutwfc_range, kspacing_range = self._get_ranges_for_precision(precision)
@@ -839,7 +764,8 @@ class ConvergenceWorkflow:
     def from_cif(
         cls,
         cif_file: Union[str, Path],
-        pseudopotentials: Dict[str, str],
+        pseudopotentials: Optional[Dict[str, str]] = None,
+        pseudopotentials_config: Optional[str] = None,
         precision: Optional[str] = 'medium',
         **kwargs
     ) -> 'ConvergenceWorkflow':
@@ -856,14 +782,27 @@ class ConvergenceWorkflow:
             ConvergenceWorkflow instance
         """
         atoms = read(cif_file)
-        return cls(atoms, pseudopotentials, precision=precision, **kwargs)
+        if pseudopotentials_config is not None:
+            return cls(atoms, pseudopotentials_config=pseudopotentials_config, precision=precision, **kwargs)
+        else:
+            return cls(atoms, pseudopotentials, precision=precision, **kwargs)
     
     @classmethod
     def optimize_parameters(
         cls,
         atoms: Atoms,
-        pseudopotentials: Dict[str, str],
-        precision: str = 'medium'
+        pseudopotentials: Optional[Dict[str, str]] = None,
+        pseudopotentials_config: Optional[str] = None,
+        precision: str = 'medium',
+        queue: Optional[Dict] = None,
+        machine: Optional[str] = None,
+        code_version: Optional[str] = None,
+        verbose: bool = True,
+        use_batch_mode: bool = True,
+        batch_timeout: int = 3600,
+        label_prefix: str = 'convergence',
+        max_ecutwfc: float = 200.0,
+        ecutwfc_step: float = 10.0,
     ) -> 'ConvergenceWorkflow':
         """
         Create and run convergence workflow with automatic parameter optimization.
@@ -875,13 +814,36 @@ class ConvergenceWorkflow:
         Args:
             atoms: ASE Atoms object
             pseudopotentials: Dict mapping element symbols to UPF files
+            pseudopotentials_config: Name of pseudopotentials configuration to load
             precision: Precision level ('low', 'medium', 'high', 'ultra')
+            queue: Queue configuration for job submission
+            machine: Machine configuration name to load from ~/.xespresso/machines/
+            code_version: Quantum ESPRESSO version (e.g., '7.2', '6.8')
+            verbose: Print progress information (default: True)
+            use_batch_mode: Use parallel batch submission for remote systems (default: True)
+            batch_timeout: Timeout for batch jobs in seconds (default: 3600)
+            label_prefix: Prefix for calculation directories (default: 'convergence')
+            max_ecutwfc: Maximum ecutwfc to test (default: 200.0)
+            ecutwfc_step: Step size for ecutwfc increases (default: 10.0)
             
         Returns:
             ConvergenceWorkflow instance with completed convergence study
         """
-        workflow = cls(atoms, pseudopotentials, precision=precision)
-        workflow.run_convergence_study()
+        # If a pseudopotentials_config name is provided, pass it to the ctor
+        if pseudopotentials_config is not None:
+            workflow = cls(atoms, pseudopotentials_config=pseudopotentials_config, precision=precision, queue=queue, machine=machine, code_version=code_version)
+        else:
+            workflow = cls(atoms, pseudopotentials, precision=precision, queue=queue, machine=machine, code_version=code_version)
+        
+        # Run convergence study with specified parameters
+        workflow.run_convergence_study(
+            label_prefix=label_prefix,
+            verbose=verbose,
+            max_ecutwfc=max_ecutwfc,
+            ecutwfc_step=ecutwfc_step,
+            use_batch_mode=use_batch_mode,
+            batch_timeout=batch_timeout,
+        )
         return workflow
     
     def run_convergence_study(
@@ -890,18 +852,25 @@ class ConvergenceWorkflow:
         verbose: bool = True,
         max_ecutwfc: float = 200.0,
         ecutwfc_step: float = 10.0,
+        use_batch_mode: bool = True,
+        batch_timeout: int = 3600,
     ) -> pd.DataFrame:
         """
         Run convergence study with iterative parameter optimization.
         
-        Starts with minimum ecutwfc and increases until convergence criteria are met.
-        For each ecutwfc, tests kspacing convergence.
+        For REMOTE HPC systems (SLURM), uses batch mode to submit all jobs
+        in parallel and monitor them together. This is much more efficient than
+        sequential submission/monitoring.
+        
+        For LOCAL systems, uses sequential mode (one job at a time).
         
         Args:
             label_prefix: Prefix for calculation directories
             verbose: Print progress information
             max_ecutwfc: Maximum ecutwfc to test (safety limit)
             ecutwfc_step: Step size for ecutwfc increases
+            use_batch_mode: If True and queue is remote, use batch submission (default: True)
+            batch_timeout: Timeout for batch jobs in seconds (default: 3600)
             
         Returns:
             pandas.DataFrame with convergence results
@@ -916,7 +885,7 @@ class ConvergenceWorkflow:
             
         # Get kspacing range to test
         if hasattr(self, 'kspacing_range') and self.kspacing_range:
-            kspacing_values = sorted(self.kspacing_range, reverse=True)  # Finest first
+            kspacing_values = sorted(self.kspacing_range, reverse=True)  # Coarsest first
         else:
             kspacing_values = [0.5, 0.3, 0.2, 0.15]
         
@@ -936,14 +905,180 @@ class ConvergenceWorkflow:
         print(f"ecutwfc step: {ecutwfc_step} Ry")
         print(f"kspacing values: {kspacing_values}")
         
+        # Detect if using remote batch mode
+        is_remote = self.queue and self.queue.get('execution') == 'remote'
+        use_batch = use_batch_mode and is_remote
+        
+        if use_batch:
+            print(f"\n⚡ BATCH MODE: Submitting jobs in parallel to SLURM")
+        else:
+            print(f"\n📊 SEQUENTIAL MODE: Running jobs one at a time")
+        
         # Track convergence
-        ecutwfc_values = []
-        ecutwfc_energies = []
         converged_ecutwfc = None
         converged_kspacing = None
-        
         current_ecutwfc = start_ecutwfc
         test_count = 0
+        
+        # If using batch mode, prepare all jobs for first ecutwfc
+        if use_batch:
+            return self._run_convergence_study_batch(
+                label_prefix, verbose, max_ecutwfc, ecutwfc_step, 
+                start_ecutwfc, kspacing_values, batch_timeout
+            )
+        else:
+            return self._run_convergence_study_sequential(
+                label_prefix, verbose, max_ecutwfc, ecutwfc_step,
+                start_ecutwfc, kspacing_values
+            )
+    
+    def _run_convergence_study_batch(
+        self,
+        label_prefix: str,
+        verbose: bool,
+        max_ecutwfc: float,
+        ecutwfc_step: float,
+        start_ecutwfc: float,
+        kspacing_values: List[float],
+        batch_timeout: int
+    ) -> pd.DataFrame:
+        """
+        Run convergence study using batch (parallel) submission on SLURM.
+        
+        Submits all kspacing tests for current ecutwfc as a batch,
+        waits for all to complete, then checks convergence.
+        """
+        results_list = []
+        test_count = 0
+        current_ecutwfc = start_ecutwfc
+        
+        while current_ecutwfc <= max_ecutwfc:
+            if verbose:
+                print(f"\n--- Testing ecutwfc = {current_ecutwfc:.1f} Ry ---")
+            
+            # Prepare batch parameters for this ecutwfc
+            batch_params = []
+            for kspacing in kspacing_values:
+                test_count += 1
+                label = f"{label_prefix}/ecut{int(current_ecutwfc)}_ksp{kspacing:.2f}"
+                batch_params.append({
+                    'label': label,
+                    'ecutwfc': current_ecutwfc,
+                    'kspacing': kspacing,
+                })
+            
+            # Create base workflow for batch submission
+            # Note: Don't pass both queue and machine - if queue is already set
+            # (from machine loaded in __init__), don't pass machine again
+            workflow_kwargs = {
+                'atoms': self.atoms,
+                'pseudopotentials': self.pseudopotentials,
+                'protocol': self.protocol,
+                'code_version': self.code_version,
+            }
+            
+            # Pass either queue or machine (not both)
+            if self.queue is not None:
+                workflow_kwargs['queue'] = self.queue
+            elif self.machine is not None:
+                workflow_kwargs['machine'] = self.machine
+            
+            # Add any extra kwargs
+            workflow_kwargs.update(self.extra_kwargs)
+            
+            workflow = CalculationWorkflow(**workflow_kwargs)
+            
+            # Copy the pseudopotentials_base_path if it exists (for remote transfer)
+            if hasattr(self, 'pseudopotentials_base_path') and self.pseudopotentials_base_path:
+                workflow.pseudopotentials_base_path = self.pseudopotentials_base_path
+            
+            # Submit all jobs in batch
+            if verbose:
+                print(f"Submitting {len(batch_params)} jobs in batch mode...")
+            
+            batch_results = workflow.submit_scf_batch_multiple(batch_params, verbose=verbose)
+            
+            # Wait for all jobs to complete
+            if verbose:
+                print(f"Waiting for batch to complete (timeout: {batch_timeout}s)...")
+            
+            completion_results = workflow.wait_for_batch_jobs(
+                batch_results, timeout=batch_timeout, verbose=verbose
+            )
+            
+            # Process results
+            ecutwfc_results = []
+            for i, comp_result in enumerate(completion_results):
+                if comp_result['success']:
+                    batch_param = batch_params[i]
+                    result = {
+                        'ecutwfc': batch_param['ecutwfc'],
+                        'kspacing': batch_param['kspacing'],
+                        'energy': comp_result.get('energy', np.nan),
+                        'energy_per_atom': comp_result.get('energy', np.nan) / len(self.atoms) if comp_result.get('energy') else np.nan,
+                        'max_force': np.nan,  # Not available from batch results yet
+                        'n_kpoints': np.nan,
+                        'label': batch_param['label'],
+                        'test_number': i + 1,
+                    }
+                    results_list.append(result)
+                    ecutwfc_results.append(result)
+                    
+                    if verbose:
+                        energy_per_atom = result['energy_per_atom']
+                        print(f"  ✓ {batch_param['label']}: E = {energy_per_atom:.6f} eV/atom")
+                else:
+                    if verbose:
+                        print(f"  ✗ {batch_params[i]['label']}: {comp_result.get('error', 'Unknown error')}")
+            
+            # Check kspacing convergence for this ecutwfc
+            if len(ecutwfc_results) >= 2:
+                temp_df = pd.DataFrame(ecutwfc_results)
+                convergence_status = self._check_kspacing_convergence(
+                    temp_df, self.convergence_criteria_list, self.convergence_criteria
+                )
+                
+                all_converged = all(convergence_status.values())
+                
+                if all_converged:
+                    converged_ecutwfc = current_ecutwfc
+                    converged_kspacing = min([r['kspacing'] for r in ecutwfc_results])
+                    
+                    if verbose:
+                        print(f"✓ CONVERGED at ecutwfc={current_ecutwfc:.1f} Ry, kspacing≤{converged_kspacing:.3f} Å⁻¹")
+                    
+                    break  # Exit ecutwfc loop
+                else:
+                    if verbose:
+                        unconverged = [k for k, v in convergence_status.items() if not v]
+                        print(f"  Not converged: {', '.join(unconverged)}")
+            
+            # Go to next ecutwfc value
+            current_ecutwfc += ecutwfc_step
+        
+        # Finalize
+        if verbose:
+            print(f"\n{'='*80}")
+            print("CONVERGENCE STUDY COMPLETE")
+            print(f"{'='*80}\n")
+        
+        # Store results
+        self.results = pd.DataFrame(results_list)
+        return self.results
+    
+    def _run_convergence_study_sequential(
+        self,
+        label_prefix: str,
+        verbose: bool,
+        max_ecutwfc: float,
+        ecutwfc_step: float,
+        start_ecutwfc: float,
+        kspacing_values: List[float]
+    ) -> pd.DataFrame:
+        """Run convergence study using sequential (one-at-a-time) submission."""
+        results_list = []
+        test_count = 0
+        current_ecutwfc = start_ecutwfc
         
         while current_ecutwfc <= max_ecutwfc:
             if verbose:
@@ -951,7 +1086,7 @@ class ConvergenceWorkflow:
             
             ecutwfc_results = []
             
-            # Test all kspacing values for this ecutwfc
+            # Test all kspacing values for this ecutwfc (sequentially)
             for kspacing in kspacing_values:
                 test_count += 1
                 label = f"{label_prefix}/ecut{int(current_ecutwfc)}_ksp{kspacing:.2f}"
@@ -960,19 +1095,35 @@ class ConvergenceWorkflow:
                     print(f"  [{test_count}] kspacing={kspacing:.3f} Å⁻¹")
                 
                 # Create workflow for this parameter set
-                workflow = CalculationWorkflow(
-                    atoms=self.atoms,
-                    pseudopotentials=self.pseudopotentials,
-                    protocol=self.protocol,
-                    kspacing=kspacing,
-                    queue=self.queue,
-                    **self.extra_kwargs
-                )
+                # Note: Don't pass both queue and machine - if queue is already set
+                # (from machine loaded in __init__), don't pass machine again
+                workflow_kwargs = {
+                    'atoms': self.atoms,
+                    'pseudopotentials': self.pseudopotentials,
+                    'protocol': self.protocol,
+                    'kspacing': kspacing,
+                    'code_version': self.code_version,
+                }
+                
+                # Pass either queue or machine (not both)
+                if self.queue is not None:
+                    workflow_kwargs['queue'] = self.queue
+                elif self.machine is not None:
+                    workflow_kwargs['machine'] = self.machine
+                
+                # Add any extra kwargs
+                workflow_kwargs.update(self.extra_kwargs)
+                
+                workflow = CalculationWorkflow(**workflow_kwargs)
+                
+                # Copy the pseudopotentials_base_path if it exists (for remote transfer)
+                if hasattr(self, 'pseudopotentials_base_path') and self.pseudopotentials_base_path:
+                    workflow.pseudopotentials_base_path = self.pseudopotentials_base_path
                 
                 # Override ecutwfc
                 workflow.input_data['ecutwfc'] = current_ecutwfc
                 
-                # Run calculation based on convergence criteria
+                # Run calculation
                 try:
                     if 'geometry' in self.convergence_criteria_list:
                         calc = workflow.run_geometry_optimization(label=label)
@@ -1035,7 +1186,7 @@ class ConvergenceWorkflow:
                     converged_kspacing = min([r['kspacing'] for r in ecutwfc_results])
                     
                     if verbose:
-                        print(f"✓ CONVERGED at ecutwfc={current_ecutwfc:.1f} Ry, kspacing≤{converged_kspacing:.3f} Å⁻¹")
+                        print(f"✓ CONVERGED at ecutwfc={converged_ecutwfc:.1f} Ry, kspacing≤{converged_kspacing:.3f} Å⁻¹")
                         finest_result = min(ecutwfc_results, key=lambda x: x['kspacing'])
                         print(f"  Energy: {finest_result['energy_per_atom']:.6f} eV/atom")
                     
@@ -1057,17 +1208,6 @@ class ConvergenceWorkflow:
         print("\n" + "="*80)
         print("CONVERGENCE STUDY COMPLETE")
         print("="*80)
-        
-        if converged_ecutwfc is not None:
-            print(f"✓ Converged parameters:")
-            print(f"  ecutwfc: {converged_ecutwfc:.1f} Ry")
-            print(f"  kspacing: {converged_kspacing:.3f} Å⁻¹")
-            print(f"  Energy tolerance: {self.convergence_criteria['energy_tolerance']*1000:.1f} meV/atom")
-        else:
-            print(f"⚠ Did not converge within limits (ecutwfc ≤ {max_ecutwfc} Ry)")
-            print(f"  Consider increasing max_ecutwfc or relaxing tolerance")
-        
-        print(f"Total calculations: {len(results_list)}")
         
         return self.results
     

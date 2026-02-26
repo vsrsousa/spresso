@@ -256,8 +256,11 @@ class CalculationWorkflow:
         for element in elements_in_atoms:
             pseudo_obj = config.get_pseudopotential(element)
             if pseudo_obj is not None:
-                pseudopotentials[element] = pseudo_obj.filename
-                logger.info(f"DEBUG: Extracted {element} -> {pseudo_obj.filename}")
+                # Store ONLY filename for transfer logic in _transfer_pseudopotentials
+                # The full path will be handled separately via ESPRESSO_PSEUDO env var
+                filename = pseudo_obj.filename
+                pseudopotentials[element] = filename
+                logger.info(f"DEBUG: Extracted {element} -> {filename}")
             else:
                 missing_elements.append(element)
         
@@ -940,6 +943,329 @@ class CalculationWorkflow:
             logger.error(f"Error during remote job monitoring: {e}")
             job_status['message'] = f"Error monitoring job: {e}"
             return job_status
+    
+    def submit_scf_batch(
+        self,
+        label: str = 'scf',
+        wait_for_completion: bool = False,
+        timeout: int = 3600,
+        poll_interval: int = 30,
+        **calc_kwargs
+    ) -> Dict:
+        """
+        Submit a single SCF calculation without blocking (non-blocking mode).
+        
+        This method is designed for batch/parallel execution on HPC systems.
+        It submits the job and returns immediately with job metadata.
+        
+        Args:
+            label: Directory/label for the calculation
+            wait_for_completion: If True, block until job completes. If False, return immediately after submission.
+            timeout: Maximum time to wait for job completion (seconds), only if wait_for_completion=True
+            poll_interval: Time between status checks (seconds), only if wait_for_completion=True
+            **calc_kwargs: Additional parameters for the Espresso calculator
+            
+        Returns:
+            Dict with keys:
+                - 'calc': Espresso calculator object
+                - 'job_id': str, SLURM job ID (if remote), None otherwise
+                - 'label': str, calculation label
+                - 'submitted': bool, True if submitted successfully
+                - 'completed': bool, True if job completed (only if wait_for_completion=True)
+        """
+        if not self.queue or self.queue.get('execution') != 'remote':
+            raise ValueError(
+                "submit_scf_batch() is only supported for remote queue systems (SLURM). "
+                "Use run_scf() for local calculations."
+            )
+        
+        # Set ESPRESSO_PSEUDO if we have pseudopotentials_config
+        if self.pseudopotentials_base_path:
+            os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
+        
+        # Prepare parameters
+        params = {
+            'pseudopotentials': self.pseudopotentials,
+            'label': label,
+            'calculation': 'scf',
+            'input_data': self.input_data.copy(),
+            'kpts': self._get_kpts(),
+        }
+        
+        params['ecutwfc'] = self.input_data.get('ecutwfc', 50.0)
+        params['ecutrho'] = self.input_data.get('ecutrho', 400.0)
+        
+        if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
+            params['input_data']['pseudo_dir'] = './pseudo'
+        
+        if self.queue is not None:
+            params['queue'] = self.queue
+        
+        params.update(self.extra_kwargs)
+        params.update(calc_kwargs)
+        
+        # Create calculator
+        calc = Espresso(**params)
+        self.atoms.calc = calc
+        self.last_calc = calc
+        
+        # Step 1: Write input
+        calc.write_input(self.atoms)
+        calc.atoms = self.atoms
+        
+        # Step 2: Execute (submits remotely, returns immediately)
+        logger.info(f"Submitting SCF calculation: {label}")
+        calc.execute()
+        
+        job_id = getattr(calc, 'last_job_id', None)
+        logger.info(f"SCF calculation submitted with job ID: {job_id}")
+        
+        # Store remote connection for later monitoring
+        if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
+            calc.remote = calc.scheduler.remote
+        
+        result = {
+            'calc': calc,
+            'job_id': job_id,
+            'label': label,
+            'submitted': True,
+            'completed': False,
+        }
+        
+        # If requested, wait for job to complete
+        if wait_for_completion:
+            if job_id:
+                monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=poll_interval)
+                result['completed'] = monitor_result['success']
+                if monitor_result['success']:
+                    # Retrieve output and read results
+                    monitor = RemoteJobMonitor(calc)
+                    if monitor.wait(timeout=60, poll_interval=5):
+                        monitor.retrieve_output()
+                        calc.read_results()
+                        logger.info(f"Job {job_id} completed and output retrieved")
+            else:
+                logger.warning(f"Could not track job completion: no job ID available")
+        
+        return result
+    
+    def submit_scf_batch_multiple(
+        self,
+        parameter_sets: List[Dict],
+        verbose: bool = True
+    ) -> List[Dict]:
+        """
+        Submit multiple SCF calculations in batch mode (non-blocking).
+        
+        All jobs are submitted quickly without waiting for completion.
+        Use wait_for_batch_jobs() to monitor and collect results.
+        
+        Args:
+            parameter_sets: List of dicts, each containing:
+                - 'label': str, unique label for this calculation
+                - 'ecutwfc': float (optional), override ecutwfc
+                - 'kspacing': float (optional), override kspacing
+                - 'other_params': other parameters to pass to Espresso
+            verbose: Print submission status
+            
+        Returns:
+            List of dicts with submission info for each job:
+                - 'calc': Espresso calculator
+                - 'job_id': SLURM job ID
+                - 'label': calculation label
+                - 'submitted': bool
+                - 'completed': bool
+        """
+        results = []
+        
+        if verbose:
+            print(f"\nSubmitting {len(parameter_sets)} SCF calculations in batch mode...")
+            print(f"{'-'*70}")
+        
+        for i, params in enumerate(parameter_sets):
+            label = params.get('label', f'scf_{i}')
+            
+            # Create a modified workflow with the specific parameters
+            input_data_override = self.input_data.copy()
+            if 'ecutwfc' in params:
+                input_data_override['ecutwfc'] = params['ecutwfc']
+            if 'ecutrho' in params:
+                input_data_override['ecutrho'] = params['ecutrho']
+            
+            # Add any other input data params from the parameter set
+            for key, value in params.items():
+                if key not in ['label', 'ecutwfc', 'ecutrho', 'kspacing']:
+                    input_data_override[key] = value
+            
+            # Create new workflow with overridden parameters
+            try:
+                temp_workflow = CalculationWorkflow(
+                    self.atoms,
+                    protocol=self.protocol,
+                    pseudopotentials=self.pseudopotentials,
+                    kspacing=params.get('kspacing', self.preset.get('kspacing')),
+                    input_data=input_data_override,
+                    queue=self.queue,
+                    **self.extra_kwargs
+                )
+                
+                # Copy the pseudopotentials_base_path if it exists (for remote transfer)
+                if hasattr(self, 'pseudopotentials_base_path'):
+                    temp_workflow.pseudopotentials_base_path = self.pseudopotentials_base_path
+                
+                # Submit this calculation
+                result = temp_workflow.submit_scf_batch(label=label, wait_for_completion=False)
+                results.append(result)
+                
+                if verbose:
+                    job_id_str = f" (job_id: {result['job_id']})" if result['job_id'] else ""
+                    print(f"  [{i+1}/{len(parameter_sets)}] {label}{job_id_str}")
+                    
+            except Exception as e:
+                logger.error(f"Error submitting calculation {label}: {e}")
+                results.append({
+                    'calc': None,
+                    'job_id': None,
+                    'label': label,
+                    'submitted': False,
+                    'completed': False,
+                    'error': str(e),
+                })
+        
+        if verbose:
+            print(f"{'-'*70}")
+            print(f"Submitted {sum(1 for r in results if r['submitted'])}/{len(parameter_sets)} calculations\n")
+        
+        return results
+    
+    def wait_for_batch_jobs(
+        self,
+        batch_results: List[Dict],
+        timeout: int = 3600,
+        poll_interval: int = 30,
+        verbose: bool = True
+    ) -> List[Dict]:
+        """
+        Monitor and wait for multiple submitted jobs to complete.
+        
+        Args:
+            batch_results: List of dicts returned from submit_scf_batch_multiple()
+            timeout: Maximum time to wait (seconds)
+            poll_interval: Time between status checks (seconds)
+            verbose: Print monitoring progress
+            
+        Returns:
+            List of dicts with completion status for each job:
+                - 'label': str
+                - 'job_id': str
+                - 'completed': bool
+                - 'success': bool
+                - 'energy': float (if successful and readable)
+                - 'error': str (if failed)
+        """
+        import time
+        
+        results = []
+        active_jobs = {r['job_id']: r for r in batch_results if r['job_id']}
+        
+        if verbose:
+            print(f"\nMonitoring {len(active_jobs)} remote jobs (timeout: {timeout}s, poll: {poll_interval}s)...")
+            print(f"{'-'*70}")
+        
+        start_time = time.time()
+        completed_count = 0
+        
+        while active_jobs and (time.time() - start_time) < timeout:
+            # Query status of all jobs at once
+            if verbose:
+                elapsed = int(time.time() - start_time)
+                print(f"[{elapsed}s] Checking {len(active_jobs)} jobs...")
+            
+            jobs_to_remove = []
+            
+            for job_id, job_info in active_jobs.items():
+                calc = job_info['calc']
+                label = job_info['label']
+                
+                try:
+                    # Get job status
+                    remote_conn = getattr(calc, 'remote', None)
+                    if not remote_conn:
+                        logger.warning(f"No remote connection for {label}")
+                        jobs_to_remove.append(job_id)
+                        continue
+                    
+                    # Check SLURM status
+                    stdout, _ = remote_conn.run_command(f"squeue -j {job_id} -h")
+                    
+                    if not stdout.strip():
+                        # Job completed, check final status
+                        stdout_sacct, _ = remote_conn.run_command(
+                            f"sacct -j {job_id} --format=State -n -P"
+                        )
+                        
+                        lines = stdout_sacct.strip().split('\n') if stdout_sacct.strip() else []
+                        state = lines[-1].split('|')[0].strip() if lines else 'UNKNOWN'
+                        
+                        success = state == 'COMPLETED'
+                        
+                        # Try to retrieve energy
+                        energy = None
+                        try:
+                            monitor = RemoteJobMonitor(calc)
+                            if monitor.wait(timeout=30, poll_interval=5):
+                                monitor.retrieve_output()
+                                calc.read_results()
+                                energy = calc.results.get('energy')
+                        except Exception as e:
+                            logger.debug(f"Could not retrieve results for {label}: {e}")
+                        
+                        results.append({
+                            'label': label,
+                            'job_id': job_id,
+                            'completed': True,
+                            'success': success,
+                            'state': state,
+                            'energy': energy,
+                        })
+                        
+                        jobs_to_remove.append(job_id)
+                        completed_count += 1
+                        
+                        if verbose:
+                            status = "✓" if success else "✗"
+                            print(f"  {status} {label}: {state}")
+                
+                except Exception as e:
+                    logger.warning(f"Error checking status for {label}: {e}")
+            
+            # Remove completed jobs
+            for job_id in jobs_to_remove:
+                del active_jobs[job_id]
+            
+            # Wait before next check
+            if active_jobs:
+                time.sleep(poll_interval)
+        
+        # Timeout or all completed
+        if active_jobs:
+            if verbose:
+                print(f"\n⚠ Timeout reached with {len(active_jobs)} jobs still running")
+            
+            for job_id, job_info in active_jobs.items():
+                results.append({
+                    'label': job_info['label'],
+                    'job_id': job_id,
+                    'completed': False,
+                    'success': False,
+                    'error': 'Timeout',
+                })
+        
+        if verbose:
+            print(f"{'-'*70}")
+            print(f"Completed {completed_count + len([r for r in results if r['completed']])}/{len(batch_results)} jobs\n")
+        
+        return results
 
     def run_scf(
         self,

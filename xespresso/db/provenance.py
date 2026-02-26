@@ -34,7 +34,8 @@ class ProvenanceDB:
         self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        self.conn = sqlite3.connect(str(self.db_path))
+        # check_same_thread=False to allow usage in Streamlit (multi-threaded)
+        self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._create_tables()
         logger.info(f"ProvenanceDB initialized at {self.db_path}")
@@ -52,12 +53,9 @@ class ProvenanceDB:
                 convergence_steps INTEGER,
                 convergence_params TEXT,
                 calculation_method TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                
-                INDEX idx_hash (calculation_hash),
-                INDEX idx_input_structure (input_structure_id),
-                INDEX idx_output_structure (output_structure_id),
-                INDEX idx_timestamp (timestamp)
+                success BOOLEAN DEFAULT 1,
+                error_message TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -70,11 +68,11 @@ class ProvenanceDB:
                 wall_time REAL,
                 xespresso_version TEXT,
                 qe_version TEXT,
+                success BOOLEAN DEFAULT 1,
+                error_message TEXT,
                 execution_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 
-                FOREIGN KEY(calculation_id) REFERENCES calculations(id),
-                INDEX idx_calculation (calculation_id),
-                INDEX idx_machine (machine)
+                FOREIGN KEY(calculation_id) REFERENCES calculations(id)
             )
         ''')
         
@@ -89,9 +87,7 @@ class ProvenanceDB:
                 derivation_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 
                 FOREIGN KEY(source_structure_id) REFERENCES calculations(input_structure_id),
-                FOREIGN KEY(derived_structure_id) REFERENCES calculations(output_structure_id),
-                INDEX idx_source (source_structure_id),
-                INDEX idx_derived (derived_structure_id)
+                FOREIGN KEY(derived_structure_id) REFERENCES calculations(output_structure_id)
             )
         ''')
         
@@ -105,17 +101,27 @@ class ProvenanceDB:
                 reason TEXT,
                 
                 FOREIGN KEY(calculation_id) REFERENCES calculations(id),
-                FOREIGN KEY(depends_on) REFERENCES calculations(id),
-                INDEX idx_calculation (calculation_id),
-                INDEX idx_depends_on (depends_on)
+                FOREIGN KEY(depends_on) REFERENCES calculations(id)
             )
         ''')
+        
+        # Create indexes separately (SQLite doesn't support INDEX in CREATE TABLE)
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_hash ON calculations(calculation_hash)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_input_structure ON calculations(input_structure_id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_output_structure ON calculations(output_structure_id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_timestamp ON calculations(timestamp)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_calculation ON execution_history(calculation_id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_machine ON execution_history(machine)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_source ON derivations(source_structure_id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_derived ON derivations(derived_structure_id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_calculation_dep ON dependencies(calculation_id)')
+        self.conn.execute('CREATE INDEX IF NOT EXISTS idx_depends_on ON dependencies(depends_on)')
         
         self.conn.commit()
     
     def log_calculation(self, calc_hash, input_structure_id=None, output_structure_id=None,
                        energy=None, convergence_steps=None, convergence_params=None,
-                       calculation_method=None):
+                       calculation_method=None, success=True, error_message=None):
         """
         Log a calculation to the database.
         
@@ -127,6 +133,8 @@ class ProvenanceDB:
             convergence_steps: Number of SCF/structural iterations
             convergence_params: Dict of convergence parameters used
             calculation_method: Type of calculation (scf, relax, phonon, etc)
+            success: Whether the calculation completed successfully
+            error_message: Error message if calculation failed
         
         Returns:
             int: Calculation ID in provenance database
@@ -136,19 +144,20 @@ class ProvenanceDB:
         cursor = self.conn.execute(
             '''INSERT INTO calculations 
                (calculation_hash, input_structure_id, output_structure_id, 
-                energy, convergence_steps, convergence_params, calculation_method)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                energy, convergence_steps, convergence_params, calculation_method, success, error_message)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (calc_hash, input_structure_id, output_structure_id,
-             energy, convergence_steps, params_json, calculation_method)
+             energy, convergence_steps, params_json, calculation_method, success, error_message)
         )
         self.conn.commit()
         
         calc_id = cursor.lastrowid
-        logger.info(f"Logged calculation {calc_id} with hash {calc_hash[:8]}...")
+        status = "successful" if success else "failed"
+        logger.info(f"Logged {status} calculation {calc_id} with hash {calc_hash[:8]}...")
         return calc_id
     
     def log_execution(self, calculation_id, machine=None, wall_time=None,
-                     xespresso_version=None, qe_version=None):
+                     xespresso_version=None, qe_version=None, success=True, error_message=None):
         """
         Log execution details for a calculation (can be called multiple times per calculation).
         
@@ -158,19 +167,22 @@ class ProvenanceDB:
             wall_time: Wall clock time in seconds
             xespresso_version: Version of xespresso used
             qe_version: Version of Quantum ESPRESSO used
+            success: Whether the execution was successful
+            error_message: Error message if execution failed
         
         Returns:
             int: Execution history ID
         """
         cursor = self.conn.execute(
             '''INSERT INTO execution_history
-               (calculation_id, machine, wall_time, xespresso_version, qe_version)
-               VALUES (?, ?, ?, ?, ?)''',
-            (calculation_id, machine, wall_time, xespresso_version, qe_version)
+               (calculation_id, machine, wall_time, xespresso_version, qe_version, success, error_message)
+               VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (calculation_id, machine, wall_time, xespresso_version, qe_version, success, error_message)
         )
         self.conn.commit()
         
-        logger.info(f"Logged execution of calculation {calculation_id} on {machine}")
+        status = "successful" if success else "failed"
+        logger.info(f"Logged {status} execution of calculation {calculation_id} on {machine}")
         return cursor.lastrowid
     
     def log_derivation(self, source_structure_id, derived_structure_id,
@@ -225,10 +237,10 @@ class ProvenanceDB:
             calc_hash: Calculation hash string
         
         Returns:
-            Row object or None if not found
+            Row object or None if not found or failed
         """
         return self.conn.execute(
-            'SELECT * FROM calculations WHERE calculation_hash = ?',
+            'SELECT * FROM calculations WHERE calculation_hash = ? AND success = 1',
             (calc_hash,)
         ).fetchone()
     

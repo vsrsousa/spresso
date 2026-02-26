@@ -563,15 +563,27 @@ class CalculationWorkflow:
             convergence_info['job_done'] = 'JOB DONE' in output
             convergence_info['scf_converged'] = 'convergence has been achieved' in output
             
-            # Extract SCF iterations
-            scf_match = re.search(r'number of scf cycles\s*=\s*(\d+)', output)
+            # Extract SCF iterations - try multiple patterns
+            # Pattern 1: "convergence has been achieved in X iterations"
+            scf_match = re.search(r'convergence has been achieved in\s+(\d+)\s+iterations?', output)
             if scf_match:
                 convergence_info['scf_iterations'] = int(scf_match.group(1))
+            else:
+                # Pattern 2: "number of scf cycles = X" (fallback)
+                scf_match = re.search(r'number of scf cycles\s*=\s*(\d+)', output)
+                if scf_match:
+                    convergence_info['scf_iterations'] = int(scf_match.group(1))
             
-            # Extract final energy
-            energy_match = re.search(r'Final energy\s*=\s*(-?\d+\.\d+)\s*Ry', output)
+            # Extract final energy - try multiple patterns
+            # Pattern 1: "!    total energy              =     X Ry"
+            energy_match = re.search(r'!\s+total energy\s*=\s*(-?\d+\.\d+)\s*Ry', output)
             if energy_match:
                 convergence_info['final_energy'] = float(energy_match.group(1))
+            else:
+                # Pattern 2: "Final energy = X Ry" (fallback)
+                energy_match = re.search(r'Final energy\s*=\s*(-?\d+\.\d+)\s*Ry', output)
+                if energy_match:
+                    convergence_info['final_energy'] = float(energy_match.group(1))
             
             # Generate status message
             if convergence_info['job_done'] and convergence_info['scf_converged']:
@@ -678,11 +690,42 @@ class CalculationWorkflow:
                     
                     # Check if job is still in queue
                     if not stdout.strip():
-                        # Job not found in queue (probably completed)
-                        job_status['state'] = 'COMPLETED'
-                        job_status['elapsed_time'] = elapsed
-                        job_status['success'] = True
-                        job_status['message'] = f"✓ JOB {job_id} completed (no longer in queue)"
+                        # Job not found in queue (probably completed) - check final status with sacct
+                        try:
+                            stdout_sacct, stderr_sacct = remote_conn.run_command(
+                                f"sacct -j {job_id} --format=State -n -P"
+                            )
+                            if stdout_sacct.strip():
+                                # Parse sacct output - get the last line (most recent state)
+                                lines = stdout_sacct.strip().split('\n')
+                                last_line = lines[-1] if lines else ""
+                                state = last_line.split('|')[0].strip() if '|' in last_line else last_line.strip()
+                                
+                                job_status['state'] = state
+                                job_status['elapsed_time'] = elapsed
+                                
+                                if state == 'COMPLETED':
+                                    job_status['success'] = True
+                                    job_status['message'] = f"✓ JOB {job_id} completed successfully"
+                                elif state in ['FAILED', 'TIMEOUT', 'CANCELLED', 'OUT_OF_MEMORY']:
+                                    job_status['success'] = False
+                                    job_status['message'] = f"✗ JOB {job_id} {state}"
+                                else:
+                                    # Other states (RUNNING, PENDING shouldn't happen here)
+                                    job_status['success'] = False
+                                    job_status['message'] = f"? JOB {job_id} finished with state: {state}"
+                            else:
+                                # Could not get sacct status, assume completed for backward compatibility
+                                job_status['state'] = 'COMPLETED'
+                                job_status['success'] = True
+                                job_status['message'] = f"✓ JOB {job_id} completed (status unknown)"
+                        except Exception as sacct_e:
+                            logger.warning(f"Could not check job status with sacct: {sacct_e}")
+                            # Assume completed for backward compatibility
+                            job_status['state'] = 'COMPLETED'
+                            job_status['success'] = True
+                            job_status['message'] = f"✓ JOB {job_id} completed (sacct failed)"
+                        
                         print(f"\n{job_status['message']}")
                         return job_status
                     

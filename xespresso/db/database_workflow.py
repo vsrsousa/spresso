@@ -31,14 +31,14 @@ class DatabaseWorkflow:
     """
     
     def __init__(self, 
-                 db_path: Union[str, Path] = '~/.xespresso/database.db',
+                 db_path: Union[str, Path] = '~/.xespresso/structures.db',
                  provenance_path: Union[str, Path] = '~/.xespresso/provenance.db'):
         """
         Initialize DatabaseWorkflow.
         
         Args:
-            db_path: Path to ASE database file
-            provenance_path: Path to provenance SQLite database
+            db_path: Path to ASE database file (default: ~/.xespresso/structures.db)
+            provenance_path: Path to provenance SQLite database (default: ~/.xespresso/provenance.db)
         """
         self.db_path = Path(db_path).expanduser()
         self.provenance_path = Path(provenance_path).expanduser()
@@ -51,27 +51,35 @@ class DatabaseWorkflow:
         logger.info(f"  ASE Database: {self.db_path}")
         logger.info(f"  Provenance DB: {self.provenance_path}")
     
-    def _compute_calculation_hash(self, atoms: Atoms, calc_params: Dict) -> str:
+    def _compute_calculation_hash(self, atoms: Atoms, calc_params: Dict, calculation_method: str = 'scf') -> str:
         """
         Compute hash of calculation inputs.
         
         Hash includes:
         - Atomic structure (composition + positions)
+        - Code type (pw, ph, dos, bands, etc) and calculation method (scf, relax, etc)
+        - Pseudopotential configuration
         - All relevant QE parameters (ecutwfc, kspacing, conv_thr, etc)
         - Hubbard parameters (U values, magnetic config)
-        - NOT machine configuration
+        - Complete input_data with all QE settings
+        - NOT machine configuration or code_version
         
         Args:
             atoms: ASE Atoms object
             calc_params: Calculation parameters dict
+            calculation_method: Type of calculation (scf, relax, vc-relax, etc)
         
         Returns:
             str: Hex hash
         """
-        # Extract relevant calculation parameters (exclude machine info)
+        # Extract relevant calculation parameters (exclude machine and code_version)
         # Include complete input_data which contains all QE settings
         qe_params = {
+            'code': calc_params.get('code'),  # Which QE code (pw, ph, dos, bands, wannier, etc)
+            'calculation_method': calculation_method,  # Type of calculation (scf, relax, vc-relax, phonon, etc)
             'protocol': calc_params.get('protocol'),
+            'pseudopotentials_config': calc_params.get('pseudopotentials_config'),  # Pseudopotential configuration
+            'pseudopotentials': calc_params.get('pseudopotentials'),
             'ecutwfc': calc_params.get('ecutwfc'),
             'ecutrho': calc_params.get('ecutrho'),
             'kspacing': calc_params.get('kspacing'),
@@ -79,12 +87,13 @@ class DatabaseWorkflow:
             'mixing_beta': calc_params.get('mixing_beta'),
             'electron_maxstep': calc_params.get('electron_maxstep'),
             'magnetic_config': calc_params.get('magnetic_config'),
-            'pseudopotentials': calc_params.get('pseudopotentials'),
+            # Relaxation parameters
+            'cell_dofree': calc_params.get('cell_dofree'),  # Cell degrees of freedom (for vc-relax)
             # Hubbard parameters (DFT+U settings)
             'hubbard': calc_params.get('hubbard'),
             'hubbard_v': calc_params.get('hubbard_v'),
             'lda_plus_u': calc_params.get('lda_plus_u'),
-            # Complete input_data contains all QE parameters
+            # Complete input_data contains all QE parameters (ibrav, volume, cell options, etc)
             'input_data': json.dumps(calc_params.get('input_data', {}), sort_keys=True),
         }
         
@@ -139,7 +148,7 @@ class DatabaseWorkflow:
             - from_cache: Boolean indicating if result was retrieved from cache
         """
         # Compute hash of this calculation
-        calc_hash = self._compute_calculation_hash(atoms, calculation_params)
+        calc_hash = self._compute_calculation_hash(atoms, calculation_params, calculation_method)
         logger.info(f"Calculation hash: {calc_hash[:8]}...")
         
         # Check if calculation exists in provenance
@@ -149,10 +158,9 @@ class DatabaseWorkflow:
                 logger.info(f"Found existing calculation in provenance")
                 output_structure_id = existing['output_structure_id']
                 
-                if output_structure_id:
+                if output_structure_id is not None:
                     # Retrieve from ASE database
-                    row = self.db.get_atoms(output_structure_id)
-                    result = row.toatoms()
+                    result = self.db.get_atoms(output_structure_id)
                     
                     logger.info(f"Retrieved result from database (structure ID: {output_structure_id})")
                     return result, True
@@ -160,32 +168,78 @@ class DatabaseWorkflow:
         # Calculation not found, need to compute
         logger.info(f"Calculation not in cache, executing...")
         
-        # Create and run workflow
+        # Create workflow
         workflow = CalculationWorkflow(atoms, **calculation_params)
         
-        if calculation_method == 'scf':
-            result = workflow.run_scf()
-        elif calculation_method == 'relax':
-            result = workflow.run_relax()
-        elif calculation_method == 'phonon':
-            result = workflow.run_phonon()
-        elif calculation_method == 'band':
-            result = workflow.run_band()
-        else:
-            raise ValueError(f"Unknown calculation method: {calculation_method}")
+        result = None
+        success = False
+        error_message = None
         
+        try:
+            if calculation_method == 'scf':
+                result = workflow.run_scf()
+            elif calculation_method in ['relax', 'vc-relax']:
+                # Automatically detect relax_type from calculation_method
+                relax_type = calculation_method if calculation_method == 'vc-relax' else 'relax'
+                label = calculation_method  # Use different labels: 'relax' vs 'vc-relax'
+                result = workflow.run_relax(label=label, relax_type=relax_type)
+            elif calculation_method == 'phonon':
+                result = workflow.run_phonon()
+            elif calculation_method == 'band':
+                result = workflow.run_band()
+            else:
+                raise ValueError(f"Unknown calculation method: {calculation_method}")
+            
+            success = True
+            
+        except Exception as e:
+            success = False
+            error_message = str(e)
+            logger.error(f"Calculation failed: {error_message}")
+            
+            # Log failed calculation to provenance
+            calc_id = self.provenance.log_calculation(
+                calc_hash=calc_hash,
+                input_structure_id=input_structure_id,
+                output_structure_id=None,  # No output for failed calc
+                energy=None,
+                convergence_steps=None,
+                convergence_params=calculation_params,
+                calculation_method=calculation_method,
+                success=False,
+                error_message=error_message
+            )
+            
+            # Log execution details for failed calc
+            machine = calculation_params.get('machine')
+            self.provenance.log_execution(
+                calculation_id=calc_id,
+                machine=machine,
+                xespresso_version='1.0.0',
+                success=False,
+                error_message=error_message
+            )
+            
+            logger.info(f"Logged failed calculation to provenance (calc ID: {calc_id})")
+            # Re-raise the exception
+            raise
+        
+        # Only reaches here on success
         # Store result in ASE database
-        result_atoms = result.atoms if hasattr(result, 'atoms') else result
+        # Detach calculator before writing - ASE database doesn't need it
+        # and the Espresso calc.check_state() returns bool instead of list
+        result_atoms = workflow.atoms.copy()
+        result_atoms.calc = None  # Remove calculator reference
         
-        self.db.write(result_atoms,
-                     calculation_hash=calc_hash,
-                     calculation_method=calculation_method,
-                     convergence_params=json.dumps(calculation_params))
-        output_structure_id = len(self.db) - 1
+        output_structure_id = self.db.write(result_atoms,
+                                           calculation_hash=calc_hash,
+                                           calculation_method=calculation_method,
+                                           convergence_params=json.dumps(calculation_params))
         
         # Log to provenance
-        energy = result.results.get('energy') if hasattr(result, 'results') else None
-        convergence_steps = result.results.get('convergence_steps') if hasattr(result, 'results') else None
+        # result is the Espresso calculator object with results from read_results()
+        energy = result.results.get('energy') if hasattr(result, 'results') and result.results else None
+        convergence_steps = result.results.get('convergence_steps') if hasattr(result, 'results') and result.results else None
         
         calc_id = self.provenance.log_calculation(
             calc_hash=calc_hash,
@@ -194,7 +248,8 @@ class DatabaseWorkflow:
             energy=energy,
             convergence_steps=convergence_steps,
             convergence_params=calculation_params,
-            calculation_method=calculation_method
+            calculation_method=calculation_method,
+            success=True
         )
         
         # Log execution details
@@ -204,6 +259,15 @@ class DatabaseWorkflow:
             machine=machine,
             xespresso_version='1.0.0'  # TODO: get from xespresso.__version__
         )
+        
+        # Log derivation if input structure was provided
+        if input_structure_id is not None:
+            self.provenance.log_derivation(
+                source_structure_id=input_structure_id,
+                derived_structure_id=output_structure_id,
+                derivation_method=calculation_method,
+                energy_change=energy
+            )
         
         logger.info(f"Stored result in database (structure ID: {output_structure_id})")
         return result_atoms, False

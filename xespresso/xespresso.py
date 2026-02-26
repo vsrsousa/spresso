@@ -503,9 +503,25 @@ class Espresso(FileIOCalculator):
             self.results["atoms"] = output
             self.efermi = self.get_fermi_level()
             # self.nspins = self.get_number_of_spins()
+            
+            # Store the raw output text for convergence checking
+            try:
+                with open(pwo, 'r') as f:
+                    self.results["output"] = f.read()
+            except Exception as e:
+                logger.debug("Failed to read output text: %s" % e)
+                self.results["output"] = ""
+            
             logger.debug("Read result successfully!")
         except Exception as e:
             logger.debug("Read output: %s, failed! %s" % (pwo, e))
+            # Even if ASE reading fails, try to store the raw output text
+            try:
+                with open(pwo, 'r') as f:
+                    self.results["output"] = f.read()
+            except Exception as e2:
+                logger.debug("Failed to read output text: %s" % e2)
+                self.results["output"] = ""
         self.results["convergence"] = convergence
         self.results["label"] = self.label
         # logger.debug('Read result failed!')

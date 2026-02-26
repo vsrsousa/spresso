@@ -1515,6 +1515,7 @@ class CalculationWorkflow:
         lsym: int = 1,
         pawproj: int = 0,
         filpdos: Optional[str] = None,
+        lowdin: bool = False,
     ):
         """
         Run Projections on Atomic Wavefunctions (PROJWFC) post-processing.
@@ -1537,6 +1538,7 @@ class CalculationWorkflow:
             lsym: Symmetrize projections (0=no, 1=yes). Default 1
             pawproj: PAW projector type (0=Rydberg, 1=m_j dependent). Default 0
             filpdos: Prefix for output PDOS files. If None, uses nscf prefix
+            lowdin: If True, calculate and output Lowdin charges to file (default False)
             
         Returns:
             EspressoProjwfc: Post-processing calculator with PDOS results
@@ -1546,6 +1548,7 @@ class CalculationWorkflow:
             - PDOS shows which atoms/orbitals contribute at each energy
             - Essential for validating magnetic orderings and orbital occupations
             - Output files: {prefix}.pdos_* (one per orbital symmetry type)
+            - If lowdin=True: generates lowdin_charges.dat with atomic population analysis
             
         Example:
             >>> # SCF + NSCF for transition metal oxide
@@ -1559,6 +1562,14 @@ class CalculationWorkflow:
             ...     Emin=-30,
             ...     Emax=10,
             ...     DeltaE=0.01
+            ... )
+            
+            >>> # PROJWFC with Lowdin charges
+            >>> projwfc_result = workflow.run_projwfc(
+            ...     nscf_label='nscf',
+            ...     Emin=-30,
+            ...     Emax=10,
+            ...     lowdin=True  # Generate lowdin_charges.dat
             ... )
             
             >>> # Analyze PDOS
@@ -1600,6 +1611,11 @@ class CalculationWorkflow:
         if filpdos is None:
             filpdos = nscf_prefix
         
+        # Set Lowdin charges output filename if requested
+        filowdin = None
+        if lowdin:
+            filowdin = f"{nscf_prefix}_lowdin_charges.dat"
+        
         # Prepare PROJWFC parameters
         projwfc_params = {
             'Emin': Emin,
@@ -1610,6 +1626,7 @@ class CalculationWorkflow:
             'lsym': lsym,
             'pawproj': pawproj,
             'filpdos': filpdos,
+            'filowdin': filowdin,
         }
         
         # Log system analysis
@@ -1631,6 +1648,9 @@ class CalculationWorkflow:
         print(f"  Symmetry projection (lsym): {lsym}")
         print(f"  PAW projector (pawproj): {pawproj}")
         print(f"  Output prefix (filpdos): {filpdos}")
+        print(f"  Lowdin charges: {lowdin}")
+        if lowdin:
+            print(f"    → Output file: {filowdin}")
         
         if is_magnetic:
             print("\n" + "-"*70)
@@ -1639,6 +1659,8 @@ class CalculationWorkflow:
             print("    • Individual atoms (site-projected)")
             print("    • Different orbitals (s, p, d, f, etc.)")
             print("    • Spin-up and spin-down for magnetic systems")
+            if lowdin:
+                print("    • Lowdin charges: atomic population analysis")
             print("  Useful for validating magnetic orderings in transition metals")
         else:
             print("\n" + "-"*70)
@@ -1646,6 +1668,8 @@ class CalculationWorkflow:
             print("  PDOS will decompose electronic structure by:")
             print("    • Atomic sites")
             print("    • Orbital angular momentum (s, p, d, f)")
+            if lowdin:
+                print("    • Lowdin charges: atomic population analysis")
         print("="*70 + "\n")
         
         logger.info(
@@ -1669,13 +1693,19 @@ class CalculationWorkflow:
         logger.info(f"PROJWFC calculation completed. Results in {projwfc_calc.directory}/")
         
         # Provide next steps information
-        logger.info(
-            f"Projected DOS (PDOS) calculated. Use xespresso.dos.DOS class to analyze:\n"
-            f"  - read_pdos() to load projection data\n"
-            f"  - plot_pdos() to visualize orbital contributions\n"
-            f"  - Compare site/orbital contributions to validate electronic structure\n"
-            f"  - For magnetic systems: analyze spin-up vs spin-down projections"
-        )
+        analysis_msg = f"Projected DOS (PDOS) calculated. Use xespresso.dos.DOS class to analyze:\n"
+        analysis_msg += f"  - read_pdos() to load projection data\n"
+        analysis_msg += f"  - plot_pdos() to visualize orbital contributions\n"
+        analysis_msg += f"  - Compare site/orbital contributions to validate electronic structure\n"
+        analysis_msg += f"  - For magnetic systems: analyze spin-up vs spin-down projections"
+        
+        if lowdin:
+            analysis_msg += f"\nLowdin charges calculated in {filowdin}:\n"
+            analysis_msg += f"  - Contains atomic population analysis using Lowdin transformation\n"
+            analysis_msg += f"  - Shows charge distribution by atom and orbital\n"
+            analysis_msg += f"  - Includes spilling parameter and magnetic moments"
+        
+        logger.info(analysis_msg)
         
         return projwfc_calc
     

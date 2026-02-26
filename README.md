@@ -127,6 +127,59 @@ config = load_pseudo_config("my_config")
 calc = quick_scf('structure.cif', config['pseudopotentials'], quality='moderate')
 ```
 
+**🎉 NEW: Simplified Convergence Workflow** - Automatic parameter optimization!
+
+The `ConvergenceWorkflow` now supports precision-based automatic parameter selection:
+
+```python
+from xespresso.workflow import ConvergenceWorkflow
+from ase.build import bulk
+
+# Create structure
+atoms = bulk('Si', 'diamond', a=5.43)
+pseudopotentials = {'Si': 'Si.pbe-n-rrkjus_psl.1.0.0.UPF'}
+
+# Method 1: Simplest interface - just provide structure and precision
+workflow = ConvergenceWorkflow.optimize_parameters(
+    atoms, 
+    pseudopotentials, 
+    precision='medium'  # 'low', 'medium', 'high', 'ultra'
+)
+
+# Method 2: Create workflow with precision, then run manually
+workflow = ConvergenceWorkflow(atoms, pseudopotentials, precision='high')
+workflow.run_convergence_study()
+
+# Method 3: From CIF file with precision
+workflow = ConvergenceWorkflow.from_cif(
+    'structure.cif', 
+    pseudopotentials, 
+    precision='low'
+)
+
+# Get convergence recommendations
+recommendations = workflow.get_convergence_recommendations()
+print(f"Recommended: ecutwfc={recommendations['ecutwfc']} Ry, "
+      f"kspacing={recommendations['kspacing']} Å⁻¹")
+```
+
+**Precision Levels:**
+- `low`: Quick calculations (ecutwfc: 30-50 Ry, kspacing: 0.5-0.3 Å⁻¹)
+- `medium`: Balanced speed/accuracy (ecutwfc: 40-70 Ry, kspacing: 0.4-0.2 Å⁻¹) 
+- `high`: High accuracy (ecutwfc: 50-90 Ry, kspacing: 0.3-0.12 Å⁻¹)
+- `ultra`: Maximum accuracy (ecutwfc: 60-140 Ry, kspacing: 0.25-0.1 Å⁻¹)
+
+**🎯 Smart Range Adjustment:** Ranges are automatically adjusted based on pseudopotential requirements! If your pseudopotentials require higher ecutwfc values than the precision defaults, the ranges are automatically extended to ensure adequate convergence testing.
+
+Advanced users can still specify custom ranges:
+```python
+workflow = ConvergenceWorkflow(
+    atoms, pseudopotentials,
+    ecutwfc_range=[40, 60, 80],
+    kspacing_range=[0.3, 0.2, 0.1]
+)
+```
+
 See [WORKFLOW_DOCUMENTATION.md](WORKFLOW_DOCUMENTATION.md) for complete documentation.
 
 #### Automatic submit job

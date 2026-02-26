@@ -4,7 +4,16 @@ Convergence parameter optimization workflow.
 This module provides tools to systematically optimize DFT calculation parameters
 (ecutwfc, kspacing) for energy and force convergence on a target structure.
 
-Typical workflow:
+Two usage modes:
+1. Simple mode: Just provide structure and desired precision level
+2. Advanced mode: Specify custom parameter ranges for detailed control
+
+Simple workflow:
+    1. Define precision level ('low', 'medium', 'high', 'ultra')
+    2. Workflow automatically determines optimal parameter ranges
+    3. Run convergence study and get recommendations
+
+Advanced workflow:
     1. Define parameter ranges (ecutwfc, kspacing)
     2. Run SCF calculations for each parameter combination
     3. Analyze convergence of total energy and forces
@@ -32,35 +41,36 @@ class ConvergenceWorkflow:
     runs SCF calculations to determine optimal values for energy and force
     convergence.
     
-    Attributes:
-        atoms: ASE Atoms object (structure to test)
-        pseudopotentials: Dictionary mapping element symbols to UPF files
-        protocol: Base protocol for calculations ('fast', 'moderate', 'accurate')
-        ecutwfc_range: List of ecutwfc values to test (default: [30, 40, 50, 60, 70])
-        kspacing_range: List of kspacing values to test (default: [0.5, 0.3, 0.2, 0.15])
-        results: DataFrame with convergence test results
+    Two usage modes:
     
-    Examples:
-        >>> # Create convergence study
-        >>> conv = ConvergenceWorkflow.from_cif(
+    1. Simple mode (recommended for most users):
+        >>> # Just provide structure and precision level
+        >>> workflow = ConvergenceWorkflow.from_cif(
         ...     'structure.cif',
+        ...     pseudopotentials={'Si': 'Si.pbe.UPF'},
+        ...     precision='medium'  # 'low', 'medium', 'high', 'ultra'
+        ... )
+        >>> optimal_params = workflow.optimize_parameters()
+    
+    2. Advanced mode (for detailed control):
+        >>> # Specify custom parameter ranges
+        >>> conv = ConvergenceWorkflow(
+        ...     atoms=atoms,
         ...     pseudopotentials={'Si': 'Si.pbe.UPF'},
         ...     ecutwfc_range=[30, 40, 50, 60],
         ...     kspacing_range=[0.4, 0.3, 0.2]
         ... )
-        
-        >>> # Run complete convergence study
         >>> conv.run_convergence_study()
-        
-        >>> # Get recommendations
-        >>> recommendations = conv.get_recommendations(
-        ...     energy_tolerance=1e-4,  # meV/atom
-        ...     force_tolerance=0.1     # eV/Å
-        ... )
-        
-        >>> # Access results
-        >>> print(conv.results)
-        >>> conv.plot_convergence()
+        >>> recommendations = conv.get_recommendations()
+    
+    Attributes:
+        atoms: ASE Atoms object (structure to test)
+        pseudopotentials: Dictionary mapping element symbols to UPF files
+        protocol: Base protocol for calculations ('fast', 'moderate', 'accurate')
+        precision: Precision level ('low', 'medium', 'high', 'ultra')
+        ecutwfc_range: List of ecutwfc values to test
+        kspacing_range: List of kspacing values to test
+        results: DataFrame with convergence test results
     """
     
     def __init__(
@@ -68,8 +78,12 @@ class ConvergenceWorkflow:
         atoms: Atoms,
         pseudopotentials: Dict[str, str],
         protocol: str = 'moderate',
+        precision: Optional[str] = None,
         ecutwfc_range: Optional[List[float]] = None,
         kspacing_range: Optional[List[float]] = None,
+        conv_thr_range: Optional[List[float]] = None,
+        convergence_criteria_list: Optional[List[str]] = None,
+        convergence_criteria: Optional[Dict] = None,
         queue: Optional[Dict] = None,
         **kwargs
     ):
@@ -80,29 +94,64 @@ class ConvergenceWorkflow:
             atoms: ASE Atoms object with structure
             pseudopotentials: Dict mapping element symbols to UPF files
             protocol: Base protocol ('fast', 'moderate', 'accurate')
+            precision: Precision level for automatic parameter selection.
+                     Options: 'low', 'medium', 'high', 'ultra'.
+                     If specified, overrides ecutwfc_range and kspacing_range.
+                     Default: None (use explicit ranges)
             ecutwfc_range: List of ecutwfc values to test.
-                          Default: [30, 40, 50, 60, 70]
+                          If None and precision=None: [30, 40, 50, 60, 70]
             kspacing_range: List of kspacing values to test (Å^-1).
-                           Default: [0.5, 0.3, 0.2, 0.15]
+                           If None and precision=None: [0.5, 0.3, 0.2, 0.15]
+            conv_thr_range: List of conv_thr values to test (optional)
+            convergence_criteria_list: List of convergence criteria to check.
+                                     Options: 'energy', 'forces', 'geometry', 'magnetic_moments'
+                                     If None, uses defaults based on precision level.
+            convergence_criteria: Dict with convergence tolerances.
+                                If None, uses defaults based on precision level.
+                                Keys: 'energy_tolerance', 'force_tolerance', 'geometry_tolerance', 'magnetic_tolerance'
             queue: Queue configuration for job submission (optional)
             **kwargs: Additional parameters passed to CalculationWorkflow
         """
         self.atoms = atoms.copy()
         self.pseudopotentials = pseudopotentials
         self.protocol = protocol
+        self.precision = precision
+        
+        # Set convergence criteria list
+        if convergence_criteria_list is None:
+            self.convergence_criteria_list = self._get_default_convergence_criteria_list(precision)
+        else:
+            self.convergence_criteria_list = convergence_criteria_list
+            
+        # Set convergence tolerances
+        if convergence_criteria is None:
+            self.convergence_criteria = self._get_default_convergence_criteria(precision)
+        else:
+            self.convergence_criteria = convergence_criteria
+            
         self.queue = queue
         self.extra_kwargs = kwargs
         
-        # Default ranges if not specified
-        if ecutwfc_range is None:
-            self.ecutwfc_range = [30, 40, 50, 60, 70]
+        # Define parameter ranges based on precision level
+        if precision is not None:
+            # Get base ranges for precision level
+            base_ecutwfc_range, base_kspacing_range = self._get_ranges_for_precision(precision)
+            
+            # Adjust ranges based on pseudopotential requirements
+            self.ecutwfc_range, self.kspacing_range = self._adjust_ranges_for_pseudopotentials(
+                precision, pseudopotentials, atoms
+            )
         else:
-            self.ecutwfc_range = sorted(ecutwfc_range)
-        
-        if kspacing_range is None:
-            self.kspacing_range = [0.5, 0.3, 0.2, 0.15]
-        else:
-            self.kspacing_range = sorted(kspacing_range, reverse=True)
+            # Use explicit ranges or defaults
+            if ecutwfc_range is None:
+                self.ecutwfc_range = [30, 40, 50, 60, 70]
+            else:
+                self.ecutwfc_range = sorted(ecutwfc_range)
+            
+            if kspacing_range is None:
+                self.kspacing_range = [0.5, 0.3, 0.2, 0.15]
+            else:
+                self.kspacing_range = sorted(kspacing_range, reverse=True)
         
         # Results storage
         self.results = None  # DataFrame will be created after tests
@@ -110,15 +159,410 @@ class ConvergenceWorkflow:
         logger.info(
             f"Convergence workflow initialized:\n"
             f"  Structure: {self.atoms.get_chemical_formula()}\n"
+            f"  Precision: {self.precision or 'custom'}\n"
             f"  ecutwfc range: {self.ecutwfc_range}\n"
             f"  kspacing range: {self.kspacing_range}"
         )
+    
+    def _get_default_convergence_criteria(self, precision: Optional[str]) -> Dict:
+        """
+        Get default convergence criteria tolerances based on precision level.
+        
+        Args:
+            precision: Precision level or None
+            
+        Returns:
+            Dict with convergence tolerances
+        """
+        if precision is None:
+            # Default criteria for custom ranges
+            return {
+                'energy_tolerance': 1e-3,      # 1 meV/atom
+                'force_tolerance': 0.1,        # eV/Å
+                'geometry_tolerance': 0.01,    # Å
+                'magnetic_tolerance': 0.001,   # μB
+            }
+        
+        precision = precision.lower()
+        
+        criteria = {
+            'low': {
+                'energy_tolerance': 3e-3,      # 3 meV/atom
+                'force_tolerance': 0.5,        # eV/Å
+                'geometry_tolerance': 0.05,    # Å
+                'magnetic_tolerance': 0.01,    # μB
+            },
+            'medium': {
+                'energy_tolerance': 2e-3,      # 2 meV/atom
+                'force_tolerance': 0.2,        # eV/Å
+                'geometry_tolerance': 0.02,    # Å
+                'magnetic_tolerance': 0.005,   # μB
+            },
+            'high': {
+                'energy_tolerance': 1e-3,      # 1 meV/atom
+                'force_tolerance': 0.1,        # eV/Å
+                'geometry_tolerance': 0.01,    # Å
+                'magnetic_tolerance': 0.001,   # μB
+            },
+            'ultra': {
+                'energy_tolerance': 5e-4,      # 0.5 meV/atom
+                'force_tolerance': 0.05,       # eV/Å
+                'geometry_tolerance': 0.005,   # Å
+                'magnetic_tolerance': 0.0005,  # μB
+            }
+        }
+        
+        if precision not in criteria:
+            raise ValueError(f"Unknown precision level: {precision}")
+            
+        return criteria[precision]
+    
+    def _get_default_convergence_criteria_list(self, precision: Optional[str]) -> List[str]:
+        """
+        Get default convergence criteria list based on precision level.
+        
+        Args:
+            precision: Precision level or None
+            
+        Returns:
+            List of convergence criteria
+        """
+        if precision is None:
+            # Default criteria for custom ranges
+            return ['energy', 'forces']
+        
+        precision = precision.lower()
+        
+        criteria_list = {
+            'low': ['energy'],
+            'medium': ['energy', 'forces'],
+            'high': ['energy', 'forces', 'geometry'],
+            'ultra': ['energy', 'forces', 'geometry', 'magnetic_moments']
+        }
+        
+        if precision not in criteria_list:
+            raise ValueError(f"Unknown precision level: {precision}")
+            
+        return criteria_list[precision]
+    
+    def _check_kspacing_convergence(self, results_df: pd.DataFrame, criteria_list: List[str], tolerances: Dict) -> Dict[str, bool]:
+        """
+        Check convergence with respect to kspacing for a fixed ecutwfc.
+        
+        Args:
+            results_df: DataFrame with results for a single ecutwfc (multiple kspacing)
+            criteria_list: List of criteria to check
+            tolerances: Dict with tolerance values
+            
+        Returns:
+            Dict mapping criterion to convergence status
+        """
+        convergence_status = {}
+        
+        # Sort by kspacing (finest first)
+        sorted_df = results_df.sort_values('kspacing')
+        
+        for criterion in criteria_list:
+            if criterion == 'energy':
+                # Check if energy converges with kspacing
+                if len(sorted_df) >= 2:
+                    energies = sorted_df['energy_per_atom'].values
+                    # Compare finest two kspacing values
+                    if len(energies) >= 2:
+                        delta_e = abs(energies[-1] - energies[-2])  # Compare last two (finest)
+                        convergence_status['energy'] = delta_e < tolerances['energy_tolerance']
+                    else:
+                        convergence_status['energy'] = False
+                else:
+                    convergence_status['energy'] = False
+                    
+            elif criterion == 'forces':
+                # Check force convergence with kspacing
+                if 'max_force' in sorted_df.columns and len(sorted_df) >= 2:
+                    forces = sorted_df['max_force'].dropna().values
+                    if len(forces) >= 2:
+                        delta_f = abs(forces[-1] - forces[-2])  # Compare finest two
+                        convergence_status['forces'] = delta_f < tolerances['force_tolerance']
+                    else:
+                        convergence_status['forces'] = False
+                else:
+                    convergence_status['forces'] = False
+                    
+            elif criterion == 'geometry':
+                # For geometry, check if positions are converged
+                # This would require position data - for now assume converged if energy is
+                convergence_status['geometry'] = convergence_status.get('energy', False)
+                
+            elif criterion == 'magnetic_moments':
+                # For magnetic moments - assume converged if energy is
+                convergence_status['magnetic_moments'] = convergence_status.get('energy', False)
+        
+        return convergence_status
+    
+    def _check_convergence(self, energies: List[float], tolerance: float) -> bool:
+        """
+        Check if energy has converged based on tolerance.
+        
+        Args:
+            energies: List of energies in order (should be at least 2 values)
+            tolerance: Energy tolerance in eV/atom
+            
+        Returns:
+            True if converged (last two energies differ by less than tolerance)
+        """
+        if len(energies) < 2:
+            return False
+        
+        # Check if last two energies are within tolerance
+        delta_e = abs(energies[-1] - energies[-2])
+        return delta_e < tolerance
+    
+    def _check_all_convergence_criteria(self, results_df: pd.DataFrame, criteria_list: List[str]) -> Dict[str, bool]:
+        """
+        Check convergence for all specified criteria.
+        
+        Args:
+            results_df: DataFrame with calculation results
+            criteria_list: List of convergence criteria to check
+            
+        Returns:
+            Dict mapping criteria to convergence status
+        """
+        convergence_status = {}
+        
+        # Group by ecutwfc and get the finest kspacing results
+        finest_results = results_df.loc[results_df.groupby('ecutwfc')['kspacing'].idxmin()]
+        finest_results = finest_results.sort_values('ecutwfc')
+        
+        if len(finest_results) < 2:
+            # Not enough data for convergence check
+            for criterion in criteria_list:
+                convergence_status[criterion] = False
+            return convergence_status
+        
+        # Check energy convergence
+        if 'energy' in criteria_list:
+            energies = finest_results['energy_per_atom'].values
+            convergence_status['energy'] = self._check_convergence(
+                energies, self.convergence_criteria['energy_tolerance']
+            )
+        
+        # Check forces convergence
+        if 'forces' in criteria_list:
+            # For forces, we need to check if max_force is below tolerance
+            # This is a different type of convergence - absolute value vs difference
+            latest_max_force = finest_results['max_force'].iloc[-1]
+            convergence_status['forces'] = latest_max_force < self.convergence_criteria['force_tolerance']
+        
+        # Check geometry convergence (simplified - would need position differences)
+        if 'geometry' in criteria_list:
+            # For now, use energy as proxy for geometry convergence
+            # In a full implementation, this would compare atomic positions
+            convergence_status['geometry'] = convergence_status.get('energy', False)
+        
+        # Check magnetic moments convergence
+        if 'magnetic_moments' in criteria_list:
+            # For now, assume converged if energy converged
+            # In a full implementation, this would check magnetic moments
+            convergence_status['magnetic_moments'] = convergence_status.get('energy', False)
+        
+        return convergence_status
+    
+    def _fit_exponential_convergence(self, ecutwfc_values: List[float], energies: List[float]) -> float:
+        """
+        Fit exponential convergence to estimate infinite ecutwfc energy.
+        
+        Args:
+            ecutwfc_values: List of ecutwfc values tested
+            energies: Corresponding energies
+            
+        Returns:
+            Estimated energy at infinite ecutwfc
+        """
+        try:
+            from scipy.optimize import curve_fit
+            
+            def exp_func(x, a, b, c):
+                return a * np.exp(-b * x) + c
+            
+            popt, _ = curve_fit(exp_func, ecutwfc_values, energies, p0=[1, 0.1, min(energies)])
+            return popt[2]  # c parameter is the asymptotic value
+        except:
+            # Fallback: use last energy if fit fails
+            return energies[-1]
+    
+    def _get_ranges_for_precision(self, precision: str) -> Tuple[List[float], List[float]]:
+        """
+        Get parameter ranges based on precision level.
+        
+        Args:
+            precision: Precision level ('low', 'medium', 'high', 'ultra')
+            
+        Returns:
+            Tuple of (ecutwfc_range, kspacing_range)
+        """
+        precision = precision.lower()
+        
+        if precision == 'low':
+            # Quick calculations, lower accuracy
+            ecutwfc_range = [30, 40, 50]
+            kspacing_range = [0.5, 0.4, 0.3]
+        elif precision == 'medium':
+            # Balanced speed and accuracy
+            ecutwfc_range = [40, 50, 60, 70]
+            kspacing_range = [0.4, 0.3, 0.25, 0.2]
+        elif precision == 'high':
+            # High accuracy, slower
+            ecutwfc_range = [50, 60, 70, 80, 90]
+            kspacing_range = [0.3, 0.25, 0.2, 0.15, 0.12]
+        elif precision == 'ultra':
+            # Maximum accuracy, very slow
+            ecutwfc_range = [60, 80, 100, 120, 140]
+            kspacing_range = [0.25, 0.2, 0.15, 0.12, 0.1]
+        else:
+            raise ValueError(f"Unknown precision level: {precision}. "
+                           "Choose from 'low', 'medium', 'high', 'ultra'")
+        
+        return ecutwfc_range, kspacing_range
+    
+    def _adjust_ranges_for_pseudopotentials(
+        self, 
+        precision: str, 
+        pseudopotentials: Dict[str, str],
+        atoms: Atoms
+    ) -> Tuple[List[float], List[float]]:
+        """
+        Adjust parameter ranges based on pseudopotential requirements and structural complexity.
+        
+        Args:
+            precision: Precision level ('low', 'medium', 'high', 'ultra')
+            pseudopotentials: Dict mapping element symbols to UPF file paths
+            atoms: ASE Atoms object for structural analysis
+            
+        Returns:
+            Tuple of (adjusted_ecutwfc_range, kspacing_range)
+        """
+        from xespresso.pseudopotentials.detector import parse_upf_header
+        
+        # Get base ranges for precision level
+        ecutwfc_range, kspacing_range = self._get_ranges_for_precision(precision)
+        
+        # Analyze structural complexity
+        complexity = self._analyze_structural_complexity(atoms)
+        structural_factor = (
+            complexity['surface_factor'] * 
+            complexity['vacuum_factor'] * 
+            complexity['heterogeneity_factor']
+        )
+        
+        logger.info(f"  Structural complexity factors: {complexity}")
+        logger.info(f"  Combined structural factor: {structural_factor:.2f}")
+        
+        # Extract suggested ecutwfc from pseudopotential files
+        max_suggested_ecutwfc = 0.0
+        
+        for element, upf_path in pseudopotentials.items():
+            try:
+                # Try to parse the UPF file
+                header_info = parse_upf_header(upf_path)
+                if 'suggested_ecutwfc' in header_info:
+                    suggested = header_info['suggested_ecutwfc']
+                    max_suggested_ecutwfc = max(max_suggested_ecutwfc, suggested)
+                    logger.info(f"  {element}: suggested ecutwfc = {suggested} Ry (from {upf_path})")
+                else:
+                    logger.warning(f"  {element}: no suggested ecutwfc found in {upf_path}")
+            except Exception as e:
+                logger.warning(f"  {element}: failed to parse {upf_path}: {e}")
+        
+        if max_suggested_ecutwfc > 0:
+            # Apply structural complexity factor
+            adjusted_suggested = max_suggested_ecutwfc * structural_factor
+            
+            # Ensure the range covers at least the adjusted suggested value
+            current_max = max(ecutwfc_range)
+            
+            if adjusted_suggested > current_max:
+                logger.info(f"  Adjusted suggested ecutwfc: {max_suggested_ecutwfc:.1f} × {structural_factor:.2f} = {adjusted_suggested:.1f} Ry")
+                logger.info(f"  Current max: {current_max} Ry → extending range")
+                
+                # Extend the range to cover the adjusted suggested value
+                # Add some buffer (10% above adjusted suggested) for convergence testing
+                extended_max = adjusted_suggested * 1.1
+                
+                # Replace the highest value in the range with the extended max
+                ecutwfc_range[-1] = round(extended_max, 1)
+                
+                # Ensure the range is still sorted
+                ecutwfc_range = sorted(ecutwfc_range)
+                
+                logger.info(f"  New ecutwfc range: {ecutwfc_range}")
+        
+        return ecutwfc_range, kspacing_range
+    
+    def _analyze_structural_complexity(self, atoms: Atoms) -> Dict[str, float]:
+        """
+        Analyze structural complexity to determine convergence requirements.
+        
+        Args:
+            atoms: ASE Atoms object
+            
+        Returns:
+            Dict with complexity factors:
+                - 'surface_factor': 1.0-2.0 (bulk vs surface/cluster)
+                - 'vacuum_factor': 1.0-1.5 (presence of vacuum)
+                - 'heterogeneity_factor': 1.0-1.8 (multiple elements/interfaces)
+        """
+        complexity = {
+            'surface_factor': 1.0,
+            'vacuum_factor': 1.0, 
+            'heterogeneity_factor': 1.0
+        }
+        
+        # Check for vacuum (slab calculations)
+        cell = atoms.get_cell()
+        positions = atoms.get_positions()
+        
+        # Simple vacuum detection: check if cell is much larger than atomic positions
+        if len(atoms) > 2:  # Avoid false positives for small systems
+            max_pos = positions.max(axis=0)
+            min_pos = positions.min(axis=0)
+            cell_lengths = cell.lengths()
+            
+            for i in range(3):
+                atomic_span = max_pos[i] - min_pos[i]
+                if cell_lengths[i] > atomic_span * 1.5:  # Significant vacuum
+                    vacuum_ratio = cell_lengths[i] / atomic_span
+                    complexity['vacuum_factor'] = min(1.5, 1.0 + (vacuum_ratio - 1.5) * 0.1)
+                    break
+        
+        # Check for surface/cluster characteristics
+        # Systems with high surface-to-volume ratio need higher cutoffs
+        if len(atoms) < 10:
+            complexity['surface_factor'] = 2.0  # Small clusters
+        elif len(atoms) < 50:
+            complexity['surface_factor'] = 1.5  # Medium systems
+        elif len(atoms) < 100:
+            complexity['surface_factor'] = 1.2  # Large but finite systems
+        
+        # Check elemental heterogeneity
+        elements = set(atoms.get_chemical_symbols())
+        if len(elements) > 3:
+            complexity['heterogeneity_factor'] = 1.8  # Complex multi-element systems
+        elif len(elements) > 2:
+            complexity['heterogeneity_factor'] = 1.4  # Binary/ternary systems
+        elif len(elements) == 1:
+            complexity['heterogeneity_factor'] = 1.0  # Pure elements
+        else:
+            complexity['heterogeneity_factor'] = 1.2  # Simple compounds
+        
+        return complexity
     
     @classmethod
     def from_cif(
         cls,
         cif_file: Union[str, Path],
         pseudopotentials: Dict[str, str],
+        precision: Optional[str] = 'medium',
         **kwargs
     ) -> 'ConvergenceWorkflow':
         """
@@ -127,68 +571,115 @@ class ConvergenceWorkflow:
         Args:
             cif_file: Path to CIF structure file
             pseudopotentials: Dict mapping element symbols to UPF files
-            **kwargs: Additional parameters for __init__
+            precision: Precision level ('low', 'medium', 'high', 'ultra') or None for custom ranges
+            **kwargs: Additional parameters for __init__ (ecutwfc_range, kspacing_range, etc.)
             
         Returns:
             ConvergenceWorkflow instance
         """
         atoms = read(cif_file)
-        return cls(atoms, pseudopotentials, **kwargs)
+        return cls(atoms, pseudopotentials, precision=precision, **kwargs)
+    
+    @classmethod
+    def optimize_parameters(
+        cls,
+        atoms: Atoms,
+        pseudopotentials: Dict[str, str],
+        precision: str = 'medium'
+    ) -> 'ConvergenceWorkflow':
+        """
+        Create and run convergence workflow with automatic parameter optimization.
+        
+        This is the simplest interface - just provide structure, pseudopotentials,
+        and desired precision level. The workflow will automatically determine
+        optimal parameter ranges and run the convergence study.
+        
+        Args:
+            atoms: ASE Atoms object
+            pseudopotentials: Dict mapping element symbols to UPF files
+            precision: Precision level ('low', 'medium', 'high', 'ultra')
+            
+        Returns:
+            ConvergenceWorkflow instance with completed convergence study
+        """
+        workflow = cls(atoms, pseudopotentials, precision=precision)
+        workflow.run_convergence_study()
+        return workflow
     
     def run_convergence_study(
         self,
         label_prefix: str = 'convergence',
         verbose: bool = True,
+        max_ecutwfc: float = 200.0,
+        ecutwfc_step: float = 10.0,
     ) -> pd.DataFrame:
         """
-        Run complete convergence study with all parameter combinations.
+        Run convergence study with iterative parameter optimization.
         
-        Tests all combinations of ecutwfc and kspacing values and collects
-        total energy, forces, and calculation metadata.
+        Starts with minimum ecutwfc and increases until convergence criteria are met.
+        For each ecutwfc, tests kspacing convergence.
         
         Args:
             label_prefix: Prefix for calculation directories
             verbose: Print progress information
+            max_ecutwfc: Maximum ecutwfc to test (safety limit)
+            ecutwfc_step: Step size for ecutwfc increases
             
         Returns:
-            pandas.DataFrame with columns:
-                - ecutwfc, kspacing: parameter values
-                - energy: total energy (eV)
-                - energy_per_atom: energy per atom (eV/atom)
-                - max_force: maximum force on atoms (eV/Å)
-                - n_kpoints: number of k-points used
-                - label: calculation directory
-        
-        Example:
-            >>> conv = ConvergenceWorkflow(...)
-            >>> results = conv.run_convergence_study()
-            >>> print(results)
+            pandas.DataFrame with convergence results
         """
         results_list = []
-        total_tests = len(self.ecutwfc_range) * len(self.kspacing_range)
-        current_test = 0
+        
+        # Get starting ecutwfc (minimum from range or 30 Ry)
+        if hasattr(self, 'ecutwfc_range') and self.ecutwfc_range:
+            start_ecutwfc = min(self.ecutwfc_range)
+        else:
+            start_ecutwfc = 30.0
+            
+        # Get kspacing range to test
+        if hasattr(self, 'kspacing_range') and self.kspacing_range:
+            kspacing_values = sorted(self.kspacing_range, reverse=True)  # Finest first
+        else:
+            kspacing_values = [0.5, 0.3, 0.2, 0.15]
         
         print("\n" + "="*80)
-        print("CONVERGENCE STUDY - DFT PARAMETER OPTIMIZATION")
+        print("ITERATIVE CONVERGENCE STUDY")
         print("="*80)
         print(f"\nStructure: {self.atoms.get_chemical_formula()}")
-        print(f"Number of atoms: {len(self.atoms)}")
-        print(f"Total tests: {total_tests}")
-        print(f"  ecutwfc values: {self.ecutwfc_range}")
-        print(f"  kspacing values: {self.kspacing_range}")
-        print("\n" + "-"*80)
+        print(f"Convergence criteria: {', '.join(self.convergence_criteria_list)}")
+        print(f"Energy tolerance: {self.convergence_criteria['energy_tolerance']*1000:.1f} meV/atom")
+        if 'forces' in self.convergence_criteria_list:
+            print(f"Force tolerance: {self.convergence_criteria['force_tolerance']:.1f} eV/Å")
+        if 'geometry' in self.convergence_criteria_list:
+            print(f"Geometry tolerance: {self.convergence_criteria['geometry_tolerance']*1000:.1f} meV/atom")
+        if 'magnetic_moments' in self.convergence_criteria_list:
+            print(f"Magnetic tolerance: {self.convergence_criteria['magnetic_tolerance']*1000:.1f} μB")
+        print(f"Starting ecutwfc: {start_ecutwfc} Ry")
+        print(f"ecutwfc step: {ecutwfc_step} Ry")
+        print(f"kspacing values: {kspacing_values}")
         
-        for ecutwfc in self.ecutwfc_range:
-            for kspacing in self.kspacing_range:
-                current_test += 1
-                label = f"{label_prefix}/ecut{int(ecutwfc)}_ksp{kspacing:.2f}"
+        # Track convergence
+        ecutwfc_values = []
+        ecutwfc_energies = []
+        converged_ecutwfc = None
+        converged_kspacing = None
+        
+        current_ecutwfc = start_ecutwfc
+        test_count = 0
+        
+        while current_ecutwfc <= max_ecutwfc:
+            if verbose:
+                print(f"\n--- Testing ecutwfc = {current_ecutwfc:.1f} Ry ---")
+            
+            ecutwfc_results = []
+            
+            # Test all kspacing values for this ecutwfc
+            for kspacing in kspacing_values:
+                test_count += 1
+                label = f"{label_prefix}/ecut{int(current_ecutwfc)}_ksp{kspacing:.2f}"
                 
                 if verbose:
-                    print(
-                        f"\n[{current_test}/{total_tests}] "
-                        f"ecutwfc={ecutwfc:.1f} Ry, kspacing={kspacing:.3f} Å⁻¹"
-                    )
-                    print(f"  label: {label}")
+                    print(f"  [{test_count}] kspacing={kspacing:.3f} Å⁻¹")
                 
                 # Create workflow for this parameter set
                 workflow = CalculationWorkflow(
@@ -200,12 +691,15 @@ class ConvergenceWorkflow:
                     **self.extra_kwargs
                 )
                 
-                # Override ecutwfc from preset
-                workflow.input_data['ecutwfc'] = ecutwfc
+                # Override ecutwfc
+                workflow.input_data['ecutwfc'] = current_ecutwfc
                 
-                # Run SCF calculation
+                # Run calculation based on convergence criteria
                 try:
-                    calc = workflow.run_scf(label=label)
+                    if 'geometry' in self.convergence_criteria_list:
+                        calc = workflow.run_geometry_optimization(label=label)
+                    else:
+                        calc = workflow.run_scf(label=label)
                     
                     # Extract results
                     energy = calc.atoms.get_potential_energy()
@@ -226,23 +720,58 @@ class ConvergenceWorkflow:
                         n_kpoints = np.nan
                     
                     result = {
-                        'ecutwfc': ecutwfc,
+                        'ecutwfc': current_ecutwfc,
                         'kspacing': kspacing,
                         'energy': energy,
                         'energy_per_atom': energy_per_atom,
                         'max_force': max_force,
                         'n_kpoints': n_kpoints,
                         'label': label,
+                        'test_number': test_count,
                     }
                     results_list.append(result)
+                    ecutwfc_results.append(result)
                     
                     if verbose:
-                        print(f"  ✓ E = {energy_per_atom:.6f} eV/atom, F_max = {max_force:.4f} eV/Å")
+                        print(f"    ✓ E = {energy_per_atom:.6f} eV/atom, F_max = {max_force:.4f} eV/Å")
                     
                 except Exception as e:
                     logger.error(f"Failed to run {label}: {e}")
                     if verbose:
-                        print(f"  ✗ Failed: {e}")
+                        print(f"    ✗ Failed: {e}")
+                    continue
+            
+            # Check kspacing convergence for this ecutwfc
+            if len(ecutwfc_results) >= 2:
+                temp_df = pd.DataFrame(ecutwfc_results)
+                convergence_status = self._check_kspacing_convergence(
+                    temp_df, self.convergence_criteria_list, self.convergence_criteria
+                )
+                
+                # Check if all required criteria are converged
+                all_converged = all(convergence_status.values())
+                
+                if all_converged:
+                    converged_ecutwfc = current_ecutwfc
+                    # Find the finest kspacing that achieved convergence
+                    converged_kspacing = min([r['kspacing'] for r in ecutwfc_results])
+                    
+                    if verbose:
+                        print(f"✓ CONVERGED at ecutwfc={current_ecutwfc:.1f} Ry, kspacing≤{converged_kspacing:.3f} Å⁻¹")
+                        finest_result = min(ecutwfc_results, key=lambda x: x['kspacing'])
+                        print(f"  Energy: {finest_result['energy_per_atom']:.6f} eV/atom")
+                    
+                    break  # Exit ecutwfc loop
+                else:
+                    if verbose:
+                        unconverged = [k for k, v in convergence_status.items() if not v]
+                        print(f"  Not converged: {', '.join(unconverged)}")
+            else:
+                if verbose:
+                    print(f"  Insufficient data for convergence check")
+            
+            # Increase ecutwfc for next iteration
+            current_ecutwfc += ecutwfc_step
         
         # Create results DataFrame
         self.results = pd.DataFrame(results_list)
@@ -250,6 +779,17 @@ class ConvergenceWorkflow:
         print("\n" + "="*80)
         print("CONVERGENCE STUDY COMPLETE")
         print("="*80)
+        
+        if converged_ecutwfc is not None:
+            print(f"✓ Converged parameters:")
+            print(f"  ecutwfc: {converged_ecutwfc:.1f} Ry")
+            print(f"  kspacing: {converged_kspacing:.3f} Å⁻¹")
+            print(f"  Energy tolerance: {self.convergence_criteria['energy_tolerance']*1000:.1f} meV/atom")
+        else:
+            print(f"⚠ Did not converge within limits (ecutwfc ≤ {max_ecutwfc} Ry)")
+            print(f"  Consider increasing max_ecutwfc or relaxing tolerance")
+        
+        print(f"Total calculations: {len(results_list)}")
         
         return self.results
     

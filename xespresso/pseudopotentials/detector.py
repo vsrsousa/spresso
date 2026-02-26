@@ -166,11 +166,20 @@ def parse_upf_header(filepath: str) -> Dict[str, any]:
                 info['z_valence'] = float(z_match.group(1))
             
             # Extract suggested cutoff energy (in Ry)
-            # UPF v2 format: suggested_ecutwfc="40.0" or similar
+            # Try different formats:
+            # UPF v2 format: suggested_ecutwfc="40.0"
+            # SSSP format: Suggested minimum cutoff for wavefunctions:  29. Ry
             ecut_match = re.search(r'suggested_ecutwfc\s*=\s*["\']?([\d.]+)["\']?', content, re.IGNORECASE)
+            if not ecut_match:
+                # Try SSSP format
+                ecut_match = re.search(r'Suggested minimum cutoff for wavefunctions:\s*([\d.]+)', content, re.IGNORECASE)
+            
             if ecut_match:
                 try:
-                    info['suggested_ecutwfc'] = float(ecut_match.group(1))
+                    value = float(ecut_match.group(1))
+                    # Only store if value > 0 (some files have 0.0 meaning no suggestion)
+                    if value > 0:
+                        info['suggested_ecutwfc'] = value
                 except (ValueError, IndexError):
                     pass
             

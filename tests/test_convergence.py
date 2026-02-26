@@ -262,6 +262,98 @@ class TestConvergenceWorkflow(unittest.TestCase):
         self.assertIsNotNone(conv.results)
         self.assertEqual(len(conv.results), 2)
         self.assertListEqual(list(conv.results['ecutwfc']), [40, 50])
+    
+    def test_precision_based_initialization(self):
+        """Test initialization with precision levels."""
+        # Test all precision levels
+        precision_levels = ['low', 'medium', 'high', 'ultra']
+        
+        for precision in precision_levels:
+            with self.subTest(precision=precision):
+                conv = ConvergenceWorkflow(
+                    atoms=self.atoms,
+                    pseudopotentials=self.pseudopotentials,
+                    precision=precision
+                )
+                
+                # Check that ranges are set based on precision
+                self.assertIsNotNone(conv.ecutwfc_range)
+                self.assertIsNotNone(conv.kspacing_range)
+                self.assertEqual(conv.precision, precision)
+                
+                # Check that ranges are sorted appropriately
+                self.assertEqual(conv.ecutwfc_range, sorted(conv.ecutwfc_range))
+                self.assertEqual(conv.kspacing_range, sorted(conv.kspacing_range, reverse=True))
+        
+        # Test invalid precision
+        with self.assertRaises(ValueError):
+            ConvergenceWorkflow(
+                atoms=self.atoms,
+                pseudopotentials=self.pseudopotentials,
+                precision='invalid'
+            )
+    
+    def test_optimize_parameters_method(self):
+        """Test the optimize_parameters convenience method."""
+        with patch.object(ConvergenceWorkflow, 'run_convergence_study') as mock_run:
+            workflow = ConvergenceWorkflow.optimize_parameters(
+                atoms=self.atoms,
+                pseudopotentials=self.pseudopotentials,
+                precision='medium'
+            )
+            
+            # Check that workflow was created with correct precision
+            self.assertEqual(workflow.precision, 'medium')
+            # Check that run_convergence_study was called
+            mock_run.assert_called_once()
+    
+    def test_from_cif_with_precision(self):
+        """Test from_cif method with precision parameter."""
+        cif_path = Path(self.temp_dir) / 'test.cif'
+        self.atoms.write(str(cif_path))
+        
+        workflow = ConvergenceWorkflow.from_cif(
+            cif_file=str(cif_path),
+            pseudopotentials=self.pseudopotentials,
+            precision='high'
+        )
+        
+        self.assertEqual(workflow.precision, 'high')
+        self.assertIsNotNone(workflow.ecutwfc_range)
+        self.assertIsNotNone(workflow.kspacing_range)
+    
+    def test_automatic_range_adjustment_for_pseudopotentials(self):
+        """Test automatic range adjustment based on pseudopotential requirements."""
+        import tempfile
+        import os
+        
+        # Create a mock UPF file with high suggested ecutwfc
+        mock_upf_content = '''<PP_INFO>
+Element: Fe
+suggested_ecutwfc="120.0"
+</PP_INFO>'''
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.UPF', delete=False) as f:
+            f.write(mock_upf_content)
+            mock_upf_path = f.name
+        
+        try:
+            # Test with medium precision and a pseudopotential requiring high ecutwfc
+            pseudopotentials = {'Fe': mock_upf_path}
+            
+            workflow = ConvergenceWorkflow(
+                atoms=self.atoms,
+                pseudopotentials=pseudopotentials,
+                precision='medium'  # Base range: [40, 50, 60, 70]
+            )
+            
+            # The range should be extended to cover the suggested 120 Ry
+            # Expected: [40, 50, 60, 144.0] (120 * 1.2 = 144)
+            self.assertGreaterEqual(max(workflow.ecutwfc_range), 120.0)
+            self.assertEqual(len(workflow.ecutwfc_range), 4)  # Same number of points
+            
+        finally:
+            os.unlink(mock_upf_path)
 
 
 if __name__ == '__main__':

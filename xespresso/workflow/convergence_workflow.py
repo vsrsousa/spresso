@@ -122,12 +122,12 @@ class ConvergenceWorkflow:
             **kwargs: Additional parameters passed to CalculationWorkflow
         """
         self.atoms = atoms.copy()
-        # Allow user to pass either an explicit mapping or a saved pseudopotentials
-        # configuration name. If a config name is provided, load it and convert
-        # to element -> absolute UPF path mapping so downstream helpers (which
-        # parse UPF files) can operate without extra user work.
+        # Store pseudopotentials and config name. If config is provided, we pass the
+        # config name to CalculationWorkflow so it loads pseudopotentials the same way
+        # and has access to base_path for proper file resolution.
         self.pseudopotentials = {}
         self.pseudopotentials_base_path = None
+        self._pseudo_config_name = pseudopotentials_config
 
         if pseudopotentials_config is not None:
             from xespresso.pseudopotentials.manager import load_pseudopotentials_config
@@ -136,19 +136,16 @@ class ConvergenceWorkflow:
             if cfg is None:
                 raise ValueError(f"Pseudopotentials configuration '{pseudopotentials_config}' not found")
 
-            # store base path and build full paths for UPF files
+            # Store base path for use in convergence study analysis
             self.pseudopotentials_base_path = cfg.base_path if hasattr(cfg, 'base_path') else None
             
-            # Only load pseudopotentials for elements present in the structure
+            # Only load pseudopotentials for elements present in the structure (for analysis)
             required_elements = set(self.atoms.get_chemical_symbols())
             for el, pseudo in cfg.pseudopotentials.items():
-                # Only include if element is in the structure
                 if el in required_elements:
                     filename = pseudo.filename if hasattr(pseudo, 'filename') else str(pseudo)
-                    if self.pseudopotentials_base_path:
-                        self.pseudopotentials[el] = os.path.join(self.pseudopotentials_base_path, filename)
-                    else:
-                        self.pseudopotentials[el] = filename
+                    # Store FILENAME only (not full path) - CalculationWorkflow will resolve via config
+                    self.pseudopotentials[el] = filename
         else:
             if pseudopotentials is None:
                 raise ValueError("Must provide 'pseudopotentials' mapping or 'pseudopotentials_config' name")
@@ -968,14 +965,19 @@ class ConvergenceWorkflow:
                 })
             
             # Create base workflow for batch submission
-            # Note: Don't pass both queue and machine - if queue is already set
-            # (from machine loaded in __init__), don't pass machine again
+            # Pass pseudopotentials via config name (recommended) so CalculationWorkflow
+            # loads them the same way and has access to base_path
             workflow_kwargs = {
                 'atoms': self.atoms,
-                'pseudopotentials': self.pseudopotentials,
                 'protocol': self.protocol,
                 'code_version': self.code_version,
             }
+            
+            # Pass pseudopotentials via config name if available
+            if self._pseudo_config_name:
+                workflow_kwargs['pseudopotentials_config'] = self._pseudo_config_name
+            else:
+                workflow_kwargs['pseudopotentials'] = self.pseudopotentials
             
             # Pass either queue or machine (not both)
             if self.queue is not None:
@@ -987,10 +989,6 @@ class ConvergenceWorkflow:
             workflow_kwargs.update(self.extra_kwargs)
             
             workflow = CalculationWorkflow(**workflow_kwargs)
-            
-            # Copy the pseudopotentials_base_path if it exists (for remote transfer)
-            if hasattr(self, 'pseudopotentials_base_path') and self.pseudopotentials_base_path:
-                workflow.pseudopotentials_base_path = self.pseudopotentials_base_path
             
             # Submit all jobs in batch
             if verbose:
@@ -1095,15 +1093,19 @@ class ConvergenceWorkflow:
                     print(f"  [{test_count}] kspacing={kspacing:.3f} Å⁻¹")
                 
                 # Create workflow for this parameter set
-                # Note: Don't pass both queue and machine - if queue is already set
-                # (from machine loaded in __init__), don't pass machine again
+                # Pass pseudopotentials via config name if available
                 workflow_kwargs = {
                     'atoms': self.atoms,
-                    'pseudopotentials': self.pseudopotentials,
                     'protocol': self.protocol,
                     'kspacing': kspacing,
                     'code_version': self.code_version,
                 }
+                
+                # Pass pseudopotentials via config name if available
+                if self._pseudo_config_name:
+                    workflow_kwargs['pseudopotentials_config'] = self._pseudo_config_name
+                else:
+                    workflow_kwargs['pseudopotentials'] = self.pseudopotentials
                 
                 # Pass either queue or machine (not both)
                 if self.queue is not None:
@@ -1115,10 +1117,6 @@ class ConvergenceWorkflow:
                 workflow_kwargs.update(self.extra_kwargs)
                 
                 workflow = CalculationWorkflow(**workflow_kwargs)
-                
-                # Copy the pseudopotentials_base_path if it exists (for remote transfer)
-                if hasattr(self, 'pseudopotentials_base_path') and self.pseudopotentials_base_path:
-                    workflow.pseudopotentials_base_path = self.pseudopotentials_base_path
                 
                 # Override ecutwfc
                 workflow.input_data['ecutwfc'] = current_ecutwfc

@@ -1334,9 +1334,16 @@ class CalculationWorkflow:
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
                 calc.remote = calc.scheduler.remote
             
-            # Step 3: Monitor SLURM job status (detect stuck jobs)
-            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
-            job_id = calc.last_job_id
+            # Step 3: Get job ID and monitor SLURM job status
+            job_id = getattr(calc, 'last_job_id', None)
+            
+            if job_id is None:
+                raise RuntimeError(
+                    "Remote job submission failed: No job ID returned from scheduler. "
+                    "Please check scheduler configuration and job submission logs."
+                )
+            
+            logger.info(f"Remote job {job_id} submitted. Monitoring SLURM status...")
             timeout = self.queue.get('job_timeout', 3600)
             job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
             
@@ -2127,8 +2134,15 @@ class CalculationWorkflow:
                 calc.remote = calc.scheduler.remote
             
             # Step 3: Monitor SLURM job status (detect stuck jobs)
-            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
-            job_id = calc.last_job_id
+            job_id = getattr(calc, 'last_job_id', None)
+            
+            if job_id is None:
+                raise RuntimeError(
+                    "Remote job submission failed: No job ID returned from scheduler. "
+                    "Check scheduler configuration and job submission logs."
+                )
+            
+            logger.info(f"Remote job {job_id} submitted. Monitoring SLURM status...")
             timeout = self.queue.get('job_timeout', 3600)
             job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
             

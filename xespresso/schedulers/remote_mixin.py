@@ -221,6 +221,23 @@ class RemoteExecutionMixin:
                 command = f"cd {self.remote_path} && {env_setup} && {self.submit_command()}"
                 stdout, stderr = self.remote.run_command(command)
                 
+                # Check for SLURM service errors
+                slurm_error_indicators = [
+                    "slurmctld is inactive",
+                    "Unable to contact slurmd",
+                    "error: ",
+                    "Connection refused",
+                    "slurm_load_jobs error"
+                ]
+                
+                combined_output = (stdout + " " + stderr).lower()
+                for error in slurm_error_indicators:
+                    if error.lower() in combined_output:
+                        error_msg = f"SLURM service appears to be down or unreachable. Check 'slurmctld' status on {self.queue['remote_host']}.\nstdout: {stdout}\nstderr: {stderr}"
+                        if hasattr(self, "logger"):
+                            self.logger.error(error_msg)
+                        raise RuntimeError(error_msg)
+                
                 import re
                 match = re.search(r"Submitted batch job (\d+)", stdout)
                 job_id = match.group(1) if match else None
@@ -235,8 +252,10 @@ class RemoteExecutionMixin:
                     self.calc.remote = self.remote
                     return stdout, stderr
                 else:
+                    error_msg = f"Could not extract SLURM job ID from sbatch output.\nstdout: {stdout}\nstderr: {stderr}"
                     if hasattr(self, "logger"):
-                        self.logger.warning("Could not extract SLURM job ID from sbatch output")
+                        self.logger.error(error_msg)
+                    raise RuntimeError(error_msg)
             else:
                 # Direct scheduler: run in background and capture PID
                 # Redirect output to log files and run in background
@@ -264,6 +283,23 @@ class RemoteExecutionMixin:
             
             # If SLURM, extract job ID and wait for completion
             if self.queue.get("scheduler") == "slurm":
+                # Check for SLURM service errors
+                slurm_error_indicators = [
+                    "slurmctld is inactive",
+                    "Unable to contact slurmd",
+                    "error: ",
+                    "Connection refused",
+                    "slurm_load_jobs error"
+                ]
+                
+                combined_output = (stdout + " " + stderr).lower()
+                for error in slurm_error_indicators:
+                    if error.lower() in combined_output:
+                        error_msg = f"SLURM service appears to be down or unreachable. Check 'slurmctld' status on {self.queue['remote_host']}.\nstdout: {stdout}\nstderr: {stderr}"
+                        if hasattr(self, "logger"):
+                            self.logger.error(error_msg)
+                        raise RuntimeError(error_msg)
+                
                 import re
                 
                 match = re.search(r"Submitted batch job (\d+)", stdout)
@@ -274,8 +310,10 @@ class RemoteExecutionMixin:
                         self.logger.info(f"Job submitted with ID: {job_id}")
                     self._wait_for_slurm_completion(job_id)
                 else:
+                    error_msg = f"Could not extract job ID from sbatch output.\nstdout: {stdout}\nstderr: {stderr}"
                     if hasattr(self, "logger"):
-                        self.logger.warning("Could not extract job ID from sbatch output")
+                        self.logger.error(error_msg)
+                    raise RuntimeError(error_msg)
             
             # For both SLURM (after completion) and direct (already completed),
             # verify and retrieve output file

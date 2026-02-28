@@ -358,13 +358,15 @@ def create_pseudopotentials_config(name: str,
 
 
 def load_pseudopotentials_config(name: str,
-                                 pseudopotentials_dir: str = DEFAULT_PSEUDOPOTENTIALS_DIR) -> Optional[PseudopotentialsConfig]:
+                                 pseudopotentials_dir: str = DEFAULT_PSEUDOPOTENTIALS_DIR,
+                                 verbose: bool = True) -> Optional[PseudopotentialsConfig]:
     """
     Load a pseudopotentials configuration from file.
     
     Args:
         name: Name of the configuration
         pseudopotentials_dir: Directory containing configurations
+        verbose: If True, print loading information; if False, load silently
     
     Returns:
         PseudopotentialsConfig object or None if not found
@@ -372,18 +374,20 @@ def load_pseudopotentials_config(name: str,
     config = PseudopotentialsManager.load_config(name, pseudopotentials_dir)
     
     if config:
-        location = f"on remote machine '{config.machine_name}'" if config.machine_name else "locally"
-        print(f"✅ Loaded pseudopotentials configuration '{name}' ({location})")
-        print(f"   Base path: {config.base_path}")
-        print(f"   Elements: {len(config.pseudopotentials)} ({', '.join(config.list_elements())})")
-        if config.functional:
-            print(f"   Functional: {config.functional}")
-        if config.library:
-            lib_str = f"   Library: {config.library}"
-            if config.version:
-                lib_str += f" v{config.version}"
-            print(lib_str)
+        if verbose:
+            location = f"on remote machine '{config.machine_name}'" if config.machine_name else "locally"
+            print(f"✅ Loaded pseudopotentials configuration '{name}' ({location})")
+            print(f"   Base path: {config.base_path}")
+            print(f"   Elements: {len(config.pseudopotentials)}")
+            if config.functional:
+                print(f"   Functional: {config.functional}")
+            if config.library:
+                lib_str = f"   Library: {config.library}"
+                if config.version:
+                    lib_str += f" v{config.version}"
+                print(lib_str)
     else:
-        print(f"⚠️  No pseudopotentials configuration found for '{name}'")
+        if verbose:
+            print(f"⚠️  No pseudopotentials configuration found for '{name}'")
     
     return config

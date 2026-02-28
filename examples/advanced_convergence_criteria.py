@@ -24,25 +24,28 @@ def demonstrate_convergence_criteria():
     print("• 'geometry': Atomic position/geometry convergence")
     print("• 'magnetic_moments': Magnetic moment convergence")
     print()
+    print("NOTE: Criteria are INDEPENDENT of precision level!")
+    print("You can use any combination of criteria with any precision level.")
+    print()
 
-    # Example 1: Energy only (fastest)
+    # Example 1: Energy only (fastest) - can be used with any precision
     print("1. Energy-only convergence (fastest):")
     workflow1 = ConvergenceWorkflow(
         atoms=atoms,
         pseudopotentials=pseudopotentials,
-        precision='medium',
+        precision='medium',  # Any precision level works
         convergence_criteria_list=['energy']
     )
     print(f"   Criteria: {workflow1.convergence_criteria_list}")
     print(f"   Tolerances: Energy = {workflow1.convergence_criteria['energy_tolerance']*1000:.1f} meV/atom")
     print()
 
-    # Example 2: Energy + Forces
+    # Example 2: Energy + Forces - can be used with any precision
     print("2. Energy + Forces convergence:")
     workflow2 = ConvergenceWorkflow(
         atoms=atoms,
         pseudopotentials=pseudopotentials,
-        precision='medium',
+        precision='low',  # Even low precision can check forces!
         convergence_criteria_list=['energy', 'forces']
     )
     print(f"   Criteria: {workflow2.convergence_criteria_list}")
@@ -50,19 +53,33 @@ def demonstrate_convergence_criteria():
     print(f"               Forces = {workflow2.convergence_criteria['force_tolerance']:.1f} eV/Å")
     print()
 
-    # Example 3: Full convergence (slowest but most accurate)
-    print("3. Full convergence (energy + forces + geometry + magnetic):")
+    # Example 3: Full convergence with LOW precision (unusual but possible!)
+    print("3. Full convergence with LOW precision (demonstrates flexibility):")
     workflow3 = ConvergenceWorkflow(
         atoms=atoms,
         pseudopotentials=pseudopotentials,
-        precision='high',
-        convergence_criteria_list=['energy', 'forces', 'geometry', 'magnetic_moments']
+        precision='low',  # Low precision parameters
+        convergence_criteria_list=['energy', 'forces', 'geometry', 'magnetic_moments']  # But strict criteria
     )
-    print(f"   Criteria: {workflow3.convergence_criteria_list}")
+    print(f"   Precision: {workflow3.precision} (coarse parameter ranges)")
+    print(f"   Criteria: {workflow3.convergence_criteria_list} (strict convergence checks)")
     print(f"   Tolerances: Energy = {workflow3.convergence_criteria['energy_tolerance']*1000:.1f} meV/atom")
     print(f"               Forces = {workflow3.convergence_criteria['force_tolerance']:.1f} eV/Å")
     print(f"               Geometry = {workflow3.convergence_criteria['geometry_tolerance']*1000:.1f} Å")
     print(f"               Magnetic = {workflow3.convergence_criteria['magnetic_tolerance']*1000:.1f} μB")
+    print()
+
+    # Example 4: Simple convergence with ULTRA precision
+    print("4. Simple convergence with ULTRA precision:")
+    workflow4 = ConvergenceWorkflow(
+        atoms=atoms,
+        pseudopotentials=pseudopotentials,
+        precision='ultra',  # Ultra precision parameters
+        convergence_criteria_list=['energy']  # But only energy check
+    )
+    print(f"   Precision: {workflow4.precision} (very fine parameter ranges)")
+    print(f"   Criteria: {workflow4.convergence_criteria_list} (only energy)")
+    print(f"   Tolerances: Energy = {workflow4.convergence_criteria['energy_tolerance']*1000:.1f} meV/atom")
     print()
 
     # Example 4: Custom tolerances

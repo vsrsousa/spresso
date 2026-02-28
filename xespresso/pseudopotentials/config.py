@@ -179,6 +179,9 @@ class PseudopotentialsConfig:
         Returns:
             PseudopotentialsConfig object
         """
+        # Extract base_path before popping (needed for reconstructing paths)
+        base_path = data.get('base_path')
+        
         # Extract pseudopotentials and convert them
         pseudos_data = data.pop('pseudopotentials', {})
         
@@ -189,6 +192,19 @@ class PseudopotentialsConfig:
             if isinstance(pseudo_data, Pseudopotential):
                 config.pseudopotentials[element] = pseudo_data
             else:
+                # Handle incomplete pseudo_data by reconstructing missing required fields
+                if not isinstance(pseudo_data, dict):
+                    pseudo_data = {'filename': str(pseudo_data)}
+                
+                # Ensure element is set (use the key as element)
+                if 'element' not in pseudo_data:
+                    pseudo_data['element'] = element
+                
+                # Reconstruct path if missing (combine base_path + filename)
+                if 'path' not in pseudo_data and base_path and 'filename' in pseudo_data:
+                    import os
+                    pseudo_data['path'] = os.path.join(base_path, pseudo_data['filename'])
+                
                 config.pseudopotentials[element] = Pseudopotential.from_dict(pseudo_data)
         
         return config

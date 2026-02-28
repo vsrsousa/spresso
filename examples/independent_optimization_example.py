@@ -24,6 +24,10 @@ def demonstrate_independent_optimization():
     print("1. Phase 1: Converge ecutwfc using coarse kspacing (efficient)")
     print("2. Phase 2: Converge kspacing using lower ecutwfc (fast)")
     print()
+    print("KEY: Precision controls PARAMETER RANGES, criteria control CONVERGENCE CHECKS")
+    print("Ranges are automatically adjusted based on pseudopotential requirements!")
+    print("You can mix any precision level with any convergence criteria!")
+    print()
 
     # Example 1: Simple optimization with medium precision
     print("Example 1: Medium precision optimization")
@@ -59,26 +63,48 @@ def demonstrate_independent_optimization():
         print("Note: This is expected if QE/xespresso is not properly configured")
         print()
 
-    # Example 2: High precision with custom criteria
-    print("Example 2: High precision with custom convergence criteria")
-    print("-" * 55)
+    # Example 2: Low precision with strict criteria (unusual combination!)
+    print("Example 2: Low precision parameters + strict convergence criteria")
+    print("-" * 60)
 
     try:
         optimal_params = ConvergenceWorkflow.optimize_parameters(
             atoms=atoms,
             pseudopotentials=pseudopotentials,
-            precision='high',
-            convergence_criteria_list=['energy', 'forces'],
-            convergence_criteria={
-                'energy_tolerance': 1e-3,  # 1 meV/atom
-                'force_tolerance': 0.1,    # 0.1 eV/Å
-            },
+            precision='low',  # Coarse parameter ranges
+            convergence_criteria_list=['energy', 'forces', 'geometry'],  # But strict criteria
             verbose=True
         )
 
         print("Results:")
         print(f"  Optimal ecutwfc: {optimal_params['ecutwfc']} Ry")
         print(f"  Optimal kspacing: {optimal_params['kspacing']} Å⁻¹")
+        print(f"  Precision: {optimal_params['precision']} (coarse ranges)")
+        print(f"  Criteria: {optimal_params['convergence_criteria']} (strict checks)")
+        print()
+
+    except Exception as e:
+        print(f"Error during optimization: {e}")
+        print()
+
+    # Example 3: Ultra precision with minimal criteria
+    print("Example 3: Ultra precision parameters + minimal convergence criteria")
+    print("-" * 65)
+
+    try:
+        optimal_params = ConvergenceWorkflow.optimize_parameters(
+            atoms=atoms,
+            pseudopotentials=pseudopotentials,
+            precision='ultra',  # Very fine parameter ranges
+            convergence_criteria_list=['energy'],  # But only energy check
+            verbose=True
+        )
+
+        print("Results:")
+        print(f"  Optimal ecutwfc: {optimal_params['ecutwfc']} Ry")
+        print(f"  Optimal kspacing: {optimal_params['kspacing']} Å⁻¹")
+        print(f"  Precision: {optimal_params['precision']} (very fine ranges)")
+        print(f"  Criteria: {optimal_params['convergence_criteria']} (minimal checks)")
         print()
 
     except Exception as e:

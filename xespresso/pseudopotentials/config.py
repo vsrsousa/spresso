@@ -37,8 +37,25 @@ class Pseudopotential:
     
     @classmethod
     def from_dict(cls, data: Dict) -> 'Pseudopotential':
-        """Create Pseudopotential from dictionary."""
-        return cls(**data)
+        """Create Pseudopotential from dictionary. 
+        
+        Handles incomplete data by providing defaults for optional fields.
+        """
+        # Ensure required fields
+        if 'element' not in data:
+            raise ValueError("Pseudopotential data must contain 'element'")
+        if 'filename' not in data:
+            raise ValueError("Pseudopotential data must contain 'filename'")
+        if 'path' not in data:
+            # If path is missing, use filename as placeholder
+            data = dict(data)  # Make a copy to avoid modifying original
+            data['path'] = data.get('filename', '')
+        
+        # Filter to only include fields that Pseudopotential accepts
+        init_fields = {'element', 'filename', 'path', 'functional', 'type', 'z_valence', 'suggested_ecutwfc'}
+        filtered_data = {k: v for k, v in data.items() if k in init_fields and v is not None}
+        
+        return cls(**filtered_data)
 
 
 @dataclass

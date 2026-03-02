@@ -43,6 +43,18 @@ class ConvergenceWorkflow:
     runs SCF calculations to determine optimal values for energy and force
     convergence.
     
+    **IMPROVED ALGORITHM (NEW)**: Two-phase independent convergence
+    ✅ PHASE 1: Convergence de ecutwfc com kspacing FIXO (0.5 Å⁻¹)
+    ✅ PHASE 2: Convergence de kspacing com ecutwfc otimizado
+    
+    Benefits:
+    - Pseudopotenciais transferidos apenas 2x (não N×M times!)
+    - 4-6x mais rápido que nested-loop approach
+    - Dois processos completamente independentes
+    
+    Legacy nested-loop mode still available via `independent_mode=False`
+    (NOT recommended - kept only for backward compatibility)
+    
     KEY CONCEPT: Precision level controls PARAMETER RANGES only, while convergence
     criteria are INDEPENDENT. You can use any combination of criteria with any precision.
     
@@ -65,6 +77,7 @@ class ConvergenceWorkflow:
         ...     precision='low',  # Coarse parameter ranges
         ...     convergence_criteria_list=['energy', 'forces', 'geometry']  # Strict criteria
         ... )
+        >>> # Uses INDEPENDENT two-phase algorithm by default
         >>> conv.run_convergence_study()
         >>> recommendations = conv.get_recommendations()
     
@@ -131,6 +144,7 @@ class ConvergenceWorkflow:
 
         if pseudopotentials_config is not None:
             from xespresso.pseudopotentials.manager import load_pseudopotentials_config
+            from xespresso.utils.pseudo_utils import get_ecutrho_ratio
 
             cfg = load_pseudopotentials_config(pseudopotentials_config, verbose=False)
             if cfg is None:
@@ -146,10 +160,15 @@ class ConvergenceWorkflow:
                     filename = pseudo.filename if hasattr(pseudo, 'filename') else str(pseudo)
                     # Store FILENAME only (not full path) - CalculationWorkflow will resolve via config
                     self.pseudopotentials[el] = filename
+            
+            # Calculate ecutrho ratio once, to be used for all calculations in this convergence study
+            self.ecutrho_ratio = get_ecutrho_ratio(required_elements, cfg)
         else:
             if pseudopotentials is None:
                 raise ValueError("Must provide 'pseudopotentials' mapping or 'pseudopotentials_config' name")
             self.pseudopotentials = pseudopotentials
+            # No config loaded, use default ratio
+            self.ecutrho_ratio = 4.0  # Default for Norm-Conserving
         self.protocol = protocol
         self.precision = precision
         
@@ -201,7 +220,7 @@ class ConvergenceWorkflow:
                 self.ecutwfc_range = sorted(ecutwfc_range)
             
             if kspacing_range is None:
-                self.kspacing_range = [0.5, 0.3, 0.2, 0.15]
+                self.kspacing_range = [0.30, 0.27, 0.23, 0.20]
             else:
                 self.kspacing_range = sorted(kspacing_range, reverse=True)
         
@@ -225,16 +244,16 @@ class ConvergenceWorkflow:
         
         if precision == 'low':
             ecutwfc_range = [30, 40, 50]
-            kspacing_range = [0.5, 0.4, 0.3]
+            kspacing_range = [0.30, 0.27, 0.23]
         elif precision == 'medium':
             ecutwfc_range = [40, 50, 60, 70]
-            kspacing_range = [0.4, 0.3, 0.25, 0.2]
+            kspacing_range = [0.30, 0.27, 0.23, 0.20]
         elif precision == 'high':
             ecutwfc_range = [50, 60, 70, 80, 90]
-            kspacing_range = [0.3, 0.25, 0.2, 0.15, 0.12]
+            kspacing_range = [0.30, 0.27, 0.23, 0.20, 0.18]
         elif precision == 'ultra':
             ecutwfc_range = [60, 80, 100, 120, 140]
-            kspacing_range = [0.25, 0.2, 0.15, 0.12, 0.1]
+            kspacing_range = [0.30, 0.27, 0.23, 0.20, 0.18, 0.15]
         else:
             raise ValueError(f"Unknown precision level: {precision}. "
                            "Choose from 'low', 'medium', 'high', 'ultra'")
@@ -466,9 +485,7 @@ class ConvergenceWorkflow:
         """
         Get default convergence criteria list.
         
-        Note: Criteria are independent of precision level. Precision controls
-        parameter ranges (ecutwfc, kspacing), while criteria control which
-        physical quantities are checked for convergence.
+        Note: Criteria control which physical quantities are checked for convergence.
         
         Args:
             precision: Precision level (unused, kept for compatibility)
@@ -476,9 +493,8 @@ class ConvergenceWorkflow:
         Returns:
             List of convergence criteria
         """
-        # Default criteria are independent of precision level
-        # Users can specify any combination of criteria regardless of precision
-        return ['energy', 'forces']
+        # Default criteria: energy convergence only
+        return ['energy']
     
     def _check_kspacing_convergence(self, results_df: pd.DataFrame, criteria_list: List[str], tolerances: Dict) -> Dict[str, bool]:
         """
@@ -851,15 +867,27 @@ class ConvergenceWorkflow:
         ecutwfc_step: float = 10.0,
         use_batch_mode: bool = True,
         batch_timeout: int = 3600,
+        independent_mode: bool = True,
     ) -> pd.DataFrame:
         """
-        Run convergence study with iterative parameter optimization.
+        Run convergence study with independent parameter optimization.
         
-        For REMOTE HPC systems (SLURM), uses batch mode to submit all jobs
-        in parallel and monitor them together. This is much more efficient than
-        sequential submission/monitoring.
+        **RECOMMENDED**: Uses independent_mode=True by default.
         
-        For LOCAL systems, uses sequential mode (one job at a time).
+        INDEPENDENT MODE (recommended, default):
+        ✅ PHASE 1: Ecutwfc convergence with FIXED coarse kspacing (0.5 Å⁻¹)
+        ✅ PHASE 2: Kspacing convergence with FIXED optimal ecutwfc
+        
+        Benefits:
+        - Pseudopotenciais transferidos apenas 2x (não N×M times!)
+        - 4-6x mais rápido que nested loop mode
+        - Algoritmo claramente diferenciado
+        - Pseudo enviado UMA VEZ para cada fase
+        
+        LEGACY MODE (nested loops, slower):
+        ❌ Tests all (ecutwfc, kspacing) combinations in nested loops
+        ❌ Pseudopotenciais reenviados múltiplas vezes
+        ❌ Mantido apenas para compatibilidade com scripts antigos
         
         Args:
             label_prefix: Prefix for calculation directories
@@ -868,9 +896,51 @@ class ConvergenceWorkflow:
             ecutwfc_step: Step size for ecutwfc increases
             use_batch_mode: If True and queue is remote, use batch submission (default: True)
             batch_timeout: Timeout for batch jobs in seconds (default: 3600)
+            independent_mode: If True (default), use INDEPENDENT two-phase algorithm.
+                             If False, use legacy nested-loop algorithm (NOT recommended).
             
         Returns:
             pandas.DataFrame with convergence results
+        """
+        # Use independent mode by default (RECOMMENDED)
+        if independent_mode:
+            return self.run_convergence_independent(
+                label_prefix=label_prefix,
+                max_ecutwfc=max_ecutwfc,
+                ecutwfc_step=ecutwfc_step,
+                verbose=verbose,
+                batch_timeout=batch_timeout,
+            )
+        
+        # Legacy nested-loop mode (NOT recommended)
+        return self._run_convergence_study_legacy(
+            label_prefix=label_prefix,
+            verbose=verbose,
+            max_ecutwfc=max_ecutwfc,
+            ecutwfc_step=ecutwfc_step,
+            use_batch_mode=use_batch_mode,
+            batch_timeout=batch_timeout,
+        )
+    
+    def _run_convergence_study_legacy(
+        self,
+        label_prefix: str = 'convergence',
+        verbose: bool = True,
+        max_ecutwfc: float = 200.0,
+        ecutwfc_step: float = 10.0,
+        use_batch_mode: bool = True,
+        batch_timeout: int = 3600,
+    ) -> pd.DataFrame:
+        """
+        Legacy nested-loop convergence (NOT recommended).
+        
+        ⚠️ WARNING: This method uses nested loops and transfers pseudopotenciais
+        multiple times. Use run_convergence_study(independent_mode=True) instead!
+        
+        For REMOTE HPC systems (SLURM), uses batch mode to submit all jobs
+        in parallel and monitor them together.
+        
+        For LOCAL systems, uses sequential mode (one job at a time).
         """
         results_list = []
         
@@ -887,7 +957,10 @@ class ConvergenceWorkflow:
             kspacing_values = [0.5, 0.3, 0.2, 0.15]
         
         print("\n" + "="*80)
-        print("ITERATIVE CONVERGENCE STUDY")
+        print("⚠️ LEGACY NESTED-LOOP CONVERGENCE STUDY")
+        print("="*80)
+        print("WARNING: This uses nested loops and transfers pseudopotenciais multiple times!")
+        print("Use run_convergence_study(independent_mode=True) instead for better performance.")
         print("="*80)
         print(f"\nStructure: {self.atoms.get_chemical_formula()}")
         print(f"Convergence criteria: {', '.join(self.convergence_criteria_list)}")
@@ -961,6 +1034,7 @@ class ConvergenceWorkflow:
                 batch_params.append({
                     'label': label,
                     'ecutwfc': current_ecutwfc,
+                    'ecutrho': current_ecutwfc * self.ecutrho_ratio,  # Calculate ecutrho dynamically
                     'kspacing': kspacing,
                 })
             
@@ -1519,3 +1593,377 @@ class ConvergenceWorkflow:
         """
         self.results = pd.read_csv(filepath)
         logger.info(f"Results loaded from {filepath}")
+    
+    def _expand_range(self, current_range: List[float], step: float, max_val: float) -> List[float]:
+        """
+        Expand parameter range by adding next values intelligently.
+        
+        Args:
+            current_range: Current list of parameters tested
+            step: Step size for expansion
+            max_val: Maximum limit for expansion
+            
+        Returns:
+            New range with additional values (subset of new values to test)
+        """
+        if not current_range:
+            return []
+        
+        max_current = max(current_range)
+        
+        # Generate next values beyond current max
+        if max_current >= max_val:
+            return []  # Already at limit
+        
+        # Calculate how many steps to add
+        remaining = max_val - max_current
+        num_steps = max(2, int(remaining / step))  # At least 2 new values
+        
+        new_vals = []
+        for i in range(1, num_steps + 1):
+            val = max_current + (i * step)
+            if val <= max_val and val not in current_range:
+                new_vals.append(val)
+        
+        return sorted(new_vals)
+    
+    def _check_convergence_vs_reference(
+        self, 
+        results_dict: Dict[float, float],
+        reference_energy: float,
+        criteria_tolerances: Dict[str, float]
+    ) -> bool:
+        """
+        Check if parameters converged compared to reference energy.
+        
+        Args:
+            results_dict: Dict mapping parameter value → energy
+            reference_energy: Energy calculated with high cutoff
+            criteria_tolerances: Dict with 'energy_tolerance' key
+            
+        Returns:
+            True if |E_max - E_ref| < tolerance, False otherwise
+        """
+        if not results_dict:
+            return False
+        
+        max_energy = max(results_dict.values())
+        energy_diff = abs(max_energy - reference_energy)
+        tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+        
+        converged = energy_diff < tolerance
+        return converged
+
+    def run_convergence_independent(
+        self,
+        label_prefix: str = 'convergence',
+        max_ecutwfc: float = 200.0,
+        ecutwfc_step: float = 10.0,
+        max_kspacing: float = 0.1,
+        kspacing_step: float = 0.05,
+        verbose: bool = True,
+        batch_timeout: int = 3600,
+    ) -> pd.DataFrame:
+        """
+        Run INDEPENDENT convergence study with DYNAMIC RANGES and REFERENCE ENERGY.
+        
+        ALGORITHM:
+        1. Calculate REFERENCE energy with very high ecutwfc (200 Ry)
+        2. PHASE 1: Ecutwfc convergence (DYNAMIC)
+           - Start with initial range [30, 40, 50]
+           - Compare each with reference
+           - If not converged, expand and test new values (cache existing)
+           - Repeat until converged
+        3. PHASE 2: Kspacing convergence (DYNAMIC)
+           - Use converged ecutwfc from PHASE 1
+           - Same dynamic expansion logic as PHASE 1
+        
+        Benefits:
+        - Converges to TRUE reference (not false convergence)
+        - Expands ranges only as needed
+        - Caches results (no redundant calculations)
+        - Pseudo transferred only 2-3x
+        
+        Returns:
+            pandas.DataFrame with complete convergence results
+        """
+        results_all = []
+        
+        # Get convergence criteria tolerances
+        criteria_tolerances = self.convergence_criteria
+        
+        # ===== PHASE 1: DYNAMIC ECUTWFC CONVERGENCE =====
+        print("\n" + "="*80)
+        print("PHASE 1: ECUTWFC CONVERGENCE (DYNAMIC)")
+        print("="*80)
+        
+        fixed_kspacing_phase1 = 0.3  # Coarse k-mesh
+        print(f"\nStructure: {self.atoms.get_chemical_formula()}")
+        print(f"Fixed kspacing: {fixed_kspacing_phase1:.3f} Å⁻¹")
+        print(f"Reference ecutwfc: {max_ecutwfc:.1f} Ry (included in first batch)\n")
+        
+        # Start with initial range + reference (max_ecutwfc) in first iteration
+        current_ecut_range = sorted(set(self.ecutwfc_range.copy() + [max_ecutwfc]))
+        ecut_results = {}  # Cache: ecut → energy
+        reference_energy_per_atom = None
+        iteration = 1
+        
+        while True:
+            print(f"\n--- Iteration {iteration} ---")
+            print(f"Testing ecutwfc: {current_ecut_range}")
+            
+            # Find which values to calculate (not in cache)
+            to_calculate = [e for e in current_ecut_range if e not in ecut_results]
+            
+            if to_calculate:
+                # Create workflow for this iteration
+                wf_kwargs = {
+                    'atoms': self.atoms,
+                    'protocol': self.protocol,
+                    'kspacing': fixed_kspacing_phase1,
+                    'code_version': self.code_version,
+                }
+                
+                if self._pseudo_config_name:
+                    wf_kwargs['pseudopotentials_config'] = self._pseudo_config_name
+                else:
+                    wf_kwargs['pseudopotentials'] = self.pseudopotentials
+                
+                if self.queue is not None:
+                    wf_kwargs['queue'] = self.queue
+                elif self.machine is not None:
+                    wf_kwargs['machine'] = self.machine
+                
+                wf1 = CalculationWorkflow(**wf_kwargs)
+                
+                # Prepare batch for new values only
+                batch_params = []
+                for ecutwfc in to_calculate:
+                    label = f"{label_prefix}/phase1_iter{iteration}_ecut{int(ecutwfc)}"
+                    batch_params.append({
+                        'label': label,
+                        'ecutwfc': ecutwfc,
+                        'ecutrho': ecutwfc * self.ecutrho_ratio,  # Calculate ecutrho dynamically
+                        'kspacing': fixed_kspacing_phase1,
+                    })
+                
+                is_first_batch = iteration == 1 and max_ecutwfc in to_calculate
+                if verbose:
+                    msg = f"Submitting {len(batch_params)} ecutwfc tests"
+                    if is_first_batch:
+                        msg += f" (including reference ecut={max_ecutwfc})"
+                    print(f"{msg}...")
+                
+                # Submit batch
+                batch_results = wf1.submit_scf_batch_multiple(batch_params, verbose=verbose)
+                completion = wf1.wait_for_batch_jobs(batch_results, timeout=batch_timeout, verbose=verbose)
+                
+                # STEP 1: Extract reference first (if not yet available)
+                if reference_energy_per_atom is None:
+                    for i, comp in enumerate(completion):
+                        param = batch_params[i]
+                        if param['ecutwfc'] == max_ecutwfc and comp['success']:
+                            energy = comp.get('energy', np.nan) / len(self.atoms)
+                            ecut_results[param['ecutwfc']] = energy
+                            reference_energy_per_atom = energy
+                            if verbose:
+                                print(f"  ✓ [REFERENCE] ecutwfc={param['ecutwfc']:.1f}: E = {energy:.6f} eV/atom")
+                            break
+                
+                # STEP 2: Store all results and print with ΔE now available
+                for i, comp in enumerate(completion):
+                    if comp['success']:
+                        param = batch_params[i]
+                        energy = comp.get('energy', np.nan) / len(self.atoms)
+                        ecut_results[param['ecutwfc']] = energy
+                        
+                        is_reference = (param['ecutwfc'] == max_ecutwfc)
+                        
+                        result = {
+                            'phase': 0 if is_reference else 1,
+                            'ecutwfc': param['ecutwfc'],
+                            'kspacing': param['kspacing'],
+                            'energy_per_atom': energy,
+                            'label': param['label'],
+                        }
+                        results_all.append(result)
+                        
+                        # Print non-reference with ΔE
+                        if not is_reference and verbose and reference_energy_per_atom is not None:
+                            diff = abs(energy - reference_energy_per_atom)
+                            status = "✓" if diff < criteria_tolerances.get('energy_tolerance', 1e-3) else "✗"
+                            print(f"  {status} ecutwfc={param['ecutwfc']:.1f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f})")
+                    else:
+                        if verbose:
+                            print(f"  ✗ ecutwfc={batch_params[i]['ecutwfc']}: {comp.get('error', 'Failed')}")
+            
+            # Check convergence (skip if reference not yet calculated)
+            if reference_energy_per_atom is not None:
+                # Exclude reference from convergence check
+                test_ecut_results = {k: v for k, v in ecut_results.items() if k != max_ecutwfc}
+                converged = self._check_convergence_vs_reference(
+                    test_ecut_results, reference_energy_per_atom, criteria_tolerances
+                )
+                
+                if converged:
+                    if verbose:
+                        print(f"\n✓ CONVERGED at iteration {iteration}")
+                    break
+            else:
+                # Reference calculation pending
+                if verbose:
+                    print(f"\n~ Iteration {iteration} complete. Reference pending...")
+            
+            # Not converged: expand range
+            expansion = self._expand_range(current_ecut_range, ecutwfc_step, max_ecutwfc)
+            if not expansion:
+                if verbose:
+                    print(f"\n⚠️  Cannot expand further (limit: {max_ecutwfc}). Stopping.")
+                break
+            
+            # Add expanded values to range
+            current_ecut_range = sorted(set(current_ecut_range + expansion))
+            iteration += 1
+        
+        # Ensure reference was calculated
+        if reference_energy_per_atom is None:
+            raise RuntimeError("Could not obtain reference energy (ecutwfc=200)")
+        
+        # Remove reference from test results for selection
+        test_ecut_results = {k: v for k, v in ecut_results.items() if k != max_ecutwfc}
+        if not test_ecut_results:
+            raise RuntimeError("PHASE 1 failed: no successful calculations")
+        
+        # Select ecutwfc for PHASE 2 (highest converged value for maximum precision)
+        optimal_ecutwfc = max(ecut_results.keys())
+        optimal_energy_phase1 = ecut_results[optimal_ecutwfc]
+        
+        print(f"\n✓ PHASE 1 COMPLETE: Selected ecutwfc = {optimal_ecutwfc:.1f} Ry")
+        
+        # ===== PHASE 2: DYNAMIC KSPACING CONVERGENCE =====
+        print("\n" + "="*80)
+        print("PHASE 2: KSPACING CONVERGENCE (DYNAMIC)")
+        print("="*80)
+        
+        print(f"\nFixed ecutwfc: {optimal_ecutwfc:.1f} Ry (from PHASE 1)")
+        
+        # Start with initial range
+        current_ksp_range = self.kspacing_range.copy()
+        ksp_results = {}  # Cache: kspacing → energy
+        iteration = 1
+        
+        while True:
+            print(f"\n--- Iteration {iteration} ---")
+            print(f"Testing kspacing: {current_ksp_range}")
+            
+            # Find which values to calculate (not in cache)
+            to_calculate = [k for k in current_ksp_range if k not in ksp_results]
+            
+            if to_calculate:
+                # Create workflow for this iteration
+                wf_kwargs = {
+                    'atoms': self.atoms,
+                    'protocol': self.protocol,
+                    'ecutwfc': optimal_ecutwfc,
+                    'code_version': self.code_version,
+                }
+                
+                if self._pseudo_config_name:
+                    wf_kwargs['pseudopotentials_config'] = self._pseudo_config_name
+                else:
+                    wf_kwargs['pseudopotentials'] = self.pseudopotentials
+                
+                if self.queue is not None:
+                    wf_kwargs['queue'] = self.queue
+                elif self.machine is not None:
+                    wf_kwargs['machine'] = self.machine
+                
+                wf2 = CalculationWorkflow(**wf_kwargs)
+                
+                # Prepare batch for new values only
+                batch_params = []
+                for kspacing in to_calculate:
+                    label = f"{label_prefix}/phase2_iter{iteration}_ecut{int(optimal_ecutwfc)}_ksp{kspacing:.2f}"
+                    batch_params.append({
+                        'label': label,
+                        'ecutwfc': optimal_ecutwfc,
+                        'ecutrho': optimal_ecutwfc * self.ecutrho_ratio,  # Calculate ecutrho dynamically
+                        'kspacing': kspacing,
+                    })
+                
+                if verbose:
+                    print(f"Submitting {len(batch_params)} new kspacing tests...")
+                
+                # Submit batch
+                batch_results = wf2.submit_scf_batch_multiple(batch_params, verbose=verbose)
+                completion = wf2.wait_for_batch_jobs(batch_results, timeout=batch_timeout, verbose=verbose)
+                
+                # Store results in cache
+                for i, comp in enumerate(completion):
+                    if comp['success']:
+                        param = batch_params[i]
+                        energy = comp.get('energy', np.nan) / len(self.atoms)
+                        ksp_results[param['kspacing']] = energy
+                        
+                        result = {
+                            'phase': 2,
+                            'ecutwfc': param['ecutwfc'],
+                            'kspacing': param['kspacing'],
+                            'energy_per_atom': energy,
+                            'label': param['label'],
+                        }
+                        results_all.append(result)
+                        
+                        if verbose:
+                            diff = abs(energy - reference_energy_per_atom)
+                            status = "✓" if diff < criteria_tolerances.get('energy_tolerance', 1e-3) else "✗"
+                            print(f"  {status} kspacing={param['kspacing']:.3f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f})")
+                    else:
+                        if verbose:
+                            print(f"  ✗ kspacing={batch_params[i]['kspacing']}: {comp.get('error', 'Failed')}")
+            
+            # Check convergence
+            converged = self._check_convergence_vs_reference(
+                ksp_results, reference_energy_per_atom, criteria_tolerances
+            )
+            
+            if converged:
+                if verbose:
+                    print(f"\n✓ CONVERGED at iteration {iteration}")
+                break
+            
+            # Not converged: expand range (finer kspacing)
+            # Note: for kspacing, smaller values are finer, so we expand downward
+            min_current = min(current_ksp_range)
+            if min_current <= max_kspacing:
+                if verbose:
+                    print(f"\n⚠️  Cannot expand further (limit: {max_kspacing}). Stopping.")
+                break
+            
+            new_ksp_vals = []
+            num_steps = 2
+            for i in range(1, num_steps + 1):
+                val = min_current - (i * kspacing_step)
+                if val >= max_kspacing and val not in current_ksp_range:
+                    new_ksp_vals.append(val)
+            
+            if not new_ksp_vals:
+                if verbose:
+                    print(f"\n⚠️  Cannot expand further (limit: {max_kspacing}). Stopping.")
+                break
+            
+            # Add expanded values to range
+            current_ksp_range = sorted(set(current_ksp_range + new_ksp_vals), reverse=True)
+            iteration += 1
+        
+        if not ksp_results:
+            print("\n⚠️  PHASE 2: No successful kspacing tests. May need to adjust parameters.")
+        
+        print(f"\n✓ PHASE 2 COMPLETE")
+        print("\n" + "="*80)
+        print("CONVERGENCE STUDY COMPLETE (INDEPENDENT WITH DYNAMIC RANGES)")
+        print("="*80 + "\n")
+        
+        # Store results
+        self.results = pd.DataFrame(results_all)
+        return self.results

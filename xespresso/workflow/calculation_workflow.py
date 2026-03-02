@@ -25,10 +25,13 @@ logger = logging.getLogger(__name__)
 
 
 # Preset configurations for different calculation protocols
+# Note: ecutrho is NOT set here - it's calculated dynamically based on pseudopotential types
+# via _get_ecutrho_ratio_for_pseudos() which respects the structure's actual pseudos:
+# - Norm-conserving: ratio = 4.0
+# - Ultrasoft/PAW: ratio = 8.0
 PRESETS = {
     'fast': {
         'ecutwfc': 30.0,
-        'ecutrho': 240.0,
         'conv_thr': 1.0e-6,
         'kspacing': 0.5,  # Angstrom^-1
         'mixing_beta': 0.7,
@@ -39,7 +42,6 @@ PRESETS = {
     },
     'moderate': {
         'ecutwfc': 50.0,
-        'ecutrho': 400.0,
         'conv_thr': 1.0e-8,
         'kspacing': 0.3,  # Angstrom^-1
         'mixing_beta': 0.5,
@@ -50,7 +52,6 @@ PRESETS = {
     },
     'accurate': {
         'ecutwfc': 80.0,
-        'ecutrho': 640.0,
         'conv_thr': 1.0e-10,
         'kspacing': 0.15,  # Angstrom^-1
         'mixing_beta': 0.3,
@@ -311,53 +312,17 @@ class CalculationWorkflow:
         """
         Determine the appropriate ecutrho/ecutwfc ratio based on pseudopotential types.
         
-        - Norm-Conserving (NC): ratio = 4.0
-        - Ultrasoft (US): ratio >= 8.0
-        - PAW: ratio >= 8.0
-        
-        Returns the MAXIMUM ratio needed to ensure compatibility with all pseudopotentials.
+        Delegates to the centralized utility function in xespresso.utils.pseudo_utils
         
         Returns:
             Ratio (ecutrho/ecutwfc) - default 4.0 if no pseudo_config
         """
-        if self._pseudo_config is None:
-            return 4.0  # Default ratio for NC pseudos
+        from xespresso.utils.pseudo_utils import get_ecutrho_ratio
         
-        max_ratio = 4.0  # Start with NC ratio
+        elements_in_atoms = set(self.atoms.get_chemical_symbols())
+        ratio = get_ecutrho_ratio(elements_in_atoms, self._pseudo_config)
         
-        try:
-            elements_in_atoms = set(self.atoms.get_chemical_symbols())
-            for element in elements_in_atoms:
-                pseudo_obj = self._pseudo_config.get_pseudopotential(element)
-                if pseudo_obj and hasattr(pseudo_obj, 'type') and pseudo_obj.type:
-                    pseudo_type = pseudo_obj.type.upper()
-                    
-                    # Determine ratio based on pseudopotential type
-                    if 'PAW' in pseudo_type or 'PROJECTOR' in pseudo_type:
-                        ratio = 8.0
-                        type_label = 'PAW'
-                    elif 'ULTRASOFT' in pseudo_type or 'US' in pseudo_type:
-                        ratio = 8.0
-                        type_label = 'Ultrasoft'
-                    elif 'NORM-CONSERVING' in pseudo_type or 'NC' in pseudo_type or 'ONCV' in pseudo_type:
-                        ratio = 4.0
-                        type_label = 'Norm-Conserving'
-                    else:
-                        # Unknown type, use conservative ratio (8.0 is safer)
-                        ratio = 8.0
-                        type_label = f"Unknown ({pseudo_obj.type})"
-                    
-                    max_ratio = max(max_ratio, ratio)
-                    logger.debug(f"Element {element}: type={type_label}, ratio={ratio}")
-                else:
-                    logger.debug(f"Element {element}: no type info available")
-        except Exception as e:
-            logger.debug(f"Could not determine ecutrho ratio from pseudos: {e}")
-        
-        if max_ratio > 4.0:
-            logger.info(f"Using ecutrho/ecutwfc ratio: {max_ratio} (Ultrasoft/PAW pseudopotentials detected)")
-        
-        return max_ratio
+        return ratio
     
     def _adjust_ecutwfc_for_pseudos(self):
         """
@@ -993,7 +958,15 @@ class CalculationWorkflow:
         }
         
         params['ecutwfc'] = self.input_data.get('ecutwfc', 50.0)
-        params['ecutrho'] = self.input_data.get('ecutrho', 400.0)
+        
+        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
+        # UNLESS it was explicitly set in input_data (e.g., by ConvergenceWorkflow)
+        if 'ecutrho' not in self.input_data:
+            ratio = self._get_ecutrho_ratio_for_pseudos()
+            params['ecutrho'] = params['ecutwfc'] * ratio
+        else:
+            # Use the explicitly provided ecutrho value
+            params['ecutrho'] = self.input_data.get('ecutrho')
         
         if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
             params['input_data']['pseudo_dir'] = './pseudo'
@@ -1298,7 +1271,9 @@ class CalculationWorkflow:
         
         # Add ecutwfc and ecutrho at top level
         params['ecutwfc'] = self.input_data.get('ecutwfc', 50.0)
-        params['ecutrho'] = self.input_data.get('ecutrho', 400.0)
+        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
+        ratio = self._get_ecutrho_ratio_for_pseudos()
+        params['ecutrho'] = params['ecutwfc'] * ratio
         
         # Set pseudo_dir when using pseudopotentials_config
         if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
@@ -1440,7 +1415,9 @@ class CalculationWorkflow:
         
         # Add ecutwfc and ecutrho at top level
         params['ecutwfc'] = input_data.get('ecutwfc', 50.0)
-        params['ecutrho'] = input_data.get('ecutrho', 400.0)
+        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
+        ratio = self._get_ecutrho_ratio_for_pseudos()
+        params['ecutrho'] = params['ecutwfc'] * ratio
         
         # Set pseudo_dir when using pseudopotentials_config
         if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
@@ -1640,6 +1617,7 @@ class CalculationWorkflow:
         )
         
         # Create DOS post-processor (note: package changes from 'pw' to 'dos')
+        # Note: DOS inherits ecutwfc and ecutrho from parent NSCF calculation
         dos_calc = EspressoDos(
             parent_directory=nscf_label,
             prefix=nscf_prefix,
@@ -1752,7 +1730,9 @@ class CalculationWorkflow:
         
         # Add ecutwfc and ecutrho at top level
         params['ecutwfc'] = input_data.get('ecutwfc', 50.0)
-        params['ecutrho'] = input_data.get('ecutrho', 400.0)
+        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
+        ratio = self._get_ecutrho_ratio_for_pseudos()
+        params['ecutrho'] = params['ecutwfc'] * ratio
         
         # Set pseudo_dir when using pseudopotentials_config
         if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
@@ -2097,7 +2077,9 @@ class CalculationWorkflow:
         
         # Add ecutwfc and ecutrho at top level
         params['ecutwfc'] = self.input_data.get('ecutwfc', 50.0)
-        params['ecutrho'] = self.input_data.get('ecutrho', 400.0)
+        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
+        ratio = self._get_ecutrho_ratio_for_pseudos()
+        params['ecutrho'] = params['ecutwfc'] * ratio
         
         # Set pseudo_dir when using pseudopotentials_config
         if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
@@ -2209,7 +2191,9 @@ class CalculationWorkflow:
         
         # Add ecutwfc and ecutrho at top level
         params['ecutwfc'] = self.input_data.get('ecutwfc', 50.0)
-        params['ecutrho'] = self.input_data.get('ecutrho', 400.0)
+        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
+        ratio = self._get_ecutrho_ratio_for_pseudos()
+        params['ecutrho'] = params['ecutwfc'] * ratio
         
         # Set pseudo_dir when using pseudopotentials_config
         if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:

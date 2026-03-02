@@ -1834,8 +1834,8 @@ class ConvergenceWorkflow:
         if not test_ecut_results:
             raise RuntimeError("PHASE 1 failed: no successful calculations")
         
-        # Select ecutwfc for PHASE 2 (highest converged value for maximum precision)
-        optimal_ecutwfc = max(ecut_results.keys())
+        # Select ecutwfc for PHASE 2 (MINIMUM converged value for best efficiency)
+        optimal_ecutwfc = min(test_ecut_results.keys())
         optimal_energy_phase1 = ecut_results[optimal_ecutwfc]
         
         print(f"\n✓ PHASE 1 COMPLETE: Selected ecutwfc = {optimal_ecutwfc:.1f} Ry")

@@ -768,20 +768,55 @@ class CalculationWorkflow:
                     print(f"\n{job_status['message']}")
                     return job_status
                 
-                # Query SLURM status on remote system
+                # Query job status on remote system
                 try:
                     # Get remote connection from calc
                     remote_conn = getattr(calc, 'remote', None)
                     if remote_conn is None:
                         raise ValueError("No remote connection available for job monitoring")
                     
-                    # Execute squeue on remote system
-                    stdout, stderr = remote_conn.run_command(
-                        f"squeue -j {job_id} -h -o '%T,%r,%M'"
-                    )
+                    # Determine scheduler type from queue configuration
+                    queue_config = getattr(calc, 'queue', {}) or {}
+                    scheduler_type = queue_config.get('scheduler', 'slurm').lower()
                     
-                    # Check if job is still in queue
-                    if not stdout.strip():
+                    # Handle direct (bash) scheduler vs SLURM-like schedulers
+                    if scheduler_type == 'direct':
+                        # For direct execution, job_id is in format "PID:xxxx"
+                        # Check if the process is still running on remote
+                        if job_id.startswith('PID:'):
+                            pid = job_id.split(':')[1]
+                            stdout, stderr = remote_conn.run_command(f"ps -p {pid} >/dev/null 2>&1 && echo 'RUNNING' || echo 'COMPLETED'")
+                            state = stdout.strip()
+                        else:
+                            # Not a valid PID format, assume completed
+                            state = 'COMPLETED'
+                    else:
+                        # SLURM or other schedulers - use squeue
+                        stdout, stderr = remote_conn.run_command(
+                            f"squeue -j {job_id} -h -o '%T,%r,%M'"
+                        )
+                        state = None  # Will be parsed below
+                    
+                    # Handle direct scheduler completion
+                    if scheduler_type == 'direct' and state == 'COMPLETED':
+                        job_status['state'] = 'COMPLETED'
+                        job_status['elapsed_time'] = elapsed
+                        job_status['success'] = True
+                        job_status['message'] = f"✓ JOB {job_id} completed successfully"
+                        print(f"\n{job_status['message']}")
+                        return job_status
+                    
+                    # Handle direct scheduler still running
+                    if scheduler_type == 'direct' and state == 'RUNNING':
+                        job_status['state'] = state
+                        job_status['elapsed_time'] = elapsed
+                        status_line = f"[{elapsed:5d}s] State: RUNNING"
+                        print(f"\r{status_line}", end='', flush=True)
+                        time.sleep(poll_interval)
+                        continue  # Poll again
+                    
+                    # Check if SLURM job is still in queue
+                    if scheduler_type != 'direct' and not stdout.strip():
                         # Job not found in queue (probably completed) - check final status with sacct
                         try:
                             stdout_sacct, stderr_sacct = remote_conn.run_command(
@@ -821,9 +856,9 @@ class CalculationWorkflow:
                         print(f"\n{job_status['message']}")
                         return job_status
                     
-                    # Parse squeue output: STATE,REASON,ELAPSED
+                    # Parse squeue output: STATE,REASON,ELAPSED (SLURM only)
                     output = stdout.strip()
-                    if output:
+                    if output and scheduler_type != 'direct':
                         parts = output.split(',')
                         state = parts[0].strip() if len(parts) > 0 else 'UNKNOWN'
                         reason = parts[1].strip() if len(parts) > 1 else ''
@@ -982,16 +1017,40 @@ class CalculationWorkflow:
         self.atoms.calc = calc
         self.last_calc = calc
         
-        # Step 1: Write input
-        calc.write_input(self.atoms)
-        calc.atoms = self.atoms
+        # Step 1: Check for previous calculation (load .asei if exists)
+        needs_calculation = True
+        try:
+            calc.read(calc.directory)  # Load previous results if they exist
+            if hasattr(calc, 'restart_atoms') and calc.restart_atoms is not None:
+                # Check if calculation state changed
+                needs_calculation = calc.check_state(self.atoms)
+                if not needs_calculation:
+                    logger.info(f"Skipping calculation (parameters unchanged): {label}")
+                    if hasattr(calc, 'read_results'):
+                        try:
+                            calc.read_results()
+                        except Exception as e:
+                            logger.debug(f"Could not read previous results: {e}")
+                            needs_calculation = True
+        except Exception as e:
+            logger.debug(f"No previous calculation found: {e}")
+            needs_calculation = True
         
-        # Step 2: Execute (submits remotely, returns immediately)
-        logger.info(f"Submitting SCF calculation: {label}")
-        calc.execute()
+        # Step 2: Only write input and execute if calculation is needed
+        if needs_calculation:
+            calc.write_input(self.atoms)
+            calc.atoms = self.atoms
+            
+            # Step 3: Execute (submits remotely, returns immediately)
+            logger.info(f"Submitting SCF calculation: {label}")
+            calc.execute()
+        else:
+            # Mark as already submitted/completed since we're reusing previous results
+            logger.info(f"Using cached results for: {label}")
         
-        job_id = getattr(calc, 'last_job_id', None)
-        logger.info(f"SCF calculation submitted with job ID: {job_id}")
+        job_id = getattr(calc, 'last_job_id', None) if needs_calculation else None
+        if needs_calculation:
+            logger.info(f"SCF calculation submitted with job ID: {job_id}")
         
         # Store remote connection for later monitoring
         if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
@@ -1001,9 +1060,13 @@ class CalculationWorkflow:
             'calc': calc,
             'job_id': job_id,
             'label': label,
-            'submitted': True,
-            'completed': False,
+            'submitted': needs_calculation,  # Only submitted if we actually ran it
+            'completed': not needs_calculation,  # Completed if we used cache
         }
+        
+        # If using cache (not recalculating), extract energy from results
+        if not needs_calculation and hasattr(calc, 'results') and 'energy' in calc.results:
+            result['energy'] = calc.results['energy']
         
         # If requested, wait for job to complete
         if wait_for_completion:
@@ -1049,7 +1112,7 @@ class CalculationWorkflow:
                 - 'submitted': bool
                 - 'completed': bool
         """
-        results = []
+        results = [None] * len(parameter_sets)  # Preserve order like wait_for_batch_jobs
         
         if verbose:
             print(f"\nSubmitting {len(parameter_sets)} SCF calculations in batch mode...")
@@ -1088,7 +1151,7 @@ class CalculationWorkflow:
                 
                 # Submit this calculation
                 result = temp_workflow.submit_scf_batch(label=label, wait_for_completion=False)
-                results.append(result)
+                results[i] = result  # Store at correct index
                 
                 if verbose:
                     job_id_str = f" (job_id: {result['job_id']})" if result['job_id'] else ""
@@ -1096,18 +1159,18 @@ class CalculationWorkflow:
                     
             except Exception as e:
                 logger.error(f"Error submitting calculation {label}: {e}")
-                results.append({
+                results[i] = {  # Store error at correct index
                     'calc': None,
                     'job_id': None,
                     'label': label,
                     'submitted': False,
                     'completed': False,
                     'error': str(e),
-                })
+                }
         
         if verbose:
             print(f"{'-'*70}")
-            print(f"Submitted {sum(1 for r in results if r['submitted'])}/{len(parameter_sets)} calculations\n")
+            print(f"Submitted {sum(1 for r in results if r and r['submitted'])}/{len(parameter_sets)} calculations\n")
         
         return results
     
@@ -1138,15 +1201,42 @@ class CalculationWorkflow:
         """
         import time
         
-        results = []
-        active_jobs = {r['job_id']: r for r in batch_results if r['job_id']}
+        results = [None] * len(batch_results)  # Preserve original order
+        
+        # Separate cached jobs (completed immediately) from remote jobs
+        active_jobs = {}
+        
+        for idx, r in enumerate(batch_results):
+            if r['completed'] and not r['submitted']:
+                # This is a cached result - process immediately and store in original position
+                calc = r.get('calc')
+                label = r.get('label')
+                
+                # Extract energy if available
+                energy = r.get('energy')
+                if energy is None and calc and hasattr(calc, 'results'):
+                    energy = calc.results.get('energy')
+                
+                results[idx] = {
+                    'label': label,
+                    'job_id': None,
+                    'completed': True,
+                    'success': True,
+                    'energy': energy,
+                }
+            elif r['job_id']:
+                # This is a remote job - store mapping for later processing
+                active_jobs[r['job_id']] = {'idx': idx, 'calc': r['calc'], 'label': r['label']}
         
         if verbose:
-            print(f"\nMonitoring {len(active_jobs)} remote jobs (timeout: {timeout}s, poll: {poll_interval}s)...")
+            cached_count = sum(1 for r in results if r is not None)
+            if cached_count > 0:
+                print(f"\n📦 Using {cached_count} cached result(s)")
+            if active_jobs:
+                print(f"Monitoring {len(active_jobs)} remote jobs (timeout: {timeout}s, poll: {poll_interval}s)...")
             print(f"{'-'*70}")
         
         start_time = time.time()
-        completed_count = 0
         
         while active_jobs and (time.time() - start_time) < timeout:
             # Query status of all jobs at once
@@ -1168,46 +1258,109 @@ class CalculationWorkflow:
                         jobs_to_remove.append(job_id)
                         continue
                     
-                    # Check SLURM status
-                    stdout, _ = remote_conn.run_command(f"squeue -j {job_id} -h")
+                    # Determine scheduler type from queue configuration
+                    queue_config = getattr(calc, 'queue', {}) or {}
+                    scheduler_type = queue_config.get('scheduler', 'slurm').lower()
                     
-                    if not stdout.strip():
-                        # Job completed, check final status
-                        stdout_sacct, _ = remote_conn.run_command(
-                            f"sacct -j {job_id} --format=State -n -P"
-                        )
-                        
-                        lines = stdout_sacct.strip().split('\n') if stdout_sacct.strip() else []
-                        state = lines[-1].split('|')[0].strip() if lines else 'UNKNOWN'
-                        
+                    # Handle direct (bash) scheduler vs SLURM-like schedulers
+                    if scheduler_type == 'direct':
+                        # For direct execution, job_id is in format "PID:xxxx"
+                        # Check if the process is still running on remote
+                        if job_id.startswith('PID:'):
+                            pid = job_id.split(':')[1]
+                            stdout, stderr = remote_conn.run_command(f"ps -p {pid} >/dev/null 2>&1 && echo 'RUNNING' || echo 'COMPLETED'")
+                            state = stdout.strip()
+                        else:
+                            # Not a valid PID format, assume completed
+                            state = 'COMPLETED'
+                    else:
+                        # SLURM status check
+                        stdout, _ = remote_conn.run_command(f"squeue -j {job_id} -h")
+                        state = None  # Will be determined below
+                    
+                    if scheduler_type == 'direct':
+                        # Direct scheduler - use ps result
                         success = state == 'COMPLETED'
                         
-                        # Try to retrieve energy
-                        energy = None
-                        try:
-                            monitor = RemoteJobMonitor(calc)
-                            if monitor.wait(timeout=30, poll_interval=5):
-                                monitor.retrieve_output()
-                                calc.read_results()
-                                energy = calc.results.get('energy')
-                        except Exception as e:
-                            logger.debug(f"Could not retrieve results for {label}: {e}")
-                        
-                        results.append({
-                            'label': label,
-                            'job_id': job_id,
-                            'completed': True,
-                            'success': success,
-                            'state': state,
-                            'energy': energy,
-                        })
-                        
-                        jobs_to_remove.append(job_id)
-                        completed_count += 1
-                        
-                        if verbose:
-                            status = "✓" if success else "✗"
-                            print(f"  {status} {label}: {state}")
+                        if success:
+                            # Try to retrieve output and extract energy
+                            energy = None
+                            try:
+                                # Retrieve output file from remote
+                                output_file = f"{calc.prefix}.{calc.package}o"
+                                remote_path = getattr(calc, 'last_remote_path', None)
+                                if remote_path:
+                                    remote_output = f"{remote_path}/{output_file}"
+                                    local_output = os.path.join(calc.directory, output_file)
+                                    remote_conn.retrieve_file(remote_output, local_output)
+                                    
+                                    # Read results from local file
+                                    if hasattr(calc, 'read_results'):
+                                        calc.read_results()
+                                        energy = calc.results.get('energy')
+                            except Exception as e:
+                                logger.debug(f"Could not retrieve results for {label}: {e}")
+                            
+                            idx = job_info['idx']
+                            results[idx] = {
+                                'label': label,
+                                'job_id': job_id,
+                                'completed': True,
+                                'success': success,
+                                'state': state,
+                                'energy': energy,
+                            }
+                            
+                            jobs_to_remove.append(job_id)
+                            
+                            if verbose:
+                                print(f"  ✓ {label}: {state}")
+                    else:
+                        # SLURM scheduler
+                        if not stdout.strip():
+                            # Job completed, check final status with sacct
+                            stdout_sacct, _ = remote_conn.run_command(
+                                f"sacct -j {job_id} --format=State -n -P"
+                            )
+                            
+                            lines = stdout_sacct.strip().split('\n') if stdout_sacct.strip() else []
+                            state = lines[-1].split('|')[0].strip() if lines else 'UNKNOWN'
+                            success = state == 'COMPLETED'
+                            
+                            # Try to retrieve output and extract energy
+                            energy = None
+                            try:
+                                output_file = f"{calc.prefix}.{calc.package}o"
+                                remote_path = getattr(calc, 'last_remote_path', None)
+                                if remote_path:
+                                    remote_output = f"{remote_path}/{output_file}"
+                                    local_output = os.path.join(calc.directory, output_file)
+                                    remote_conn.retrieve_file(remote_output, local_output)
+                                    
+                                    if hasattr(calc, 'read_results'):
+                                        calc.read_results()
+                                        energy = calc.results.get('energy')
+                            except Exception as e:
+                                logger.debug(f"Could not retrieve results for {label}: {e}")
+                            
+                            idx = job_info['idx']
+                            results[idx] = {
+                                'label': label,
+                                'job_id': job_id,
+                                'completed': True,
+                                'success': success,
+                                'state': state,
+                                'energy': energy,
+                            }
+                            
+                            jobs_to_remove.append(job_id)
+                            
+                            if verbose:
+                                status = "✓" if success else "✗"
+                                print(f"  {status} {label}: {state}")
+                        else:
+                            # Still in queue, not finished yet
+                            continue
                 
                 except Exception as e:
                     logger.warning(f"Error checking status for {label}: {e}")
@@ -1226,19 +1379,21 @@ class CalculationWorkflow:
                 print(f"\n⚠ Timeout reached with {len(active_jobs)} jobs still running")
             
             for job_id, job_info in active_jobs.items():
-                results.append({
+                idx = job_info['idx']
+                results[idx] = {
                     'label': job_info['label'],
                     'job_id': job_id,
                     'completed': False,
                     'success': False,
                     'error': 'Timeout',
-                })
+                }
         
         if verbose:
             print(f"{'-'*70}")
-            print(f"Completed {completed_count + len([r for r in results if r['completed']])}/{len(batch_results)} jobs\n")
+            print(f"Completed {sum(1 for r in results if r is not None and r.get('completed'))}/{len(batch_results)} jobs\n")
         
-        return results
+        # Filter out None entries (shouldn't happen, but safe)
+        return [r for r in results if r is not None]
 
     def run_scf(
         self,
@@ -1292,38 +1447,62 @@ class CalculationWorkflow:
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
         
+        # Check for previous calculation (load .asei if exists)
+        needs_calculation = True
+        try:
+            calc.read(calc.directory)  # Load previous results if they exist
+            if hasattr(calc, 'restart_atoms') and calc.restart_atoms is not None:
+                # Check if calculation state changed
+                needs_calculation = calc.check_state(self.atoms)
+                if not needs_calculation:
+                    logger.info(f"Skipping calculation (parameters unchanged): {label}")
+                    if hasattr(calc, 'read_results'):
+                        try:
+                            calc.read_results()
+                        except Exception as e:
+                            logger.debug(f"Could not read previous results: {e}")
+                            needs_calculation = True
+        except Exception as e:
+            logger.debug(f"No previous calculation found: {e}")
+            needs_calculation = True
+        
         # If remote non-blocking: control execution steps to avoid retry loop
         if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
             logger.info("Remote non-blocking: executing with automatic job monitoring...")
             
-            # Step 1: Write input (with atoms, so _transfer_pseudopotentials won't need to call it again)
-            calc.write_input(self.atoms)
-            
-            # IMPORTANT: Set calc.atoms so _transfer_pseudopotentials() can use it if needed
-            calc.atoms = self.atoms
-            
-            # Step 2: Execute (submits job remotely)
-            calc.execute()
+            # Only write input and execute if calculation is needed
+            if needs_calculation:
+                # Step 1: Write input (with atoms, so _transfer_pseudopotentials won't need to call it again)
+                calc.write_input(self.atoms)
+                
+                # IMPORTANT: Set calc.atoms so _transfer_pseudopotentials() can use it if needed
+                calc.atoms = self.atoms
+                
+                # Step 2: Execute (submits job remotely)
+                calc.execute()
+            else:
+                logger.info(f"Using cached results for: {label}")
             
             # IMPORTANT: Store remote connection on calc for RemoteJobMonitor to access
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
                 calc.remote = calc.scheduler.remote
             
             # Step 3: Get job ID and monitor SLURM job status
-            job_id = getattr(calc, 'last_job_id', None)
+            job_id = getattr(calc, 'last_job_id', None) if needs_calculation else None
             
-            if job_id is None:
+            if needs_calculation and job_id is None:
                 raise RuntimeError(
                     "Remote job submission failed: No job ID returned from scheduler. "
                     "Please check scheduler configuration and job submission logs."
                 )
             
-            logger.info(f"Remote job {job_id} submitted. Monitoring SLURM status...")
-            timeout = self.queue.get('job_timeout', 3600)
-            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
-            
-            if not job_monitor_result['success']:
-                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
+            if needs_calculation:
+                logger.info(f"Remote job {job_id} submitted. Monitoring SLURM status...")
+                timeout = self.queue.get('job_timeout', 3600)
+                job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
+                
+                if not job_monitor_result['success']:
+                    raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
             
             # Step 4: Job completed in queue, now fetch output using RemoteJobMonitor
             monitor = RemoteJobMonitor(calc)
@@ -1436,16 +1615,39 @@ class CalculationWorkflow:
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
         
+        # Check for previous calculation (load .asei if exists)
+        needs_calculation = True
+        try:
+            calc.read(calc.directory)  # Load previous results if they exist
+            if hasattr(calc, 'restart_atoms') and calc.restart_atoms is not None:
+                # Check if calculation state changed
+                needs_calculation = calc.check_state(self.atoms)
+                if not needs_calculation:
+                    logger.info(f"Skipping calculation (parameters unchanged): {label}")
+                    if hasattr(calc, 'read_results'):
+                        try:
+                            calc.read_results()
+                        except Exception as e:
+                            logger.debug(f"Could not read previous results: {e}")
+                            needs_calculation = True
+        except Exception as e:
+            logger.debug(f"No previous calculation found: {e}")
+            needs_calculation = True
+        
         # If remote non-blocking: control execution steps to avoid retry loop
         if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
             logger.info("Remote non-blocking: executing NSCF with automatic job monitoring...")
             
-            # Step 1: Write input
-            calc.write_input(self.atoms)
-            calc.atoms = self.atoms
-            
-            # Step 2: Execute (submits job remotely)
-            calc.execute()
+            # Only write input and execute if calculation is needed
+            if needs_calculation:
+                # Step 1: Write input
+                calc.write_input(self.atoms)
+                calc.atoms = self.atoms
+                
+                # Step 2: Execute (submits job remotely)
+                calc.execute()
+            else:
+                logger.info(f"Using cached results for: {label}")
             
             # IMPORTANT: Store remote connection on calc for RemoteJobMonitor to access
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
@@ -1751,42 +1953,65 @@ class CalculationWorkflow:
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
         
+        # Check for previous calculation (load .asei if exists)
+        needs_calculation = True
+        try:
+            calc.read(calc.directory)  # Load previous results if they exist
+            if hasattr(calc, 'restart_atoms') and calc.restart_atoms is not None:
+                # Check if calculation state changed
+                needs_calculation = calc.check_state(self.atoms)
+                if not needs_calculation:
+                    logger.info(f"Skipping calculation (parameters unchanged): {label}")
+                    if hasattr(calc, 'read_results'):
+                        try:
+                            calc.read_results()
+                        except Exception as e:
+                            logger.debug(f"Could not read previous results: {e}")
+                            needs_calculation = True
+        except Exception as e:
+            logger.debug(f"No previous calculation found: {e}")
+            needs_calculation = True
+        
         # Run calculation (local or remote)
         if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
             logger.info("Remote non-blocking: executing band structure with automatic job monitoring...")
             
-            # Step 1: Write input
-            calc.write_input(self.atoms)
-            calc.atoms = self.atoms
-            
-            # Step 2: Execute (submits job remotely)
-            calc.execute()
+            # Only write input and execute if calculation is needed
+            if needs_calculation:
+                # Step 1: Write input
+                calc.write_input(self.atoms)
+                calc.atoms = self.atoms
+                
+                # Step 2: Execute (submits job remotely)
+                calc.execute()
+            else:
+                logger.info(f"Using cached results for: {label}")
             
             # Store remote connection on calc for RemoteJobMonitor to access
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
                 calc.remote = calc.scheduler.remote
             
             # Step 3: Monitor SLURM job status
-            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
-            job_id = calc.last_job_id
-            timeout = self.queue.get('job_timeout', 3600)  # 1 hour for bands
-            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
-            
-            if not job_monitor_result['success']:
-                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
-            
-            # Step 4: Fetch output
-            monitor = RemoteJobMonitor(calc)
-            if monitor.wait(timeout=60, poll_interval=5):
-                monitor.retrieve_output()
-                logger.info("Remote band structure output retrieved.")
-                calc.read_results()
-            else:
-                raise RuntimeError(f"Failed to retrieve band structure output for job {job_id}")
+            if needs_calculation:
+                logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
+                job_id = calc.last_job_id
+                timeout = self.queue.get('job_timeout', 3600)  # 1 hour for bands
+                job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
+                
+                if not job_monitor_result['success']:
+                    raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
+                
+                # Step 4: Fetch output
+                monitor = RemoteJobMonitor(calc)
+                if monitor.wait(timeout=60, poll_interval=5):
+                    monitor.retrieve_output()
+                    logger.info("Remote band structure output retrieved.")
+                    calc.read_results()
+                else:
+                    raise RuntimeError(f"Failed to retrieve band structure output for job {job_id}")
         else:
             # Local or remote blocking: use normal run()
             calc.run(atoms=self.atoms)
-        
         # Check convergence
         self._check_convergence(calc, calculation_type='bands')
         
@@ -2098,52 +2323,75 @@ class CalculationWorkflow:
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
         
+        # Check for previous calculation (load .asei if exists)
+        needs_calculation = True
+        try:
+            calc.read(calc.directory)  # Load previous results if they exist
+            if hasattr(calc, 'restart_atoms') and calc.restart_atoms is not None:
+                # Check if calculation state changed
+                needs_calculation = calc.check_state(self.atoms)
+                if not needs_calculation:
+                    logger.info(f"Skipping calculation (parameters unchanged): {label}")
+                    if hasattr(calc, 'read_results'):
+                        try:
+                            calc.read_results()
+                        except Exception as e:
+                            logger.debug(f"Could not read previous results: {e}")
+                            needs_calculation = True
+        except Exception as e:
+            logger.debug(f"No previous calculation found: {e}")
+            needs_calculation = True
+        
         # If remote non-blocking: control execution steps to avoid retry loop
         if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
             logger.info("Remote non-blocking: executing with automatic job monitoring...")
             
-            # Step 1: Write input (with atoms, so _transfer_pseudopotentials won't need to call it again)
-            calc.write_input(self.atoms)
-            
-            # IMPORTANT: Set calc.atoms so _transfer_pseudopotentials() can use it if needed
-            calc.atoms = self.atoms
-            
-            # Step 2: Execute (submits job remotely)
-            calc.execute()
+            # Only write input and execute if calculation is needed
+            if needs_calculation:
+                # Step 1: Write input (with atoms, so _transfer_pseudopotentials won't need to call it again)
+                calc.write_input(self.atoms)
+                
+                # IMPORTANT: Set calc.atoms so _transfer_pseudopotentials() can use it if needed
+                calc.atoms = self.atoms
+                
+                # Step 2: Execute (submits job remotely)
+                calc.execute()
+            else:
+                logger.info(f"Using cached results for: {label}")
             
             # IMPORTANT: Store remote connection on calc for RemoteJobMonitor to access
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
                 calc.remote = calc.scheduler.remote
             
             # Step 3: Monitor SLURM job status (detect stuck jobs)
-            job_id = getattr(calc, 'last_job_id', None)
+            job_id = getattr(calc, 'last_job_id', None) if needs_calculation else None
             
-            if job_id is None:
+            if needs_calculation and job_id is None:
                 raise RuntimeError(
                     "Remote job submission failed: No job ID returned from scheduler. "
                     "Check scheduler configuration and job submission logs."
                 )
             
-            logger.info(f"Remote job {job_id} submitted. Monitoring SLURM status...")
-            timeout = self.queue.get('job_timeout', 3600)
-            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
-            
-            if not job_monitor_result['success']:
-                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
-            
-            # Step 4: Job completed in queue, now fetch output using RemoteJobMonitor
-            monitor = RemoteJobMonitor(calc)
-            if monitor.wait(timeout=60, poll_interval=5):  # Short timeout since job already completed
-                monitor.retrieve_output()
-                logger.info("Remote job output retrieved.")
-                # Step 5: Read results
-                calc.read_results()
-            else:
-                raise RuntimeError(f"Failed to retrieve output for job {job_id}")
+            if needs_calculation:
+                logger.info(f"Remote job {job_id} submitted. Monitoring SLURM status...")
+                timeout = self.queue.get('job_timeout', 3600)
+                job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
+                
+                if not job_monitor_result['success']:
+                    raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
+                
+                # Step 4: Job completed in queue, now fetch output using RemoteJobMonitor
+                monitor = RemoteJobMonitor(calc)
+                if monitor.wait(timeout=60, poll_interval=5):  # Short timeout since job already completed
+                    monitor.retrieve_output()
+                    logger.info("Remote job output retrieved.")
+                    # Step 5: Read results
+                    calc.read_results()
+                else:
+                    raise RuntimeError(f"Failed to retrieve output for job {job_id}")
         else:
             # Local or remote blocking: use normal run() with retry logic
             calc.run(atoms=self.atoms)
-        
         # Check convergence and inform user
         self._check_convergence(calc, calculation_type=relax_type)
         

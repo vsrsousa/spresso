@@ -292,10 +292,9 @@ def detect_pseudopotentials(directory: str, recursive: bool = True) -> Dict[str,
         if functional:
             pseudo_info['functional'] = functional
         
-        # Add type
-        pseudo_type = header_info.get('type') or extract_type_from_filename(filename)
-        if pseudo_type:
-            pseudo_info['type'] = pseudo_type
+        # Add type (only from UPF header parsing, don't use filename-based detection)
+        if 'type' in header_info:
+            pseudo_info['type'] = header_info['type']
         
         # Add z_valence
         if 'z_valence' in header_info:
@@ -363,10 +362,6 @@ def detect_pseudopotentials_remote(directory: str,
             functional = extract_functional_from_filename(filename)
             if functional:
                 pseudo_info['functional'] = functional
-            
-            pseudo_type = extract_type_from_filename(filename)
-            if pseudo_type:
-                pseudo_info['type'] = pseudo_type
             
             if element not in pseudopotentials:
                 pseudopotentials[element] = pseudo_info

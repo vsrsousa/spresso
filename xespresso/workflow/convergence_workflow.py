@@ -1283,197 +1283,52 @@ class ConvergenceWorkflow:
         
         return self.results
     
-    def get_recommendations(
-        self,
-        energy_tolerance: float = 1e-4,
-        force_tolerance: float = 0.1,
-        verbose: bool = True,
-    ) -> Dict:
+    def get_recommendations(self, verbose: bool = True) -> Dict:
         """
         Analyze convergence results and recommend optimal parameters.
         
-        Recommends parameter combinations based on:
-        1. Energy convergence (difference from highest ecutwfc/finest kspacing)
-        2. Force convergence
-        3. Computational cost balance
+        Uses the convergence criteria and tolerances from the convergence study.
         
         Args:
-            energy_tolerance: Energy convergence target (meV/atom).
-                             Default: 0.1 meV/atom (1e-4 eV/atom)
-            force_tolerance: Force convergence target (eV/Å).
-                            Default: 0.1 eV/Å
             verbose: Print recommendations
             
         Returns:
-            Dict with recommendations:
-                - 'fast': minimal parameters (low cost, acceptable accuracy)
-                - 'balanced': good balance of accuracy/cost
-                - 'accurate': tight convergence (high cost, high accuracy)
-                - 'best_ecutwfc': ec ecutwfc for best convergence
-                - 'best_kspacing': best kspacing for best convergence
-                - 'convergence_summary': details of convergence analysis
-        
-        Example:
-            >>> conv = ConvergenceWorkflow(...)
-            >>> conv.run_convergence_study()
-            >>> recs = conv.get_recommendations(
-            ...     energy_tolerance=1e-4,  # 0.1 meV/atom
-            ...     force_tolerance=0.1
-            ... )
-            >>> print(recs['balanced'])
+            Dict with optimal parameters found during convergence study
         """
         if self.results is None or len(self.results) == 0:
             raise ValueError("No convergence results. Run convergence study first.")
         
-        # Reference: highest ecutwfc, finest kspacing
-        ref_ecutwfc = self.ecutwfc_range[-1]
-        ref_kspacing = self.kspacing_range[-1]
-        ref_result = self.results[
-            (self.results['ecutwfc'] == ref_ecutwfc) &
-            (self.results['kspacing'] == ref_kspacing)
-        ]
+        # Optimal parameters found during convergence study
+        optimal_ecutwfc = getattr(self, 'optimal_ecutwfc', None)
+        optimal_kspacing = getattr(self, 'optimal_kspacing', None)
         
-        if len(ref_result) == 0:
+        if optimal_ecutwfc is None or optimal_kspacing is None:
             raise ValueError(
-                f"Reference calculation (ecutwfc={ref_ecutwfc}, "
-                f"kspacing={ref_kspacing}) not found in results."
+                f"Convergence study incomplete. Could not find optimal parameters. "
+                f"optimal_ecutwfc={optimal_ecutwfc}, optimal_kspacing={optimal_kspacing}"
             )
         
-        ref_energy = ref_result['energy_per_atom'].values[0]
+        # Get tolerance info from convergence criteria
+        energy_tol_meV = self.convergence_criteria.get('energy_tolerance', 1e-4) * 1000
         
-        # Analyze convergence
-        self.results['energy_diff'] = (
-            (self.results['energy_per_atom'] - ref_energy) * 1000  # Convert to meV
-        )
-        self.results['converged_energy'] = (
-            np.abs(self.results['energy_diff']) <= energy_tolerance
-        )
-        self.results['converged_force'] = (
-            self.results['max_force'] <= force_tolerance
-        )
-        
-        recommendations = {}
-        
-        # 1. Fast convergence: loosest parameters that meet criteria
-        fast = self.results[
-            self.results['converged_energy'] &
-            self.results['converged_force']
-        ]
-        if len(fast) > 0:
-            # Choose loosest (smallest ecutwfc, largest kspacing)
-            fast_sorted = fast.sort_values('ecutwfc')
-            fast_rec = fast_sorted.iloc[0]
-            recommendations['fast'] = {
-                'ecutwfc': fast_rec['ecutwfc'],
-                'kspacing': fast_rec['kspacing'],
-                'energy_per_atom': fast_rec['energy_per_atom'],
-                'energy_diff': fast_rec['energy_diff'],
-                'max_force': fast_rec['max_force'],
-                'n_kpoints': fast_rec['n_kpoints'],
-                'label': fast_rec['label'],
-            }
-        
-        # 2. Balanced: medium ecutwfc, reasonable kspacing
-        mid_ecutwfc = self.ecutwfc_range[len(self.ecutwfc_range)//2]
-        balanced = self.results[
-            (self.results['ecutwfc'] <= mid_ecutwfc) &
-            self.results['converged_energy']
-        ]
-        if len(balanced) > 0:
-            # Choose finest kspacing from mid ecutwfc options
-            balanced_rec = balanced.sort_values('kspacing').iloc[-1]
-            recommendations['balanced'] = {
-                'ecutwfc': balanced_rec['ecutwfc'],
-                'kspacing': balanced_rec['kspacing'],
-                'energy_per_atom': balanced_rec['energy_per_atom'],
-                'energy_diff': balanced_rec['energy_diff'],
-                'max_force': balanced_rec['max_force'],
-                'n_kpoints': balanced_rec['n_kpoints'],
-                'label': balanced_rec['label'],
-            }
-        
-        # 3. Accurate: tightest parameters
-        accurate = self.results[
-            (self.results['ecutwfc'] == ref_ecutwfc) |
-            (self.results['kspacing'] == ref_kspacing)
-        ]
-        if len(accurate) > 0:
-            accurate_rec = accurate.iloc[0]
-            recommendations['accurate'] = {
-                'ecutwfc': accurate_rec['ecutwfc'],
-                'kspacing': accurate_rec['kspacing'],
-                'energy_per_atom': accurate_rec['energy_per_atom'],
-                'energy_diff': accurate_rec['energy_diff'],
-                'max_force': accurate_rec['max_force'],
-                'n_kpoints': accurate_rec['n_kpoints'],
-                'label': accurate_rec['label'],
-            }
-        
-        # Best parameters
-        recommendations['best_ecutwfc'] = ref_ecutwfc
-        recommendations['best_kspacing'] = ref_kspacing
-        
-        # Summary
-        recommendations['convergence_summary'] = {
-            'energy_tolerance_eV_atom': energy_tolerance,
-            'force_tolerance_eV_A': force_tolerance,
-            'reference_energy_per_atom': ref_energy,
-            'n_converged_energy': len(self.results[self.results['converged_energy']]),
-            'n_converged_both': len(
-                self.results[
-                    self.results['converged_energy'] &
-                    self.results['converged_force']
-                ]
-            ),
-            'n_total_tests': len(self.results),
+        recommendations = {
+            'optimal_ecutwfc': optimal_ecutwfc,
+            'optimal_kspacing': optimal_kspacing,
+            'precision': self.precision,
+            'energy_tolerance_meV_atom': energy_tol_meV,
         }
         
         if verbose:
-            self._print_recommendations(recommendations)
+            print("\n" + "="*80)
+            print("CONVERGENCE RECOMMENDATIONS")
+            print("="*80)
+            print(f"Precision level: {self.precision}")
+            print(f"Energy tolerance: {energy_tol_meV:.2f} meV/atom")
+            print(f"\nOptimal ecutwfc: {optimal_ecutwfc} Ry")
+            print(f"Optimal kspacing: {optimal_kspacing} Å⁻¹")
+            print("="*80 + "\n")
         
         return recommendations
-    
-    def _print_recommendations(self, recommendations: Dict):
-        """Print formatted recommendations."""
-        print("\n" + "="*80)
-        print("CONVERGENCE RECOMMENDATIONS")
-        print("="*80)
-        
-        if 'convergence_summary' in recommendations:
-            summary = recommendations['convergence_summary']
-            print(f"\nConvergence Criteria:")
-            print(f"  Energy tolerance: {summary['energy_tolerance_eV_atom']*1000:.2f} meV/atom")
-            print(f"  Force tolerance: {summary['force_tolerance_eV_A']:.3f} eV/Å")
-            print(f"\nTest Results:")
-            print(f"  Total tests: {summary['n_total_tests']}")
-            print(f"  Energy converged: {summary['n_converged_energy']}")
-            print(f"  Both converged: {summary['n_converged_both']}")
-        
-        if 'fast' in recommendations:
-            rec = recommendations['fast']
-            print(f"\n⚡ FAST (minimal cost):")
-            print(f"  ecutwfc: {rec['ecutwfc']:.1f} Ry")
-            print(f"  kspacing: {rec['kspacing']:.3f} Å⁻¹")
-            print(f"  k-points: {int(rec['n_kpoints'])}")
-            print(f"  Energy diff: {rec['energy_diff']:.3f} meV/atom")
-        
-        if 'balanced' in recommendations:
-            rec = recommendations['balanced']
-            print(f"\n⚖️ BALANCED (accuracy/cost):")
-            print(f"  ecutwfc: {rec['ecutwfc']:.1f} Ry")
-            print(f"  kspacing: {rec['kspacing']:.3f} Å⁻¹")
-            print(f"  k-points: {int(rec['n_kpoints'])}")
-            print(f"  Energy diff: {rec['energy_diff']:.3f} meV/atom")
-        
-        if 'accurate' in recommendations:
-            rec = recommendations['accurate']
-            print(f"\n🎯 ACCURATE (high precision):")
-            print(f"  ecutwfc: {rec['ecutwfc']:.1f} Ry")
-            print(f"  kspacing: {rec['kspacing']:.3f} Å⁻¹")
-            print(f"  k-points: {int(rec['n_kpoints'])}")
-            print(f"  Energy diff: {rec['energy_diff']:.3f} meV/atom")
-        
-        print("\n" + "="*80)
     
     def plot_convergence(
         self,
@@ -1836,6 +1691,7 @@ class ConvergenceWorkflow:
         
         # Select ecutwfc for PHASE 2 (MINIMUM converged value for best efficiency)
         optimal_ecutwfc = min(test_ecut_results.keys())
+        self.optimal_ecutwfc = optimal_ecutwfc  # Store for later use in get_recommendations()
         optimal_energy_phase1 = ecut_results[optimal_ecutwfc]
         
         print(f"\n✓ PHASE 1 COMPLETE: Selected ecutwfc = {optimal_ecutwfc:.1f} Ry")
@@ -1846,10 +1702,12 @@ class ConvergenceWorkflow:
         print("="*80)
         
         print(f"\nFixed ecutwfc: {optimal_ecutwfc:.1f} Ry (from PHASE 1)")
+        print(f"Reference kspacing: {max_kspacing:.3f} Å⁻¹ (included in first batch)\n")
         
-        # Start with initial range
-        current_ksp_range = self.kspacing_range.copy()
+        # Start with initial range + reference (max_kspacing) in first iteration
+        current_ksp_range = sorted(set(self.kspacing_range.copy() + [max_kspacing]))
         ksp_results = {}  # Cache: kspacing → energy
+        reference_energy_per_atom_phase2 = None
         iteration = 1
         
         while True:
@@ -1892,18 +1750,36 @@ class ConvergenceWorkflow:
                     })
                 
                 if verbose:
-                    print(f"Submitting {len(batch_params)} new kspacing tests...")
+                    is_first_batch = iteration == 1 and max_kspacing in to_calculate
+                    msg = f"Submitting {len(batch_params)} kspacing tests"
+                    if is_first_batch:
+                        msg += f" (including reference kspacing={max_kspacing})"
+                    print(f"{msg}...")
                 
                 # Submit batch
                 batch_results = wf2.submit_scf_batch_multiple(batch_params, verbose=verbose)
                 completion = wf2.wait_for_batch_jobs(batch_results, timeout=batch_timeout, verbose=verbose)
                 
-                # Store results in cache
+                # STEP 1: Extract reference first (if not yet available)
+                if reference_energy_per_atom_phase2 is None:
+                    for i, comp in enumerate(completion):
+                        param = batch_params[i]
+                        if param['kspacing'] == max_kspacing and comp['success']:
+                            energy = comp.get('energy', np.nan) / len(self.atoms)
+                            ksp_results[param['kspacing']] = energy
+                            reference_energy_per_atom_phase2 = energy
+                            if verbose:
+                                print(f"  ✓ [REFERENCE] kspacing={param['kspacing']:.3f}: E = {energy:.6f} eV/atom")
+                            break
+                
+                # STEP 2: Store all results and print with ΔE now available
                 for i, comp in enumerate(completion):
                     if comp['success']:
                         param = batch_params[i]
                         energy = comp.get('energy', np.nan) / len(self.atoms)
                         ksp_results[param['kspacing']] = energy
+                        
+                        is_reference = (param['kspacing'] == max_kspacing)
                         
                         result = {
                             'phase': 2,
@@ -1914,18 +1790,22 @@ class ConvergenceWorkflow:
                         }
                         results_all.append(result)
                         
-                        if verbose:
-                            diff = abs(energy - reference_energy_per_atom)
+                        # Print non-reference with ΔE
+                        if not is_reference and verbose and reference_energy_per_atom_phase2 is not None:
+                            diff = abs(energy - reference_energy_per_atom_phase2)
                             status = "✓" if diff < criteria_tolerances.get('energy_tolerance', 1e-3) else "✗"
                             print(f"  {status} kspacing={param['kspacing']:.3f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f})")
                     else:
                         if verbose:
                             print(f"  ✗ kspacing={batch_params[i]['kspacing']}: {comp.get('error', 'Failed')}")
             
-            # Check convergence
-            converged = self._check_convergence_vs_reference(
-                ksp_results, reference_energy_per_atom, criteria_tolerances
-            )
+            # Check convergence (skip if reference not yet calculated)
+            if reference_energy_per_atom_phase2 is not None:
+                converged = self._check_convergence_vs_reference(
+                    ksp_results, reference_energy_per_atom_phase2, criteria_tolerances
+                )
+            else:
+                converged = False
             
             if converged:
                 if verbose:
@@ -1956,11 +1836,42 @@ class ConvergenceWorkflow:
             current_ksp_range = sorted(set(current_ksp_range + new_ksp_vals), reverse=True)
             iteration += 1
         
+        # PHASE 2: SELECT OPTIMAL KSPACING FROM CONVERGENCE RESULTS
         if not ksp_results:
             print("\n⚠️  PHASE 2: No successful kspacing tests. May need to adjust parameters.")
+        else:
+            # Exclude reference from selection
+            test_ksp_results = {k: v for k, v in ksp_results.items() if k != max_kspacing}
+            
+            # Find converged kspacing values (ΔE < tolerance)
+            tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+            converged_ksp = {}
+            for ksp, energy in test_ksp_results.items():
+                delta_e = abs(energy - reference_energy_per_atom_phase2)
+                if delta_e < tolerance:
+                    converged_ksp[ksp] = delta_e
+            
+            if converged_ksp:
+                # Select the MAXIMUM (coarsest, most efficient) converged kspacing
+                optimal_kspacing = max(converged_ksp.keys())
+                self.optimal_kspacing = optimal_kspacing  # Store for get_recommendations()
+                optimal_delta_e = converged_ksp[optimal_kspacing]
+                
+                if verbose:
+                    print(f"\n✓ PHASE 2 CONVERGED")
+                    print(f"  Optimal kspacing: {optimal_kspacing:.3f} Å⁻¹")
+                    print(f"  ΔE = {optimal_delta_e*1000:.2f} meV/atom < tolerance = {tolerance*1000:.2f} meV/atom")
+                    print(f"  (Converged values: {sorted(converged_ksp.keys())})")
+            else:
+                if verbose:
+                    best_kspacing = min(test_ksp_results.keys())
+                    best_delta_e = abs(test_ksp_results[best_kspacing] - reference_energy_per_atom_phase2)
+                    print(f"\n✗ PHASE 2 NOT CONVERGED")
+                    print(f"  Tolerance = {tolerance*1000:.2f} meV/atom (precision='{self.precision}')")
+                    print(f"  Reached minimum kspacing=0.1 without achieving convergence")
+                    print(f"  Closest: kspacing={best_kspacing:.3f} with ΔE = {best_delta_e*1000:.2f} meV/atom")
         
-        print(f"\n✓ PHASE 2 COMPLETE")
-        print("\n" + "="*80)
+        print(f"\n" + "="*80)
         print("CONVERGENCE STUDY COMPLETE (INDEPENDENT WITH DYNAMIC RANGES)")
         print("="*80 + "\n")
         

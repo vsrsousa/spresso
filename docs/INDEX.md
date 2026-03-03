@@ -56,6 +56,15 @@
 - Design verification
 - **Best for**: Project tracking
 
+### 6. Convergence Workflow Guide (10 min read)
+📄 **[CONVERGENCE_WORKFLOW.md](CONVERGENCE_WORKFLOW.md)**
+- Two-phase independent convergence algorithm
+- Call tree and execution flow
+- Dynamic range expansion
+- Performance optimization
+- Usage examples
+- **Best for**: DFT parameter optimization
+
 ---
 
 ## 🧪 Test Files

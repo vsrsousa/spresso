@@ -496,129 +496,6 @@ class ConvergenceWorkflow:
         # Default criteria: energy convergence only
         return ['energy']
     
-    def _check_kspacing_convergence(self, results_df: pd.DataFrame, criteria_list: List[str], tolerances: Dict) -> Dict[str, bool]:
-        """
-        Check convergence with respect to kspacing for a fixed ecutwfc.
-        
-        Args:
-            results_df: DataFrame with results for a single ecutwfc (multiple kspacing)
-            criteria_list: List of criteria to check
-            tolerances: Dict with tolerance values
-            
-        Returns:
-            Dict mapping criterion to convergence status
-        """
-        convergence_status = {}
-        
-        # Sort by kspacing (finest first)
-        sorted_df = results_df.sort_values('kspacing')
-        
-        for criterion in criteria_list:
-            if criterion == 'energy':
-                # Check if energy converges with kspacing
-                if len(sorted_df) >= 2:
-                    energies = sorted_df['energy_per_atom'].values
-                    # Compare finest two kspacing values
-                    if len(energies) >= 2:
-                        delta_e = abs(energies[-1] - energies[-2])  # Compare last two (finest)
-                        convergence_status['energy'] = delta_e < tolerances['energy_tolerance']
-                    else:
-                        convergence_status['energy'] = False
-                else:
-                    convergence_status['energy'] = False
-                    
-            elif criterion == 'forces':
-                # Check force convergence with kspacing
-                if 'max_force' in sorted_df.columns and len(sorted_df) >= 2:
-                    forces = sorted_df['max_force'].dropna().values
-                    if len(forces) >= 2:
-                        delta_f = abs(forces[-1] - forces[-2])  # Compare finest two
-                        convergence_status['forces'] = delta_f < tolerances['force_tolerance']
-                    else:
-                        convergence_status['forces'] = False
-                else:
-                    convergence_status['forces'] = False
-                    
-            elif criterion == 'geometry':
-                # For geometry, check if positions are converged
-                # This would require position data - for now assume converged if energy is
-                convergence_status['geometry'] = convergence_status.get('energy', False)
-                
-            elif criterion == 'magnetic_moments':
-                # For magnetic moments - assume converged if energy is
-                convergence_status['magnetic_moments'] = convergence_status.get('energy', False)
-        
-        return convergence_status
-    
-    def _check_convergence(self, energies: List[float], tolerance: float) -> bool:
-        """
-        Check if energy has converged based on tolerance.
-        
-        Args:
-            energies: List of energies in order (should be at least 2 values)
-            tolerance: Energy tolerance in eV/atom
-            
-        Returns:
-            True if converged (last two energies differ by less than tolerance)
-        """
-        if len(energies) < 2:
-            return False
-        
-        # Check if last two energies are within tolerance
-        delta_e = abs(energies[-1] - energies[-2])
-        return delta_e < tolerance
-    
-    def _check_all_convergence_criteria(self, results_df: pd.DataFrame, criteria_list: List[str]) -> Dict[str, bool]:
-        """
-        Check convergence for all specified criteria.
-        
-        Args:
-            results_df: DataFrame with calculation results
-            criteria_list: List of convergence criteria to check
-            
-        Returns:
-            Dict mapping criteria to convergence status
-        """
-        convergence_status = {}
-        
-        # Group by ecutwfc and get the finest kspacing results
-        finest_results = results_df.loc[results_df.groupby('ecutwfc')['kspacing'].idxmin()]
-        finest_results = finest_results.sort_values('ecutwfc')
-        
-        if len(finest_results) < 2:
-            # Not enough data for convergence check
-            for criterion in criteria_list:
-                convergence_status[criterion] = False
-            return convergence_status
-        
-        # Check energy convergence
-        if 'energy' in criteria_list:
-            energies = finest_results['energy_per_atom'].values
-            convergence_status['energy'] = self._check_convergence(
-                energies, self.convergence_criteria['energy_tolerance']
-            )
-        
-        # Check forces convergence
-        if 'forces' in criteria_list:
-            # For forces, we need to check if max_force is below tolerance
-            # This is a different type of convergence - absolute value vs difference
-            latest_max_force = finest_results['max_force'].iloc[-1]
-            convergence_status['forces'] = latest_max_force < self.convergence_criteria['force_tolerance']
-        
-        # Check geometry convergence (simplified - would need position differences)
-        if 'geometry' in criteria_list:
-            # For now, use energy as proxy for geometry convergence
-            # In a full implementation, this would compare atomic positions
-            convergence_status['geometry'] = convergence_status.get('energy', False)
-        
-        # Check magnetic moments convergence
-        if 'magnetic_moments' in criteria_list:
-            # For now, assume converged if energy converged
-            # In a full implementation, this would check magnetic moments
-            convergence_status['magnetic_moments'] = convergence_status.get('energy', False)
-        
-        return convergence_status
-    
     def _fit_exponential_convergence(self, ecutwfc_values: List[float], energies: List[float]) -> float:
         """
         Fit exponential convergence to estimate infinite ecutwfc energy.
@@ -811,7 +688,6 @@ class ConvergenceWorkflow:
         machine: Optional[str] = None,
         code_version: Optional[str] = None,
         verbose: bool = True,
-        use_batch_mode: bool = True,
         batch_timeout: int = 3600,
         label_prefix: str = 'convergence',
         max_ecutwfc: float = 200.0,
@@ -833,7 +709,6 @@ class ConvergenceWorkflow:
             machine: Machine configuration name to load from ~/.xespresso/machines/
             code_version: Quantum ESPRESSO version (e.g., '7.2', '6.8')
             verbose: Print progress information (default: True)
-            use_batch_mode: Use parallel batch submission for remote systems (default: True)
             batch_timeout: Timeout for batch jobs in seconds (default: 3600)
             label_prefix: Prefix for calculation directories (default: 'convergence')
             max_ecutwfc: Maximum ecutwfc to test (default: 200.0)
@@ -854,7 +729,6 @@ class ConvergenceWorkflow:
             verbose=verbose,
             max_ecutwfc=max_ecutwfc,
             ecutwfc_step=ecutwfc_step,
-            use_batch_mode=use_batch_mode,
             batch_timeout=batch_timeout,
         )
         return workflow
@@ -865,423 +739,36 @@ class ConvergenceWorkflow:
         verbose: bool = True,
         max_ecutwfc: float = 200.0,
         ecutwfc_step: float = 10.0,
-        use_batch_mode: bool = True,
         batch_timeout: int = 3600,
-        independent_mode: bool = True,
     ) -> pd.DataFrame:
         """
-        Run convergence study with independent parameter optimization.
+        Run convergence study with INDEPENDENT two-phase algorithm.
         
-        **RECOMMENDED**: Uses independent_mode=True by default.
-        
-        INDEPENDENT MODE (recommended, default):
-        ✅ PHASE 1: Ecutwfc convergence with FIXED coarse kspacing (0.5 Å⁻¹)
-        ✅ PHASE 2: Kspacing convergence with FIXED optimal ecutwfc
+        PHASE 1: Ecutwfc convergence with FIXED coarse kspacing
+        PHASE 2: Kspacing convergence with FIXED optimal ecutwfc
         
         Benefits:
-        - Pseudopotenciais transferidos apenas 2x (não N×M times!)
-        - 4-6x mais rápido que nested loop mode
-        - Algoritmo claramente diferenciado
-        - Pseudo enviado UMA VEZ para cada fase
-        
-        LEGACY MODE (nested loops, slower):
-        ❌ Tests all (ecutwfc, kspacing) combinations in nested loops
-        ❌ Pseudopotenciais reenviados múltiplas vezes
-        ❌ Mantido apenas para compatibilidade com scripts antigos
+        - Pseudopotenciais transferred only 2-3x (not N×M times)
+        - 4-6x faster than nested loop approaches
+        - Two independent, clearly separated phases
         
         Args:
             label_prefix: Prefix for calculation directories
             verbose: Print progress information
             max_ecutwfc: Maximum ecutwfc to test (safety limit)
             ecutwfc_step: Step size for ecutwfc increases
-            use_batch_mode: If True and queue is remote, use batch submission (default: True)
             batch_timeout: Timeout for batch jobs in seconds (default: 3600)
-            independent_mode: If True (default), use INDEPENDENT two-phase algorithm.
-                             If False, use legacy nested-loop algorithm (NOT recommended).
             
         Returns:
             pandas.DataFrame with convergence results
         """
-        # Use independent mode by default (RECOMMENDED)
-        if independent_mode:
-            return self.run_convergence_independent(
-                label_prefix=label_prefix,
-                max_ecutwfc=max_ecutwfc,
-                ecutwfc_step=ecutwfc_step,
-                verbose=verbose,
-                batch_timeout=batch_timeout,
-            )
-        
-        # Legacy nested-loop mode (NOT recommended)
-        return self._run_convergence_study_legacy(
+        return self.run_convergence_independent(
             label_prefix=label_prefix,
-            verbose=verbose,
             max_ecutwfc=max_ecutwfc,
             ecutwfc_step=ecutwfc_step,
-            use_batch_mode=use_batch_mode,
+            verbose=verbose,
             batch_timeout=batch_timeout,
         )
-    
-    def _run_convergence_study_legacy(
-        self,
-        label_prefix: str = 'convergence',
-        verbose: bool = True,
-        max_ecutwfc: float = 200.0,
-        ecutwfc_step: float = 10.0,
-        use_batch_mode: bool = True,
-        batch_timeout: int = 3600,
-    ) -> pd.DataFrame:
-        """
-        Legacy nested-loop convergence (NOT recommended).
-        
-        ⚠️ WARNING: This method uses nested loops and transfers pseudopotenciais
-        multiple times. Use run_convergence_study(independent_mode=True) instead!
-        
-        For REMOTE HPC systems (SLURM), uses batch mode to submit all jobs
-        in parallel and monitor them together.
-        
-        For LOCAL systems, uses sequential mode (one job at a time).
-        """
-        results_list = []
-        
-        # Get starting ecutwfc (minimum from range or 30 Ry)
-        if hasattr(self, 'ecutwfc_range') and self.ecutwfc_range:
-            start_ecutwfc = min(self.ecutwfc_range)
-        else:
-            start_ecutwfc = 30.0
-            
-        # Get kspacing range to test
-        if hasattr(self, 'kspacing_range') and self.kspacing_range:
-            kspacing_values = sorted(self.kspacing_range, reverse=True)  # Coarsest first
-        else:
-            kspacing_values = [0.5, 0.3, 0.2, 0.15]
-        
-        print("\n" + "="*80)
-        print("⚠️ LEGACY NESTED-LOOP CONVERGENCE STUDY")
-        print("="*80)
-        print("WARNING: This uses nested loops and transfers pseudopotenciais multiple times!")
-        print("Use run_convergence_study(independent_mode=True) instead for better performance.")
-        print("="*80)
-        print(f"\nStructure: {self.atoms.get_chemical_formula()}")
-        print(f"Convergence criteria: {', '.join(self.convergence_criteria_list)}")
-        print(f"Energy tolerance: {self.convergence_criteria['energy_tolerance']*1000:.1f} meV/atom")
-        if 'forces' in self.convergence_criteria_list:
-            print(f"Force tolerance: {self.convergence_criteria['force_tolerance']:.1f} eV/Å")
-        if 'geometry' in self.convergence_criteria_list:
-            print(f"Geometry tolerance: {self.convergence_criteria['geometry_tolerance']*1000:.1f} meV/atom")
-        if 'magnetic_moments' in self.convergence_criteria_list:
-            print(f"Magnetic tolerance: {self.convergence_criteria['magnetic_tolerance']*1000:.1f} μB")
-        print(f"Starting ecutwfc: {start_ecutwfc} Ry")
-        print(f"ecutwfc step: {ecutwfc_step} Ry")
-        print(f"kspacing values: {kspacing_values}")
-        
-        # Detect if using remote batch mode
-        is_remote = self.queue and self.queue.get('execution') == 'remote'
-        use_batch = use_batch_mode and is_remote
-        
-        if use_batch:
-            print(f"\n⚡ BATCH MODE: Submitting jobs in parallel to SLURM")
-        else:
-            print(f"\n📊 SEQUENTIAL MODE: Running jobs one at a time")
-        
-        # Track convergence
-        converged_ecutwfc = None
-        converged_kspacing = None
-        current_ecutwfc = start_ecutwfc
-        test_count = 0
-        
-        # If using batch mode, prepare all jobs for first ecutwfc
-        if use_batch:
-            return self._run_convergence_study_batch(
-                label_prefix, verbose, max_ecutwfc, ecutwfc_step, 
-                start_ecutwfc, kspacing_values, batch_timeout
-            )
-        else:
-            return self._run_convergence_study_sequential(
-                label_prefix, verbose, max_ecutwfc, ecutwfc_step,
-                start_ecutwfc, kspacing_values
-            )
-    
-    def _run_convergence_study_batch(
-        self,
-        label_prefix: str,
-        verbose: bool,
-        max_ecutwfc: float,
-        ecutwfc_step: float,
-        start_ecutwfc: float,
-        kspacing_values: List[float],
-        batch_timeout: int
-    ) -> pd.DataFrame:
-        """
-        Run convergence study using batch (parallel) submission on SLURM.
-        
-        Submits all kspacing tests for current ecutwfc as a batch,
-        waits for all to complete, then checks convergence.
-        """
-        results_list = []
-        test_count = 0
-        current_ecutwfc = start_ecutwfc
-        
-        while current_ecutwfc <= max_ecutwfc:
-            if verbose:
-                print(f"\n--- Testing ecutwfc = {current_ecutwfc:.1f} Ry ---")
-            
-            # Prepare batch parameters for this ecutwfc
-            batch_params = []
-            for kspacing in kspacing_values:
-                test_count += 1
-                label = f"{label_prefix}/ecut{int(current_ecutwfc)}_ksp{kspacing:.2f}"
-                batch_params.append({
-                    'label': label,
-                    'ecutwfc': current_ecutwfc,
-                    'ecutrho': current_ecutwfc * self.ecutrho_ratio,  # Calculate ecutrho dynamically
-                    'kspacing': kspacing,
-                })
-            
-            # Create base workflow for batch submission
-            # Pass pseudopotentials via config name (recommended) so CalculationWorkflow
-            # loads them the same way and has access to base_path
-            workflow_kwargs = {
-                'atoms': self.atoms,
-                'protocol': self.protocol,
-                'code_version': self.code_version,
-            }
-            
-            # Pass pseudopotentials via config name if available
-            if self._pseudo_config_name:
-                workflow_kwargs['pseudopotentials_config'] = self._pseudo_config_name
-            else:
-                workflow_kwargs['pseudopotentials'] = self.pseudopotentials
-            
-            # Pass either queue or machine (not both)
-            if self.queue is not None:
-                workflow_kwargs['queue'] = self.queue
-            elif self.machine is not None:
-                workflow_kwargs['machine'] = self.machine
-            
-            # Add any extra kwargs
-            workflow_kwargs.update(self.extra_kwargs)
-            
-            workflow = CalculationWorkflow(**workflow_kwargs)
-            
-            # Submit all jobs in batch
-            if verbose:
-                print(f"Submitting {len(batch_params)} jobs in batch mode...")
-            
-            batch_results = workflow.submit_scf_batch_multiple(batch_params, verbose=verbose)
-            
-            # Wait for all jobs to complete
-            if verbose:
-                print(f"Waiting for batch to complete (timeout: {batch_timeout}s)...")
-            
-            completion_results = workflow.wait_for_batch_jobs(
-                batch_results, timeout=batch_timeout, verbose=verbose
-            )
-            
-            # Process results
-            ecutwfc_results = []
-            for i, comp_result in enumerate(completion_results):
-                if comp_result['success']:
-                    batch_param = batch_params[i]
-                    result = {
-                        'ecutwfc': batch_param['ecutwfc'],
-                        'kspacing': batch_param['kspacing'],
-                        'energy': comp_result.get('energy', np.nan),
-                        'energy_per_atom': comp_result.get('energy', np.nan) / len(self.atoms) if comp_result.get('energy') else np.nan,
-                        'max_force': np.nan,  # Not available from batch results yet
-                        'n_kpoints': np.nan,
-                        'label': batch_param['label'],
-                        'test_number': i + 1,
-                    }
-                    results_list.append(result)
-                    ecutwfc_results.append(result)
-                    
-                    if verbose:
-                        energy_per_atom = result['energy_per_atom']
-                        print(f"  ✓ {batch_param['label']}: E = {energy_per_atom:.6f} eV/atom")
-                else:
-                    if verbose:
-                        print(f"  ✗ {batch_params[i]['label']}: {comp_result.get('error', 'Unknown error')}")
-            
-            # Check kspacing convergence for this ecutwfc
-            if len(ecutwfc_results) >= 2:
-                temp_df = pd.DataFrame(ecutwfc_results)
-                convergence_status = self._check_kspacing_convergence(
-                    temp_df, self.convergence_criteria_list, self.convergence_criteria
-                )
-                
-                all_converged = all(convergence_status.values())
-                
-                if all_converged:
-                    converged_ecutwfc = current_ecutwfc
-                    converged_kspacing = min([r['kspacing'] for r in ecutwfc_results])
-                    
-                    if verbose:
-                        print(f"✓ CONVERGED at ecutwfc={current_ecutwfc:.1f} Ry, kspacing≤{converged_kspacing:.3f} Å⁻¹")
-                    
-                    break  # Exit ecutwfc loop
-                else:
-                    if verbose:
-                        unconverged = [k for k, v in convergence_status.items() if not v]
-                        print(f"  Not converged: {', '.join(unconverged)}")
-            
-            # Go to next ecutwfc value
-            current_ecutwfc += ecutwfc_step
-        
-        # Finalize
-        if verbose:
-            print(f"\n{'='*80}")
-            print("CONVERGENCE STUDY COMPLETE")
-            print(f"{'='*80}\n")
-        
-        # Store results
-        self.results = pd.DataFrame(results_list)
-        return self.results
-    
-    def _run_convergence_study_sequential(
-        self,
-        label_prefix: str,
-        verbose: bool,
-        max_ecutwfc: float,
-        ecutwfc_step: float,
-        start_ecutwfc: float,
-        kspacing_values: List[float]
-    ) -> pd.DataFrame:
-        """Run convergence study using sequential (one-at-a-time) submission."""
-        results_list = []
-        test_count = 0
-        current_ecutwfc = start_ecutwfc
-        
-        while current_ecutwfc <= max_ecutwfc:
-            if verbose:
-                print(f"\n--- Testing ecutwfc = {current_ecutwfc:.1f} Ry ---")
-            
-            ecutwfc_results = []
-            
-            # Test all kspacing values for this ecutwfc (sequentially)
-            for kspacing in kspacing_values:
-                test_count += 1
-                label = f"{label_prefix}/ecut{int(current_ecutwfc)}_ksp{kspacing:.2f}"
-                
-                if verbose:
-                    print(f"  [{test_count}] kspacing={kspacing:.3f} Å⁻¹")
-                
-                # Create workflow for this parameter set
-                # Pass pseudopotentials via config name if available
-                workflow_kwargs = {
-                    'atoms': self.atoms,
-                    'protocol': self.protocol,
-                    'kspacing': kspacing,
-                    'code_version': self.code_version,
-                }
-                
-                # Pass pseudopotentials via config name if available
-                if self._pseudo_config_name:
-                    workflow_kwargs['pseudopotentials_config'] = self._pseudo_config_name
-                else:
-                    workflow_kwargs['pseudopotentials'] = self.pseudopotentials
-                
-                # Pass either queue or machine (not both)
-                if self.queue is not None:
-                    workflow_kwargs['queue'] = self.queue
-                elif self.machine is not None:
-                    workflow_kwargs['machine'] = self.machine
-                
-                # Add any extra kwargs
-                workflow_kwargs.update(self.extra_kwargs)
-                
-                workflow = CalculationWorkflow(**workflow_kwargs)
-                
-                # Override ecutwfc
-                workflow.input_data['ecutwfc'] = current_ecutwfc
-                
-                # Run calculation
-                try:
-                    if 'geometry' in self.convergence_criteria_list:
-                        calc = workflow.run_geometry_optimization(label=label)
-                    else:
-                        calc = workflow.run_scf(label=label)
-                    
-                    # Extract results
-                    energy = calc.atoms.get_potential_energy()
-                    energy_per_atom = energy / len(self.atoms)
-                    
-                    # Calculate max force if available
-                    try:
-                        forces = calc.atoms.get_forces()
-                        max_force = np.max(np.abs(forces))
-                    except:
-                        max_force = np.nan
-                    
-                    # Extract k-points info
-                    try:
-                        kpts = workflow.atoms.get_calculator().get_ibz_k_points()
-                        n_kpoints = len(kpts)
-                    except:
-                        n_kpoints = np.nan
-                    
-                    result = {
-                        'ecutwfc': current_ecutwfc,
-                        'kspacing': kspacing,
-                        'energy': energy,
-                        'energy_per_atom': energy_per_atom,
-                        'max_force': max_force,
-                        'n_kpoints': n_kpoints,
-                        'label': label,
-                        'test_number': test_count,
-                    }
-                    results_list.append(result)
-                    ecutwfc_results.append(result)
-                    
-                    if verbose:
-                        print(f"    ✓ E = {energy_per_atom:.6f} eV/atom, F_max = {max_force:.4f} eV/Å")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to run {label}: {e}")
-                    if verbose:
-                        print(f"    ✗ Failed: {e}")
-                    continue
-            
-            # Check kspacing convergence for this ecutwfc
-            if len(ecutwfc_results) >= 2:
-                temp_df = pd.DataFrame(ecutwfc_results)
-                convergence_status = self._check_kspacing_convergence(
-                    temp_df, self.convergence_criteria_list, self.convergence_criteria
-                )
-                
-                # Check if all required criteria are converged
-                all_converged = all(convergence_status.values())
-                
-                if all_converged:
-                    converged_ecutwfc = current_ecutwfc
-                    # Find the finest kspacing that achieved convergence
-                    converged_kspacing = min([r['kspacing'] for r in ecutwfc_results])
-                    
-                    if verbose:
-                        print(f"✓ CONVERGED at ecutwfc={converged_ecutwfc:.1f} Ry, kspacing≤{converged_kspacing:.3f} Å⁻¹")
-                        finest_result = min(ecutwfc_results, key=lambda x: x['kspacing'])
-                        print(f"  Energy: {finest_result['energy_per_atom']:.6f} eV/atom")
-                    
-                    break  # Exit ecutwfc loop
-                else:
-                    if verbose:
-                        unconverged = [k for k, v in convergence_status.items() if not v]
-                        print(f"  Not converged: {', '.join(unconverged)}")
-            else:
-                if verbose:
-                    print(f"  Insufficient data for convergence check")
-            
-            # Increase ecutwfc for next iteration
-            current_ecutwfc += ecutwfc_step
-        
-        # Create results DataFrame
-        self.results = pd.DataFrame(results_list)
-        
-        print("\n" + "="*80)
-        print("CONVERGENCE STUDY COMPLETE")
-        print("="*80)
-        
-        return self.results
     
     def get_recommendations(self, verbose: bool = True) -> Dict:
         """

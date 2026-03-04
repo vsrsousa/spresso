@@ -63,36 +63,37 @@ def _check_convergence_vs_reference(...):
 
 ### Phase 1: Force Convergence
 
-**Status**: ⏳ Ready to implement  
-**Priority**: HIGH (most commonly needed after energy)  
-**Effort**: MEDIUM
+**Status**: ✅ **COMPLETE** (2026-03-04)  
+**Commits**: Implementation + Tests  
 
-**What needs to happen**:
+**What was implemented**:
 
-1. **Enable force calculation** (line 880-920):
-   - In `_extract_property_from_result()`, handle `'forces'` criterion
-   - Extract max force from `completion['forces']` (assumes ASE Atoms format: forces shape (N, 3))
-   - Return: `float` with max force magnitude
+1. ✅ **Enable force calculation** (lines 880-920):
+   - In `_extract_property_from_result()`, added 'forces' criterion
+   - Extract max force magnitude from `completion['forces']` array (shape: N_atoms×3)
+   - Compute `np.linalg.norm()` per atom, return max magnitude
+   - Unit: eV/Å (QE native)
 
-2. **Code location**: `xespresso/workflow/convergence_workflow.py:880-920`
-   - Add elif block after energy extraction
-   - Parse forces array and compute `np.linalg.norm()` per atom
-   - Return `np.max(force_magnitudes)`
+2. ✅ **QE configuration** (lines 827-857):
+   - Updated `_get_calculation_config()` to accept 'forces' criterion
+   - Added 'forces' to valid_criteria set
+   - Automatically inserts `'tprnfor': True` when 'forces' in criteria_list
 
-3. **Enable in convergence check** (line 1010-1044):
-   - Add elif for `'forces'` criterion in `_check_convergence_vs_reference()`
-   - Compare max force in test results vs reference
-   - Use `criteria_tolerances.get('force_tolerance', 0.5)`
+3. ✅ **Enable in convergence check** (lines 1010-1044):
+   - Added elif for 'forces' criterion in `_check_convergence_vs_reference()`
+   - Compares max force in test results vs reference
+   - Uses `criteria_tolerances.get('force_tolerance', 0.05)` (eV/Å)
 
-4. **QE configuration**:
-   - Add `tprnfor=True` to input when 'forces' criterion is requested
-   - Location: Update `_get_calculation_config()` (lines 827-857)
-   - Logic: If 'forces' in criteria_list → add `'tprnfor': True` to overrides
+4. ✅ **Unit Tests** (test_convergence_multi_property.py):
+   - `test_get_calculation_config_forces_implemented`: Config returns tprnfor=True
+   - `test_extract_property_forces_implemented`: Extract max force correctly
+   - `test_extract_property_forces_max_magnitude`: Magnitude calculation (3-4-5 triangle)
+   - `test_check_convergence_forces_converged`: Force convergence check passes
+   - `test_check_convergence_forces_not_converged`: Force convergence check fails properly
+   - `test_check_convergence_energy_and_forces_both_required`: ALL criteria must converge
+   - `test_check_convergence_energy_and_forces_both_converged`: Both pass → converged
 
-**Technical Details**:
-- Forces extracted from QE output via ASE interface
-- Expected format: `completion['forces']` as (N_atoms, 3) numpy array
-- Unit: eV/Å (QE native)
+**Test Results**: 22/22 tests PASSING ✅
 
 ---
 
@@ -100,7 +101,7 @@ def _check_convergence_vs_reference(...):
 
 **Status**: ⏳ Ready to implement  
 **Priority**: HIGH  
-**Effort**: MEDIUM
+**Effort**: MEDIUM (identical to forces structure)
 
 **What needs to happen**:
 
@@ -190,18 +191,17 @@ def _check_convergence_vs_reference(...):
 
 ## 🎯 NEXT IMMEDIATE STEPS
 
-### Step 1: Implement Force Extraction & Convergence
+### Step 1: Implement Stress Extraction & Convergence ← **CURRENT**
 **Time**: ~30 minutes  
 **Files to edit**: 
 - `xespresso/workflow/convergence_workflow.py`: lines 880-920 (extraction)
 - `xespresso/workflow/convergence_workflow.py`: lines 827-857 (`_get_calculation_config`)
 - `xespresso/workflow/convergence_workflow.py`: lines 1010-1044 (convergence check)
 
-**Validation**: Create test with `convergence_criteria_list=['energy', 'forces']`
-
-### Step 2: Implement Stress Extraction & Convergence
-**Time**: ~30 minutes  
-**Files to edit**: Same as Step 1
+**What needs to happen** (same pattern as forces):
+1. Extract hydrostatic pressure from stress tensor
+2. Set `tstress=True` when 'stress' in criteria_list
+3. Add convergence check for stress vs reference, use `stress_tolerance` (GPa)
 
 ### Step 3: Create Unit Tests
 **Time**: ~1 hour  

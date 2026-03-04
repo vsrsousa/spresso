@@ -65,7 +65,7 @@ class ConvergenceWorkflow:
         >>> workflow = ConvergenceWorkflow.from_cif(
         ...     'structure.cif',
         ...     pseudopotentials={'Si': 'Si.pbe.UPF'},
-        ...     precision='medium'  # Controls parameter ranges (ecutwfc, kspacing)
+        ...     precision='low'  # Controls parameter ranges (ecutwfc, kspacing), fastest settings
         ... )
         >>> optimal_params = workflow.optimize_parameters()
     
@@ -75,7 +75,7 @@ class ConvergenceWorkflow:
         ...     atoms=atoms,
         ...     pseudopotentials={'Si': 'Si.pbe.UPF'},
         ...     precision='low',  # Coarse parameter ranges
-        ...     convergence_criteria_list=['energy', 'forces', 'geometry']  # Strict criteria
+        ...     convergence_criteria_list=['energy', 'forces', 'geometry', 'stress']  # Strict criteria
         ... )
         >>> # Uses INDEPENDENT two-phase algorithm by default
         >>> conv.run_convergence_study()
@@ -98,7 +98,7 @@ class ConvergenceWorkflow:
         pseudopotentials: Optional[Dict[str, str]] = None,
         pseudopotentials_config: Optional[str] = None,
         protocol: str = 'moderate',
-        precision: Optional[str] = None,
+        precision: str = 'low',
         ecutwfc_range: Optional[List[float]] = None,
         kspacing_range: Optional[List[float]] = None,
         conv_thr_range: Optional[List[float]] = None,
@@ -107,6 +107,7 @@ class ConvergenceWorkflow:
         queue: Optional[Dict] = None,
         machine: Optional[str] = None,
         code_version: Optional[str] = None,
+        magnetic_config: Optional[Union[str, Dict]] = None,
         **kwargs
     ):
         """
@@ -118,20 +119,20 @@ class ConvergenceWorkflow:
             protocol: Base protocol ('fast', 'moderate', 'accurate')
             precision: Precision level for automatic parameter selection.
                      Options: 'low', 'medium', 'high', 'ultra'.
-                     If specified, overrides ecutwfc_range and kspacing_range.
-                     Default: None (use explicit ranges)
-            ecutwfc_range: List of ecutwfc values to test.
-                          If None and precision=None: [30, 40, 50, 60, 70]
-            kspacing_range: List of kspacing values to test (Å^-1).
-                           If None and precision=None: [0.5, 0.3, 0.2, 0.15]
+                     Overrides ecutwfc_range and kspacing_range.
+                     Default: 'low' (fast convergence)
+            ecutwfc_range: List of ecutwfc values to test (optional override).
+            kspacing_range: List of kspacing values to test in Å⁻¹ (optional override).
             conv_thr_range: List of conv_thr values to test (optional)
             convergence_criteria_list: List of convergence criteria to check.
-                                     Options: 'energy', 'forces', 'geometry', 'magnetic_moments'
+                                     Options: 'energy', 'forces', 'geometry', 'stress', 'magnetic_moments'
                                      If None, uses defaults based on precision level.
             convergence_criteria: Dict with convergence tolerances.
                                 If None, uses defaults based on precision level.
-                                Keys: 'energy_tolerance', 'force_tolerance', 'geometry_tolerance', 'magnetic_tolerance'
+                                Keys: 'energy_tolerance', 'force_tolerance', 'geometry_tolerance', 'stress_tolerance', 'magnetic_tolerance'
             queue: Queue configuration for job submission (optional)
+            magnetic_config: Magnetic configuration for calculations. Can be a string like 'ferromagnetic', 
+                           'antiferromagnetic', or a dict specifying magnetic moments per atom (optional)
             **kwargs: Additional parameters passed to CalculationWorkflow
         """
         self.atoms = atoms.copy()
@@ -204,25 +205,18 @@ class ConvergenceWorkflow:
         
         self.machine = machine
         self.code_version = code_version
+        self.magnetic_config = magnetic_config
         self.extra_kwargs = kwargs
         
         # Define parameter ranges based on precision level
-        if precision is not None:
-            # Get smart ranges adjusted for pseudopotential requirements
-            self.ecutwfc_range, self.kspacing_range = self._get_smart_ranges_for_pseudopotentials(
-                precision, self.pseudopotentials, atoms
-            )
-        else:
-            # Use explicit ranges or defaults
-            if ecutwfc_range is None:
-                self.ecutwfc_range = [30, 40, 50, 60, 70]
-            else:
-                self.ecutwfc_range = sorted(ecutwfc_range)
-            
-            if kspacing_range is None:
-                self.kspacing_range = [0.30, 0.27, 0.23, 0.20]
-            else:
-                self.kspacing_range = sorted(kspacing_range, reverse=True)
+        # Get smart ranges adjusted for pseudopotential requirements
+        default_ecutwfc, default_kspacing = self._get_smart_ranges_for_pseudopotentials(
+            precision, self.pseudopotentials, atoms
+        )
+        
+        # Apply user overrides if provided
+        self.ecutwfc_range = sorted(ecutwfc_range) if ecutwfc_range is not None else default_ecutwfc
+        self.kspacing_range = sorted(kspacing_range, reverse=True) if kspacing_range is not None else default_kspacing
         
         # Results storage
         self.results = None  # DataFrame will be created after tests
@@ -428,49 +422,44 @@ class ConvergenceWorkflow:
         
         return ecutwfc_range, kspacing_range
     
-    def _get_default_convergence_criteria(self, precision: Optional[str]) -> Dict:
+    def _get_default_convergence_criteria(self, precision: str) -> Dict:
         """
         Get default convergence criteria tolerances based on precision level.
         
         Args:
-            precision: Precision level or None
+            precision: Precision level ('low', 'medium', 'high', 'ultra')
             
         Returns:
             Dict with convergence tolerances
         """
-        if precision is None:
-            # Default criteria for custom ranges
-            return {
-                'energy_tolerance': 1e-3,      # 1 meV/atom
-                'force_tolerance': 0.1,        # eV/Å
-                'geometry_tolerance': 0.01,    # Å
-                'magnetic_tolerance': 0.001,   # μB
-            }
-        
         precision = precision.lower()
         
         criteria = {
             'low': {
                 'energy_tolerance': 3e-3,      # 3 meV/atom
                 'force_tolerance': 0.5,        # eV/Å
+                'stress_tolerance': 1.0,       # GPa
                 'geometry_tolerance': 0.05,    # Å
                 'magnetic_tolerance': 0.01,    # μB
             },
             'medium': {
                 'energy_tolerance': 2e-3,      # 2 meV/atom
                 'force_tolerance': 0.2,        # eV/Å
+                'stress_tolerance': 0.5,       # GPa
                 'geometry_tolerance': 0.02,    # Å
                 'magnetic_tolerance': 0.005,   # μB
             },
             'high': {
                 'energy_tolerance': 1e-3,      # 1 meV/atom
                 'force_tolerance': 0.1,        # eV/Å
+                'stress_tolerance': 0.1,       # GPa
                 'geometry_tolerance': 0.01,    # Å
                 'magnetic_tolerance': 0.001,   # μB
             },
             'ultra': {
                 'energy_tolerance': 5e-4,      # 0.5 meV/atom
                 'force_tolerance': 0.05,       # eV/Å
+                'stress_tolerance': 0.05,      # GPa
                 'geometry_tolerance': 0.005,   # Å
                 'magnetic_tolerance': 0.0005,  # μB
             }
@@ -481,14 +470,14 @@ class ConvergenceWorkflow:
             
         return criteria[precision]
     
-    def _get_default_convergence_criteria_list(self, precision: Optional[str]) -> List[str]:
+    def _get_default_convergence_criteria_list(self, precision: str) -> List[str]:
         """
         Get default convergence criteria list.
         
         Note: Criteria control which physical quantities are checked for convergence.
         
         Args:
-            precision: Precision level (unused, kept for compatibility)
+            precision: Precision level (required)
             
         Returns:
             List of convergence criteria
@@ -656,7 +645,7 @@ class ConvergenceWorkflow:
         cif_file: Union[str, Path],
         pseudopotentials: Optional[Dict[str, str]] = None,
         pseudopotentials_config: Optional[str] = None,
-        precision: Optional[str] = 'medium',
+        precision: Optional[str] = 'low',
         **kwargs
     ) -> 'ConvergenceWorkflow':
         """
@@ -665,7 +654,7 @@ class ConvergenceWorkflow:
         Args:
             cif_file: Path to CIF structure file
             pseudopotentials: Dict mapping element symbols to UPF files
-            precision: Precision level ('low', 'medium', 'high', 'ultra') or None for custom ranges
+            precision: Precision level ('low', 'medium', 'high', 'ultra'). Default: 'low'
             **kwargs: Additional parameters for __init__ (ecutwfc_range, kspacing_range, etc.)
             
         Returns:
@@ -683,15 +672,17 @@ class ConvergenceWorkflow:
         atoms: Atoms,
         pseudopotentials: Optional[Dict[str, str]] = None,
         pseudopotentials_config: Optional[str] = None,
-        precision: str = 'medium',
+        precision: str = 'low',
         queue: Optional[Dict] = None,
         machine: Optional[str] = None,
         code_version: Optional[str] = None,
+        convergence_criteria_list: List[str] = ['energy'],
         verbose: bool = True,
         batch_timeout: int = 3600,
         label_prefix: str = 'convergence',
         max_ecutwfc: float = 200.0,
         ecutwfc_step: float = 10.0,
+        magnetic_config: Optional[Union[str, Dict]] = None,
     ) -> 'ConvergenceWorkflow':
         """
         Create and run convergence workflow with automatic parameter optimization.
@@ -708,20 +699,22 @@ class ConvergenceWorkflow:
             queue: Queue configuration for job submission
             machine: Machine configuration name to load from ~/.xespresso/machines/
             code_version: Quantum ESPRESSO version (e.g., '7.2', '6.8')
+            convergence_criteria_list: List of convergence criteria to check (default: ['energy'])
             verbose: Print progress information (default: True)
             batch_timeout: Timeout for batch jobs in seconds (default: 3600)
             label_prefix: Prefix for calculation directories (default: 'convergence')
             max_ecutwfc: Maximum ecutwfc to test (default: 200.0)
             ecutwfc_step: Step size for ecutwfc increases (default: 10.0)
+            magnetic_config: Magnetic configuration string or dict (optional)
             
         Returns:
             ConvergenceWorkflow instance with completed convergence study
         """
         # If a pseudopotentials_config name is provided, pass it to the ctor
         if pseudopotentials_config is not None:
-            workflow = cls(atoms, pseudopotentials_config=pseudopotentials_config, precision=precision, queue=queue, machine=machine, code_version=code_version)
+            workflow = cls(atoms, pseudopotentials_config=pseudopotentials_config, precision=precision, queue=queue, machine=machine, code_version=code_version, convergence_criteria_list=convergence_criteria_list, magnetic_config=magnetic_config)
         else:
-            workflow = cls(atoms, pseudopotentials, precision=precision, queue=queue, machine=machine, code_version=code_version)
+            workflow = cls(atoms, pseudopotentials, precision=precision, queue=queue, machine=machine, code_version=code_version, convergence_criteria_list=convergence_criteria_list, magnetic_config=magnetic_config)
         
         # Run convergence study with specified parameters
         workflow.run_convergence_study(
@@ -969,32 +962,175 @@ class ConvergenceWorkflow:
         
         return sorted(new_vals)
     
-    def _check_convergence_vs_reference(
-        self, 
-        results_dict: Dict[float, float],
-        reference_energy: float,
-        criteria_tolerances: Dict[str, float]
-    ) -> bool:
+    def _get_calculation_config(self, convergence_criteria_list: List[str]) -> Dict:
         """
-        Check if parameters converged compared to reference energy.
+        Determine calculation configuration based on convergence criteria.
+        
+        Analyzes which properties need to be calculated and returns appropriate
+        configuration. Currently only 'energy' criterion is fully implemented.
         
         Args:
-            results_dict: Dict mapping parameter value → energy
-            reference_energy: Energy calculated with high cutoff
-            criteria_tolerances: Dict with 'energy_tolerance' key
+            convergence_criteria_list: List of criteria like ['energy'], ['energy', 'forces'], etc.
             
         Returns:
-            True if |E_max - E_ref| < tolerance, False otherwise
+            Dict with keys:
+                - 'calc_type': 'scf' or 'vc-relax' (string)
+                - 'input_data_overrides': Dict of QE input parameters to override
+                
+        Raises:
+            NotImplementedError: If any criterion other than 'energy' is used
+        """
+        if not convergence_criteria_list:
+            convergence_criteria_list = ['energy']
+        
+        config = {
+            'calc_type': 'scf',
+            'input_data_overrides': {}
+        }
+        
+        # Validate which criteria are implemented
+        valid_criteria = {'energy', 'forces'}  # energy and forces are implemented
+        unsupported = set(convergence_criteria_list) - valid_criteria
+        
+        if unsupported:
+            unsupported_str = ', '.join(sorted(unsupported))
+            raise NotImplementedError(
+                f"Convergence criteria not yet implemented: {unsupported_str}\n"
+                f"Currently supported: 'energy', 'forces'\n"
+                f"Coming soon: 'stress' (SCF+tstress), 'geometry' (VC-RELAX), "
+                f"'magnetic_moments' (nspin=2)"
+            )
+        
+        # Add QE input flags for forces if needed
+        if 'forces' in convergence_criteria_list:
+            config['input_data_overrides']['tprnfor'] = True
+        
+        return config
+    
+    def _extract_property_from_result(
+        self, 
+        completion: Dict, 
+        num_atoms: int,
+        property_name: str
+    ) -> float:
+        """
+        Extract a single physical property from a completed calculation result.
+        
+        Args:
+            completion: Completion dict from wait_for_batch_jobs()
+            num_atoms: Number of atoms in the structure
+            property_name: Name of property to extract: 'energy', 'forces', 'stress', etc.
+            
+        Returns:
+            Float value of the property, or np.nan if not available
+            
+        Raises:
+            NotImplementedError: If property is not yet implemented
+        """
+        if property_name == 'energy':
+            # Energy per atom in eV
+            if 'energy' in completion:
+                return completion['energy'] / num_atoms
+            else:
+                return np.nan
+        
+        elif property_name == 'forces':
+            # Extract maximum force magnitude from completion results
+            if 'forces' in completion:
+                forces_array = np.array(completion['forces'])  # Shape: (N_atoms, 3)
+                # Compute force magnitude for each atom
+                force_magnitudes = np.linalg.norm(forces_array, axis=1)  # Shape: (N_atoms,)
+                # Return maximum magnitude in eV/Å
+                return float(np.max(force_magnitudes))
+            else:
+                return np.nan
+        
+        elif property_name == 'stress':
+            raise NotImplementedError(
+                "Stress extraction not yet implemented. "
+                "Coming soon: will extract hydrostatic pressure."
+            )
+        
+        elif property_name == 'geometry':
+            raise NotImplementedError(
+                "Geometry extraction not yet implemented. "
+                "Coming soon: will extract atomic displacement (requires vc-relax)."
+            )
+        
+        elif property_name == 'magnetic_moments':
+            raise NotImplementedError(
+                "Magnetic moments extraction not yet implemented. "
+                "Coming soon: will extract total magnetic moment (requires nspin=2)."
+            )
+        
+        else:
+            raise ValueError(f"Unknown property: {property_name}")
+    
+    def _check_convergence_vs_reference(
+        self, 
+        results_dict: Dict[float, Dict[str, float]],
+        reference_properties: Dict[str, float],
+        criteria_tolerances: Dict[str, float],
+        convergence_criteria_list: List[str]
+    ) -> bool:
+        """
+        Check if parameters converged for ALL criteria in convergence_criteria_list.
+        
+        All criteria must converge for this to return True.
+        
+        Args:
+            results_dict: Dict mapping parameter value → Dict of extracted properties
+                         Inner dict has keys like 'energy', 'forces', etc.
+            reference_properties: Dict with same structure as values in results_dict
+                                 Contains reference values for all properties
+            criteria_tolerances: Dict with tolerance keys like 'energy_tolerance', 'force_tolerance'
+            convergence_criteria_list: List of which criteria to check (e.g., ['energy', 'forces'])
+            
+        Returns:
+            True if ALL criteria in convergence_criteria_list converged, False otherwise
         """
         if not results_dict:
             return False
         
-        max_energy = max(results_dict.values())
-        energy_diff = abs(max_energy - reference_energy)
-        tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+        if not convergence_criteria_list:
+            convergence_criteria_list = ['energy']
         
-        converged = energy_diff < tolerance
-        return converged
+        # Check each criterion - ALL must pass
+        for criterion in convergence_criteria_list:
+            if criterion == 'energy':
+                # Energy convergence: max deviation from reference < tolerance
+                energies = [props.get('energy', np.nan) for props in results_dict.values()]
+                if not energies or all(np.isnan(e) for e in energies):
+                    return False
+                
+                max_energy = max(e for e in energies if not np.isnan(e))
+                energy_diff = abs(max_energy - reference_properties.get('energy', 0))
+                tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+                
+                if energy_diff >= tolerance:
+                    return False  # Energy not converged
+            
+            elif criterion == 'forces':
+                # Force convergence: max force in test results vs reference < tolerance
+                forces = [props.get('forces', np.nan) for props in results_dict.values()]
+                if not forces or all(np.isnan(f) for f in forces):
+                    return False
+                
+                max_force = max(f for f in forces if not np.isnan(f))
+                reference_force = reference_properties.get('forces', 0)
+                force_diff = abs(max_force - reference_force)
+                tolerance = criteria_tolerances.get('force_tolerance', 0.05)  # eV/Å
+                
+                if force_diff >= tolerance:
+                    return False  # Forces not converged
+            
+            else:
+                # Other criteria not yet implemented, but we already validated in
+                # _get_calculation_config(), so this shouldn't happen
+                raise NotImplementedError(f"Convergence check for '{criterion}' not yet implemented")
+        
+        # All criteria converged!
+        return True
 
     def run_convergence_independent(
         self,
@@ -1002,7 +1138,8 @@ class ConvergenceWorkflow:
         max_ecutwfc: float = 200.0,
         ecutwfc_step: float = 10.0,
         max_kspacing: float = 0.1,
-        kspacing_step: float = 0.05,
+        min_kspacing: float = 0.1,
+        kspacing_step: float = 0.03,
         verbose: bool = True,
         batch_timeout: int = 3600,
     ) -> pd.DataFrame:
@@ -1034,6 +1171,14 @@ class ConvergenceWorkflow:
         # Get convergence criteria tolerances
         criteria_tolerances = self.convergence_criteria
         
+        # Validate calculation configuration for requested criteria
+        calc_config = self._get_calculation_config(self.convergence_criteria_list)
+        if calc_config['calc_type'] != 'scf':
+            raise NotImplementedError(
+                f"Calculation type '{calc_config['calc_type']}' not yet supported. "
+                f"Only 'scf' (energy convergence) is currently implemented."
+            )
+        
         # ===== PHASE 1: DYNAMIC ECUTWFC CONVERGENCE =====
         print("\n" + "="*80)
         print("PHASE 1: ECUTWFC CONVERGENCE (DYNAMIC)")
@@ -1046,8 +1191,8 @@ class ConvergenceWorkflow:
         
         # Start with initial range + reference (max_ecutwfc) in first iteration
         current_ecut_range = sorted(set(self.ecutwfc_range.copy() + [max_ecutwfc]))
-        ecut_results = {}  # Cache: ecut → energy
-        reference_energy_per_atom = None
+        ecut_results = {}  # Cache: ecut → Dict of extracted properties
+        reference_properties = None  # Dict with all properties from reference calculation
         iteration = 1
         
         while True:
@@ -1076,6 +1221,9 @@ class ConvergenceWorkflow:
                 elif self.machine is not None:
                     wf_kwargs['machine'] = self.machine
                 
+                if self.magnetic_config is not None:
+                    wf_kwargs['magnetic_config'] = self.magnetic_config
+                
                 wf1 = CalculationWorkflow(**wf_kwargs)
                 
                 # Prepare batch for new values only
@@ -1101,23 +1249,39 @@ class ConvergenceWorkflow:
                 completion = wf1.wait_for_batch_jobs(batch_results, timeout=batch_timeout, verbose=verbose)
                 
                 # STEP 1: Extract reference first (if not yet available)
-                if reference_energy_per_atom is None:
+                if reference_properties is None:
                     for i, comp in enumerate(completion):
                         param = batch_params[i]
                         if param['ecutwfc'] == max_ecutwfc and comp['success']:
-                            energy = comp.get('energy', np.nan) / len(self.atoms)
-                            ecut_results[param['ecutwfc']] = energy
-                            reference_energy_per_atom = energy
+                            # Extract all properties for this result
+                            props = {}
+                            for prop_name in self.convergence_criteria_list:
+                                props[prop_name] = self._extract_property_from_result(
+                                    comp, len(self.atoms), prop_name
+                                )
+                            ecut_results[param['ecutwfc']] = props
+                            reference_properties = props
+                            
                             if verbose:
-                                print(f"  ✓ [REFERENCE] ecutwfc={param['ecutwfc']:.1f}: E = {energy:.6f} eV/atom")
+                                energy_str = f"{props.get('energy', np.nan):.6f}" if 'energy' in props else "N/A"
+                                print(f"  ✓ [REFERENCE] ecutwfc={param['ecutwfc']:.1f}: E = {energy_str} eV/atom")
                             break
                 
                 # STEP 2: Store all results and print with ΔE now available
                 for i, comp in enumerate(completion):
                     if comp['success']:
                         param = batch_params[i]
-                        energy = comp.get('energy', np.nan) / len(self.atoms)
-                        ecut_results[param['ecutwfc']] = energy
+                        # Skip if already stored (reference)
+                        if param['ecutwfc'] in ecut_results:
+                            continue
+                        
+                        # Extract all properties for this result
+                        props = {}
+                        for prop_name in self.convergence_criteria_list:
+                            props[prop_name] = self._extract_property_from_result(
+                                comp, len(self.atoms), prop_name
+                            )
+                        ecut_results[param['ecutwfc']] = props
                         
                         is_reference = (param['ecutwfc'] == max_ecutwfc)
                         
@@ -1125,14 +1289,16 @@ class ConvergenceWorkflow:
                             'phase': 0 if is_reference else 1,
                             'ecutwfc': param['ecutwfc'],
                             'kspacing': param['kspacing'],
-                            'energy_per_atom': energy,
+                            'energy_per_atom': props.get('energy', np.nan),
                             'label': param['label'],
                         }
                         results_all.append(result)
                         
                         # Print non-reference with ΔE
-                        if not is_reference and verbose and reference_energy_per_atom is not None:
-                            diff = abs(energy - reference_energy_per_atom)
+                        if not is_reference and verbose and reference_properties is not None:
+                            energy = props.get('energy', np.nan)
+                            ref_energy = reference_properties.get('energy', 0)
+                            diff = abs(energy - ref_energy)
                             status = "✓" if diff < criteria_tolerances.get('energy_tolerance', 1e-3) else "✗"
                             print(f"  {status} ecutwfc={param['ecutwfc']:.1f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f})")
                     else:
@@ -1140,11 +1306,12 @@ class ConvergenceWorkflow:
                             print(f"  ✗ ecutwfc={batch_params[i]['ecutwfc']}: {comp.get('error', 'Failed')}")
             
             # Check convergence (skip if reference not yet calculated)
-            if reference_energy_per_atom is not None:
+            if reference_properties is not None:
                 # Exclude reference from convergence check
                 test_ecut_results = {k: v for k, v in ecut_results.items() if k != max_ecutwfc}
                 converged = self._check_convergence_vs_reference(
-                    test_ecut_results, reference_energy_per_atom, criteria_tolerances
+                    test_ecut_results, reference_properties, criteria_tolerances, 
+                    self.convergence_criteria_list
                 )
                 
                 if converged:
@@ -1168,7 +1335,7 @@ class ConvergenceWorkflow:
             iteration += 1
         
         # Ensure reference was calculated
-        if reference_energy_per_atom is None:
+        if reference_properties is None:
             raise RuntimeError("Could not obtain reference energy (ecutwfc=200)")
         
         # Remove reference from test results for selection
@@ -1179,7 +1346,7 @@ class ConvergenceWorkflow:
         # Select ecutwfc for PHASE 2 (MINIMUM converged value for best efficiency)
         optimal_ecutwfc = min(test_ecut_results.keys())
         self.optimal_ecutwfc = optimal_ecutwfc  # Store for later use in get_recommendations()
-        optimal_energy_phase1 = ecut_results[optimal_ecutwfc]
+        optimal_props_phase1 = ecut_results[optimal_ecutwfc]
         
         print(f"\n✓ PHASE 1 COMPLETE: Selected ecutwfc = {optimal_ecutwfc:.1f} Ry")
         
@@ -1189,20 +1356,27 @@ class ConvergenceWorkflow:
         print("="*80)
         
         print(f"\nFixed ecutwfc: {optimal_ecutwfc:.1f} Ry (from PHASE 1)")
-        print(f"Reference kspacing: {max_kspacing:.3f} Å⁻¹ (included in first batch)\n")
+        print(f"Reference kspacing (fine): {max_kspacing:.3f} Å⁻¹\n")
         
-        # Start with initial range + reference (max_kspacing) in first iteration
-        current_ksp_range = sorted(set(self.kspacing_range.copy() + [max_kspacing]))
-        ksp_results = {}  # Cache: kspacing → energy
-        reference_energy_per_atom_phase2 = None
+        # Start with normal range (WITHOUT reference). Reference will be added to first batch.
+        current_ksp_range = sorted(self.kspacing_range.copy(), reverse=True)
+        ksp_results = {}  # Cache: kspacing → Dict of extracted properties
+        reference_properties_phase2 = None  # Dict with all properties from reference calculation
         iteration = 1
         
         while True:
             print(f"\n--- Iteration {iteration} ---")
-            print(f"Testing kspacing: {current_ksp_range}")
+            
+            # Add reference to batch on first iteration only
+            if iteration == 1:
+                to_test = sorted(set(current_ksp_range + [max_kspacing]), reverse=True)
+            else:
+                to_test = current_ksp_range
+            
+            print(f"Testing kspacing: {to_test}")
             
             # Find which values to calculate (not in cache)
-            to_calculate = [k for k in current_ksp_range if k not in ksp_results]
+            to_calculate = [k for k in to_test if k not in ksp_results]
             
             if to_calculate:
                 # Create workflow for this iteration
@@ -1223,16 +1397,19 @@ class ConvergenceWorkflow:
                 elif self.machine is not None:
                     wf_kwargs['machine'] = self.machine
                 
+                if self.magnetic_config is not None:
+                    wf_kwargs['magnetic_config'] = self.magnetic_config
+                
                 wf2 = CalculationWorkflow(**wf_kwargs)
                 
                 # Prepare batch for new values only
                 batch_params = []
                 for kspacing in to_calculate:
-                    label = f"{label_prefix}/phase2_iter{iteration}_ecut{int(optimal_ecutwfc)}_ksp{kspacing:.2f}"
+                    label = f"{label_prefix}/phase2_iter{iteration}_ecut{int(optimal_ecutwfc)}_ksp{kspacing:.3f}"
                     batch_params.append({
                         'label': label,
                         'ecutwfc': optimal_ecutwfc,
-                        'ecutrho': optimal_ecutwfc * self.ecutrho_ratio,  # Calculate ecutrho dynamically
+                        'ecutrho': optimal_ecutwfc * self.ecutrho_ratio,
                         'kspacing': kspacing,
                     })
                 
@@ -1240,7 +1417,7 @@ class ConvergenceWorkflow:
                     is_first_batch = iteration == 1 and max_kspacing in to_calculate
                     msg = f"Submitting {len(batch_params)} kspacing tests"
                     if is_first_batch:
-                        msg += f" (including reference kspacing={max_kspacing})"
+                        msg += f" (including reference kspacing={max_kspacing:.3f})"
                     print(f"{msg}...")
                 
                 # Submit batch
@@ -1248,38 +1425,53 @@ class ConvergenceWorkflow:
                 completion = wf2.wait_for_batch_jobs(batch_results, timeout=batch_timeout, verbose=verbose)
                 
                 # STEP 1: Extract reference first (if not yet available)
-                if reference_energy_per_atom_phase2 is None:
+                if reference_properties_phase2 is None:
                     for i, comp in enumerate(completion):
                         param = batch_params[i]
                         if param['kspacing'] == max_kspacing and comp['success']:
-                            energy = comp.get('energy', np.nan) / len(self.atoms)
-                            ksp_results[param['kspacing']] = energy
-                            reference_energy_per_atom_phase2 = energy
+                            # Extract all properties for this result
+                            props = {}
+                            for prop_name in self.convergence_criteria_list:
+                                props[prop_name] = self._extract_property_from_result(
+                                    comp, len(self.atoms), prop_name
+                                )
+                            ksp_results[param['kspacing']] = props
+                            reference_properties_phase2 = props
                             if verbose:
-                                print(f"  ✓ [REFERENCE] kspacing={param['kspacing']:.3f}: E = {energy:.6f} eV/atom")
+                                energy_str = f"{props.get('energy', np.nan):.6f}" if 'energy' in props else "N/A"
+                                print(f"  ✓ [REFERENCE] kspacing={param['kspacing']:.3f}: E = {energy_str} eV/atom")
                             break
                 
                 # STEP 2: Store all results and print with ΔE now available
                 for i, comp in enumerate(completion):
                     if comp['success']:
                         param = batch_params[i]
-                        energy = comp.get('energy', np.nan) / len(self.atoms)
-                        ksp_results[param['kspacing']] = energy
+                        # Skip if already stored (reference)
+                        if param['kspacing'] in ksp_results:
+                            continue
                         
-                        is_reference = (param['kspacing'] == max_kspacing)
+                        # Extract all properties for this result
+                        props = {}
+                        for prop_name in self.convergence_criteria_list:
+                            props[prop_name] = self._extract_property_from_result(
+                                comp, len(self.atoms), prop_name
+                            )
+                        ksp_results[param['kspacing']] = props
                         
                         result = {
                             'phase': 2,
                             'ecutwfc': param['ecutwfc'],
                             'kspacing': param['kspacing'],
-                            'energy_per_atom': energy,
+                            'energy_per_atom': props.get('energy', np.nan),
                             'label': param['label'],
                         }
                         results_all.append(result)
                         
                         # Print non-reference with ΔE
-                        if not is_reference and verbose and reference_energy_per_atom_phase2 is not None:
-                            diff = abs(energy - reference_energy_per_atom_phase2)
+                        if verbose and reference_properties_phase2 is not None:
+                            energy = props.get('energy', np.nan)
+                            ref_energy = reference_properties_phase2.get('energy', 0)
+                            diff = abs(energy - ref_energy)
                             status = "✓" if diff < criteria_tolerances.get('energy_tolerance', 1e-3) else "✗"
                             print(f"  {status} kspacing={param['kspacing']:.3f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f})")
                     else:
@@ -1287,9 +1479,12 @@ class ConvergenceWorkflow:
                             print(f"  ✗ kspacing={batch_params[i]['kspacing']}: {comp.get('error', 'Failed')}")
             
             # Check convergence (skip if reference not yet calculated)
-            if reference_energy_per_atom_phase2 is not None:
+            if reference_properties_phase2 is not None:
+                # Exclude reference from convergence check
+                test_ksp_results = {k: v for k, v in ksp_results.items() if k != max_kspacing}
                 converged = self._check_convergence_vs_reference(
-                    ksp_results, reference_energy_per_atom_phase2, criteria_tolerances
+                    test_ksp_results, reference_properties_phase2, criteria_tolerances,
+                    self.convergence_criteria_list
                 )
             else:
                 converged = False
@@ -1299,29 +1494,36 @@ class ConvergenceWorkflow:
                     print(f"\n✓ CONVERGED at iteration {iteration}")
                 break
             
-            # Not converged: expand range (finer kspacing)
-            # Note: for kspacing, smaller values are finer, so we expand downward
+            # Not converged: expand range to finer kspacing (smaller values)
+            # Note: for kspacing, smaller values are finer
             min_current = min(current_ksp_range)
-            if min_current <= max_kspacing:
+            
+            # Check if we can expand further (can't go below min_kspacing)
+            if min_current <= min_kspacing:
                 if verbose:
-                    print(f"\n⚠️  Cannot expand further (limit: {max_kspacing}). Stopping.")
+                    print(f"\n⚠️  Cannot expand further (limit: {min_kspacing:.3f}). Stopping.")
                 break
             
+            # Generate finer kspacing values (smaller than min_current)
             new_ksp_vals = []
-            num_steps = 2
+            num_steps = 1
             for i in range(1, num_steps + 1):
                 val = min_current - (i * kspacing_step)
-                if val >= max_kspacing and val not in current_ksp_range:
+                if val >= min_kspacing and val not in current_ksp_range:
                     new_ksp_vals.append(val)
             
             if not new_ksp_vals:
                 if verbose:
-                    print(f"\n⚠️  Cannot expand further (limit: {max_kspacing}). Stopping.")
+                    print(f"\n⚠️  Cannot generate new values (would go below {min_kspacing:.3f}). Stopping.")
                 break
             
-            # Add expanded values to range
+            # Add expanded values to range (maintain reverse sort)
             current_ksp_range = sorted(set(current_ksp_range + new_ksp_vals), reverse=True)
             iteration += 1
+        
+        # Ensure reference was calculated
+        if reference_properties_phase2 is None:
+            raise RuntimeError(f"Could not obtain reference energy (kspacing={max_kspacing})")
         
         # PHASE 2: SELECT OPTIMAL KSPACING FROM CONVERGENCE RESULTS
         if not ksp_results:
@@ -1330,11 +1532,16 @@ class ConvergenceWorkflow:
             # Exclude reference from selection
             test_ksp_results = {k: v for k, v in ksp_results.items() if k != max_kspacing}
             
+            if not test_ksp_results:
+                raise RuntimeError("PHASE 2 failed: no successful calculations (only reference)")
+            
             # Find converged kspacing values (ΔE < tolerance)
             tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
             converged_ksp = {}
-            for ksp, energy in test_ksp_results.items():
-                delta_e = abs(energy - reference_energy_per_atom_phase2)
+            for ksp, props_dict in test_ksp_results.items():
+                energy = props_dict.get('energy', np.nan)
+                ref_energy = reference_properties_phase2.get('energy', 0)
+                delta_e = abs(energy - ref_energy)
                 if delta_e < tolerance:
                     converged_ksp[ksp] = delta_e
             
@@ -1348,15 +1555,21 @@ class ConvergenceWorkflow:
                     print(f"\n✓ PHASE 2 CONVERGED")
                     print(f"  Optimal kspacing: {optimal_kspacing:.3f} Å⁻¹")
                     print(f"  ΔE = {optimal_delta_e*1000:.2f} meV/atom < tolerance = {tolerance*1000:.2f} meV/atom")
-                    print(f"  (Converged values: {sorted(converged_ksp.keys())})")
+                    print(f"  (All converged values: {sorted(converged_ksp.keys())})")
             else:
                 if verbose:
                     best_kspacing = min(test_ksp_results.keys())
-                    best_delta_e = abs(test_ksp_results[best_kspacing] - reference_energy_per_atom_phase2)
+                    best_props = test_ksp_results[best_kspacing]
+                    best_energy = best_props.get('energy', np.nan)
+                    ref_energy = reference_properties_phase2.get('energy', 0)
+                    best_delta_e = abs(best_energy - ref_energy)
                     print(f"\n✗ PHASE 2 NOT CONVERGED")
                     print(f"  Tolerance = {tolerance*1000:.2f} meV/atom (precision='{self.precision}')")
-                    print(f"  Reached minimum kspacing=0.1 without achieving convergence")
+                    print(f"  Reached minimum kspacing={min_kspacing:.3f} without achieving convergence")
                     print(f"  Closest: kspacing={best_kspacing:.3f} with ΔE = {best_delta_e*1000:.2f} meV/atom")
+                
+                # Use the best (finest) kspacing found as fallback
+                self.optimal_kspacing = best_kspacing
         
         print(f"\n" + "="*80)
         print("CONVERGENCE STUDY COMPLETE (INDEPENDENT WITH DYNAMIC RANGES)")

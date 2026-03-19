@@ -931,7 +931,7 @@ class ConvergenceWorkflow:
     
     def _expand_range(self, current_range: List[float], step: float, max_val: float) -> List[float]:
         """
-        Expand parameter range by adding next values intelligently.
+        Expand parameter range by adding NEXT value intelligently (ONE at a time).
         
         Args:
             current_range: Current list of parameters tested
@@ -939,28 +939,23 @@ class ConvergenceWorkflow:
             max_val: Maximum limit for expansion
             
         Returns:
-            New range with additional values (subset of new values to test)
+            List with single next value to test (or empty if at limit)
         """
         if not current_range:
             return []
         
         max_current = max(current_range)
         
-        # Generate next values beyond current max
+        # Generate NEXT value beyond current max (only one)
         if max_current >= max_val:
             return []  # Already at limit
         
-        # Calculate how many steps to add
-        remaining = max_val - max_current
-        num_steps = max(2, int(remaining / step))  # At least 2 new values
-        
-        new_vals = []
-        for i in range(1, num_steps + 1):
-            val = max_current + (i * step)
-            if val <= max_val and val not in current_range:
-                new_vals.append(val)
-        
-        return sorted(new_vals)
+        # Add only the immediate next step value
+        next_val = max_current + step
+        if next_val <= max_val:
+            return [next_val]
+        else:
+            return []  # Would exceed limit
     
     def _get_calculation_config(self, convergence_criteria_list: List[str]) -> Dict:
         """
@@ -1187,20 +1182,42 @@ class ConvergenceWorkflow:
         fixed_kspacing_phase1 = 0.3  # Coarse k-mesh
         print(f"\nStructure: {self.atoms.get_chemical_formula()}")
         print(f"Fixed kspacing: {fixed_kspacing_phase1:.3f} Å⁻¹")
-        print(f"Reference ecutwfc: {max_ecutwfc:.1f} Ry (included in first batch)\n")
+        print(f"Reference ecutwfc: {max_ecutwfc:.1f} Ry (calculated separately)\n")
         
-        # Start with initial range + reference (max_ecutwfc) in first iteration
-        current_ecut_range = sorted(set(self.ecutwfc_range.copy() + [max_ecutwfc]))
+        # Initialize range with copy (can be expanded as needed)
+        ecutwfc_range = sorted(self.ecutwfc_range.copy())
         ecut_results = {}  # Cache: ecut → Dict of extracted properties
         reference_properties = None  # Dict with all properties from reference calculation
+        current_ecut_index = 0  # Index into ecutwfc_range
         iteration = 1
         
         while True:
-            print(f"\n--- Iteration {iteration} ---")
-            print(f"Testing ecutwfc: {current_ecut_range}")
+            # Safety check: don't exceed expansion limit
+            expansion_limit = max_ecutwfc - ecutwfc_step
             
-            # Find which values to calculate (not in cache)
-            to_calculate = [e for e in current_ecut_range if e not in ecut_results]
+            # Get next ecutwfc value to test
+            if current_ecut_index >= len(ecutwfc_range):
+                # Need to expand range - generate next value
+                last_ecut = sorted(ecutwfc_range)[-1]
+                next_ecut = last_ecut + ecutwfc_step
+                if next_ecut > expansion_limit:
+                    # Can't expand further
+                    if verbose:
+                        print(f"\n⚠️  Cannot expand further (limit: {expansion_limit:.1f} Ry). Stopping.")
+                    break
+                ecutwfc_range.append(next_ecut)
+            
+            ecut_to_test = ecutwfc_range[current_ecut_index]
+            
+            print(f"\n--- Iteration {iteration} ---")
+            print(f"Testing ecutwfc: {ecut_to_test:.1f} Ry")
+            
+            # Prepare batch: test value + reference (first iteration only)
+            to_calculate = []
+            if ecut_to_test not in ecut_results:
+                to_calculate.append(ecut_to_test)
+            if iteration == 1 and max_ecutwfc not in ecut_results:
+                to_calculate.append(max_ecutwfc)
             
             if to_calculate:
                 # Create workflow for this iteration
@@ -1305,33 +1322,29 @@ class ConvergenceWorkflow:
                         if verbose:
                             print(f"  ✗ ecutwfc={batch_params[i]['ecutwfc']}: {comp.get('error', 'Failed')}")
             
-            # Check convergence (skip if reference not yet calculated)
-            if reference_properties is not None:
-                # Exclude reference from convergence check
-                test_ecut_results = {k: v for k, v in ecut_results.items() if k != max_ecutwfc}
-                converged = self._check_convergence_vs_reference(
-                    test_ecut_results, reference_properties, criteria_tolerances, 
-                    self.convergence_criteria_list
-                )
+            # Check if current value has converged (skip if reference not yet calculated)
+            if reference_properties is not None and ecut_to_test in ecut_results:
+                tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+                energy = ecut_results[ecut_to_test].get('energy', np.nan)
+                ref_energy = reference_properties.get('energy', 0)
+                delta_e = abs(energy - ref_energy)
                 
-                if converged:
+                if delta_e < tolerance:
+                    # Current value converged! Stop searching
                     if verbose:
-                        print(f"\n✓ CONVERGED at iteration {iteration}")
+                        print(f"\n✓ CONVERGED at ecutwfc={ecut_to_test:.1f} Ry")
                     break
+                else:
+                    # Not converged, try next value
+                    if verbose:
+                        print(f"  Not yet converged (ΔE = {delta_e:.6f} > tolerance {tolerance:.6f}), trying next...")
             else:
                 # Reference calculation pending
-                if verbose:
-                    print(f"\n~ Iteration {iteration} complete. Reference pending...")
+                if verbose and iteration == 1:
+                    print(f"~ Reference calculated, continuing with other values...")
             
-            # Not converged: expand range
-            expansion = self._expand_range(current_ecut_range, ecutwfc_step, max_ecutwfc)
-            if not expansion:
-                if verbose:
-                    print(f"\n⚠️  Cannot expand further (limit: {max_ecutwfc}). Stopping.")
-                break
-            
-            # Add expanded values to range
-            current_ecut_range = sorted(set(current_ecut_range + expansion))
+            # Move to next value
+            current_ecut_index += 1
             iteration += 1
         
         # Ensure reference was calculated
@@ -1344,11 +1357,30 @@ class ConvergenceWorkflow:
             raise RuntimeError("PHASE 1 failed: no successful calculations")
         
         # Select ecutwfc for PHASE 2 (MINIMUM converged value for best efficiency)
-        optimal_ecutwfc = min(test_ecut_results.keys())
+        tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+        converged_ecutwfc = {}
+        for ecut, props_dict in test_ecut_results.items():
+            energy = props_dict.get('energy', np.nan)
+            ref_energy = reference_properties.get('energy', 0)
+            delta_e = abs(energy - ref_energy)
+            if delta_e < tolerance:
+                converged_ecutwfc[ecut] = delta_e
+        
+        if converged_ecutwfc:
+            # Select the MINIMUM (most efficient) converged ecutwfc
+            optimal_ecutwfc = min(converged_ecutwfc.keys())
+        else:
+            # Fallback: if nothing converged, select the one with smallest error
+            best_ecut = min(test_ecut_results.keys(), 
+                           key=lambda e: abs(test_ecut_results[e].get('energy', np.nan) - 
+                                           reference_properties.get('energy', 0)))
+            optimal_ecutwfc = best_ecut
+        
         self.optimal_ecutwfc = optimal_ecutwfc  # Store for later use in get_recommendations()
         optimal_props_phase1 = ecut_results[optimal_ecutwfc]
         
-        print(f"\n✓ PHASE 1 COMPLETE: Selected ecutwfc = {optimal_ecutwfc:.1f} Ry")
+        converged_str = "CONVERGED" if converged_ecutwfc else "NOT CONVERGED (best available)"
+        print(f"\n✓ PHASE 1 COMPLETE: Selected ecutwfc = {optimal_ecutwfc:.1f} Ry ({converged_str})")
         
         # ===== PHASE 2: DYNAMIC KSPACING CONVERGENCE =====
         print("\n" + "="*80)
@@ -1358,25 +1390,42 @@ class ConvergenceWorkflow:
         print(f"\nFixed ecutwfc: {optimal_ecutwfc:.1f} Ry (from PHASE 1)")
         print(f"Reference kspacing (fine): {max_kspacing:.3f} Å⁻¹\n")
         
-        # Start with normal range (WITHOUT reference). Reference will be added to first batch.
-        current_ksp_range = sorted(self.kspacing_range.copy(), reverse=True)
+        # Initialize range with copy (can be expanded as needed)
+        # kspacing range is reverse-sorted (coarse to fine)
+        kspacing_range = sorted(self.kspacing_range.copy(), reverse=True)
         ksp_results = {}  # Cache: kspacing → Dict of extracted properties
         reference_properties_phase2 = None  # Dict with all properties from reference calculation
+        current_ksp_index = 0  # Index into kspacing_range
         iteration = 1
         
         while True:
+            # Safety check: don't exceed expansion limit
+            expansion_limit = max_kspacing - kspacing_step  # For kspacing, smaller values are finer
+            
+            # Get next kspacing value to test
+            if current_ksp_index >= len(kspacing_range):
+                # Need to expand range - generate next finer (smaller) value
+                finest_ksp = sorted(kspacing_range)[-1]  # smallest value
+                next_ksp = finest_ksp - kspacing_step
+                if next_ksp < expansion_limit:
+                    # Can't expand further
+                    if verbose:
+                        print(f"\n⚠️  Cannot expand further (limit: {expansion_limit:.3f} Å⁻¹). Stopping.")
+                    break
+                kspacing_range.append(next_ksp)
+                kspacing_range.sort(reverse=True)  # Keep reverse sorted
+            
+            ksp_to_test = kspacing_range[current_ksp_index]
+            
             print(f"\n--- Iteration {iteration} ---")
+            print(f"Testing kspacing: {ksp_to_test:.3f} Å⁻¹")
             
-            # Add reference to batch on first iteration only
-            if iteration == 1:
-                to_test = sorted(set(current_ksp_range + [max_kspacing]), reverse=True)
-            else:
-                to_test = current_ksp_range
-            
-            print(f"Testing kspacing: {to_test}")
-            
-            # Find which values to calculate (not in cache)
-            to_calculate = [k for k in to_test if k not in ksp_results]
+            # Prepare batch: test value + reference (first iteration only)
+            to_calculate = []
+            if ksp_to_test not in ksp_results:
+                to_calculate.append(ksp_to_test)
+            if iteration == 1 and max_kspacing not in ksp_results:
+                to_calculate.append(max_kspacing)
             
             if to_calculate:
                 # Create workflow for this iteration
@@ -1478,47 +1527,29 @@ class ConvergenceWorkflow:
                         if verbose:
                             print(f"  ✗ kspacing={batch_params[i]['kspacing']}: {comp.get('error', 'Failed')}")
             
-            # Check convergence (skip if reference not yet calculated)
-            if reference_properties_phase2 is not None:
-                # Exclude reference from convergence check
-                test_ksp_results = {k: v for k, v in ksp_results.items() if k != max_kspacing}
-                converged = self._check_convergence_vs_reference(
-                    test_ksp_results, reference_properties_phase2, criteria_tolerances,
-                    self.convergence_criteria_list
-                )
+            # Check if current value has converged (skip if reference not yet calculated)
+            if reference_properties_phase2 is not None and ksp_to_test in ksp_results:
+                tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+                energy = ksp_results[ksp_to_test].get('energy', np.nan)
+                ref_energy = reference_properties_phase2.get('energy', 0)
+                delta_e = abs(energy - ref_energy)
+                
+                if delta_e < tolerance:
+                    # Current value converged! Stop searching
+                    if verbose:
+                        print(f"\n✓ CONVERGED at kspacing={ksp_to_test:.3f} Å⁻¹")
+                    break
+                else:
+                    # Not converged, try next (finer) value
+                    if verbose:
+                        print(f"  Not yet converged (ΔE = {delta_e:.6f} > tolerance {tolerance:.6f}), trying finer...")
             else:
-                converged = False
+                # Reference calculation pending
+                if verbose and iteration == 1:
+                    print(f"~ Reference calculated, continuing with other kspacing values...")
             
-            if converged:
-                if verbose:
-                    print(f"\n✓ CONVERGED at iteration {iteration}")
-                break
-            
-            # Not converged: expand range to finer kspacing (smaller values)
-            # Note: for kspacing, smaller values are finer
-            min_current = min(current_ksp_range)
-            
-            # Check if we can expand further (can't go below min_kspacing)
-            if min_current <= min_kspacing:
-                if verbose:
-                    print(f"\n⚠️  Cannot expand further (limit: {min_kspacing:.3f}). Stopping.")
-                break
-            
-            # Generate finer kspacing values (smaller than min_current)
-            new_ksp_vals = []
-            num_steps = 1
-            for i in range(1, num_steps + 1):
-                val = min_current - (i * kspacing_step)
-                if val >= min_kspacing and val not in current_ksp_range:
-                    new_ksp_vals.append(val)
-            
-            if not new_ksp_vals:
-                if verbose:
-                    print(f"\n⚠️  Cannot generate new values (would go below {min_kspacing:.3f}). Stopping.")
-                break
-            
-            # Add expanded values to range (maintain reverse sort)
-            current_ksp_range = sorted(set(current_ksp_range + new_ksp_vals), reverse=True)
+            # Move to next value
+            current_ksp_index += 1
             iteration += 1
         
         # Ensure reference was calculated

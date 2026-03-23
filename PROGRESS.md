@@ -1,8 +1,8 @@
 # Convergence Workflow - Implementation Progress
 
-**Last Updated**: 2026-03-03  
-**Status**: ✅ Working - Ready for next phase  
-**Current Focus**: Multi-property convergence criteria implementation
+**Last Updated**: 2026-03-05  
+**Status**: ✅ Working - Range expansion & incremental testing refactored  
+**Current Focus**: Multi-property convergence criteria implementation (stress, geometry, magnetic moments)
 
 ---
 
@@ -59,7 +59,38 @@ def _check_convergence_vs_reference(...):
 
 ---
 
-## 🔄 IN PROGRESS / TODO
+## � BUG FIXES
+
+### Phase 2 Infinite Loop Bug (2026-03-23) ✅ **FIXED**
+
+**Problem**: Kspacing convergence got stuck in infinite loop, testing the same value repeatedly (iterations 4-34 all tested kspacing=0.230).
+
+**Root Cause**: Line 1402 had incorrect expansion limit calculation:
+```python
+expansion_limit = max_kspacing - kspacing_step  # ❌ WRONG
+```
+This allowed generating kspacing values below the reference (0.100 Å⁻¹), creating logical inconsistency.
+
+**Solution**: Changed to prevent any kspacing smaller than reference:
+```python
+# Safety check: cannot expand below reference kspacing
+# (max_kspacing is the finest/reference value, should never go smaller)
+expansion_limit = max_kspacing
+```
+
+**Why it works**: 
+- `max_kspacing = 0.1` is the reference (finest k-mesh, most k-points)
+- For kspacing: smaller values = finer mesh = more k-points
+- Should NEVER generate values smaller than reference
+- Loop now stops when: `next_ksp = finest - step` would be `< max_kspacing`
+
+**Example**: With `max_kspacing=0.1`, `kspacing_step=0.03`:
+- ✅ Fixed behavior: Tests 0.3 → 0.2 → 0.1 → STOPS (prevents 0.07)
+- ❌ Old behavior: Would allow 0.07, creating convergence paradox
+
+---
+
+## �🔄 IN PROGRESS / TODO
 
 ### Phase 1: Force Convergence
 

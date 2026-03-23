@@ -1399,13 +1399,14 @@ class ConvergenceWorkflow:
         iteration = 1
         
         while True:
-            # Safety check: don't exceed expansion limit
-            expansion_limit = max_kspacing - kspacing_step  # For kspacing, smaller values are finer
+            # Safety check: cannot expand below reference kspacing
+            # (max_kspacing is the finest/reference value, should never go smaller)
+            expansion_limit = max_kspacing
             
             # Get next kspacing value to test
             if current_ksp_index >= len(kspacing_range):
                 # Need to expand range - generate next finer (smaller) value
-                finest_ksp = sorted(kspacing_range)[-1]  # smallest value
+                finest_ksp = min(kspacing_range)  # smallest value
                 next_ksp = finest_ksp - kspacing_step
                 if next_ksp < expansion_limit:
                     # Can't expand further

@@ -72,18 +72,33 @@ class TestConvergenceMultiProperty:
         assert config['calc_type'] == 'scf'
         assert config['input_data_overrides']['tprnfor'] is True
     
-    def test_get_calculation_config_stress_not_implemented(self, si_atoms, pseudo_dict):
-        """Test that requesting stress raises NotImplementedError."""
+    def test_get_calculation_config_stress_implemented(self, si_atoms, pseudo_dict):
+        """Test that stress criterion is now implemented and sets tstress=True."""
         workflow = ConvergenceWorkflow(
             atoms=si_atoms,
             pseudopotentials=pseudo_dict,
             precision='low'
         )
         
-        with pytest.raises(NotImplementedError) as exc_info:
-            workflow._get_calculation_config(['stress'])
+        # Should not raise NotImplementedError anymore
+        config = workflow._get_calculation_config(['stress'])
         
-        assert 'stress' in str(exc_info.value)
+        assert config['calc_type'] == 'scf'
+        assert config['input_data_overrides']['tstress'] is True
+    
+    def test_get_calculation_config_energy_forces_stress(self, si_atoms, pseudo_dict):
+        """Test that stress works in combination with energy and forces."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        config = workflow._get_calculation_config(['energy', 'forces', 'stress'])
+        
+        assert config['calc_type'] == 'scf'
+        assert config['input_data_overrides']['tprnfor'] is True
+        assert config['input_data_overrides']['tstress'] is True
     
     def test_get_calculation_config_geometry_not_implemented(self, si_atoms, pseudo_dict):
         """Test that requesting geometry raises NotImplementedError."""
@@ -164,6 +179,67 @@ class TestConvergenceMultiProperty:
         max_force = workflow._extract_property_from_result(completion, len(forces), 'forces')
         assert np.isclose(max_force, 5.0)
     
+    def test_extract_property_stress_implemented(self, si_atoms, pseudo_dict):
+        """Test extracting hydrostatic pressure from stress tensor."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        # Stress tensor [in kBar]: 
+        # [[σ_xx, σ_xy, σ_xz],
+        #  [σ_yx, σ_yy, σ_yz],
+        #  [σ_zx, σ_zy, σ_zz]]
+        # Hydrostatic pressure = -(trace/3) = -((σ_xx + σ_yy + σ_zz)/3)
+        # Example: diag stress [100, 100, 100] → trace=300 → P=-(300/3)=-100 kBar
+        stress_tensor = np.array([[100.0, 0.0, 0.0],
+                                  [0.0, 100.0, 0.0],
+                                  [0.0, 0.0, 100.0]])  # in kBar
+        completion = {'stress': stress_tensor, 'success': True}
+        
+        pressure_gpa = workflow._extract_property_from_result(completion, len(si_atoms), 'stress')
+        
+        # Expected: |-(300/3) * 0.1| = |−100 * 0.1| = 10 GPa
+        assert np.isclose(pressure_gpa, 10.0)
+    
+    def test_extract_property_stress_kbar_to_gpa_conversion(self, si_atoms, pseudo_dict):
+        """Test kBar to GPa conversion in stress extraction."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        # Simple test: stress = [[10, 0, 0], [0, 10, 0], [0, 0, 10]] kBar
+        # trace = 30 kBar, hydrostatic pressure = -(30/3) = -10 kBar = -1 GPa
+        # abs(-1) = 1 GPa
+        stress_tensor = np.array([[10.0, 0.0, 0.0],
+                                  [0.0, 10.0, 0.0],
+                                  [0.0, 0.0, 10.0]])  # in kBar
+        completion = {'stress': stress_tensor}
+        
+        pressure_gpa = workflow._extract_property_from_result(completion, len(si_atoms), 'stress')
+        assert np.isclose(pressure_gpa, 1.0)
+    
+    def test_extract_property_stress_negative_pressure(self, si_atoms, pseudo_dict):
+        """Test stress extraction handles negative hydrostatic pressure (tension)."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        # Negative stress (tension): stress = [[-50, 0, 0], [0, -50, 0], [0, 0, -50]] kBar
+        # trace = -150 kBar, hydrostatic pressure = -(-150/3) = 50 kBar = 5 GPa
+        stress_tensor = np.array([[-50.0, 0.0, 0.0],
+                                  [0.0, -50.0, 0.0],
+                                  [0.0, 0.0, -50.0]])  # in kBar (tension)
+        completion = {'stress': stress_tensor}
+        
+        pressure_gpa = workflow._extract_property_from_result(completion, len(si_atoms), 'stress')
+        assert np.isclose(pressure_gpa, 5.0)
+    
     def test_check_convergence_forces_converged(self, si_atoms, pseudo_dict):
         """Test force convergence check when converged."""
         workflow = ConvergenceWorkflow(
@@ -209,6 +285,55 @@ class TestConvergenceMultiProperty:
         # Should NOT converge: max deviation is 0.15 eV/Å > 0.05 eV/Å tolerance
         converged = workflow._check_convergence_vs_reference(
             results, reference, criteria_tolerances, ['forces']
+        )
+        
+        assert converged is False
+    
+    def test_check_convergence_stress_converged(self, si_atoms, pseudo_dict):
+        """Test stress convergence check when converged."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        # Results dict: param_value -> Dict of properties (stress in GPa)
+        results = {
+            40: {'stress': 2.4},
+            50: {'stress': 2.0},
+            60: {'stress': 1.8},
+        }
+        
+        reference = {'stress': 1.5}
+        criteria_tolerances = {'stress_tolerance': 1.0}  # 1.0 GPa tolerance
+        
+        # Should converge: max deviation is 0.9 GPa < 1.0 GPa tolerance
+        converged = workflow._check_convergence_vs_reference(
+            results, reference, criteria_tolerances, ['stress']
+        )
+        
+        assert converged is True
+    
+    def test_check_convergence_stress_not_converged(self, si_atoms, pseudo_dict):
+        """Test stress convergence check when NOT converged."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        results = {
+            30: {'stress': 5.0},
+            40: {'stress': 4.2},
+            50: {'stress': 3.5},
+        }
+        
+        reference = {'stress': 1.5}
+        criteria_tolerances = {'stress_tolerance': 1.0}
+        
+        # Should NOT converge: max deviation is 3.5 GPa > 1.0 GPa tolerance
+        converged = workflow._check_convergence_vs_reference(
+            results, reference, criteria_tolerances, ['stress']
         )
         
         assert converged is False
@@ -260,6 +385,54 @@ class TestConvergenceMultiProperty:
         )
         
         assert converged is True
+    
+    def test_check_convergence_energy_and_stress_both_converged(self, si_atoms, pseudo_dict):
+        """Test that convergence passes when energy and stress both converge."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        # Both energy and stress converged
+        results = {
+            50: {'energy': -10.5398, 'stress': 1.9},
+            60: {'energy': -10.5399, 'stress': 1.8},
+        }
+        
+        reference = {'energy': -10.54, 'stress': 1.5}
+        criteria_tolerances = {'energy_tolerance': 1e-3, 'stress_tolerance': 1.0}
+        
+        # Should converge: both criteria meet their tolerances
+        converged = workflow._check_convergence_vs_reference(
+            results, reference, criteria_tolerances, ['energy', 'stress']
+        )
+        
+        assert converged is True
+    
+    def test_check_convergence_stress_not_converged_energy_does(self, si_atoms, pseudo_dict):
+        """Test that convergence fails when stress doesn't converge, even if energy does."""
+        workflow = ConvergenceWorkflow(
+            atoms=si_atoms,
+            pseudopotentials=pseudo_dict,
+            precision='low'
+        )
+        
+        # Energy converged but stress not
+        results = {
+            50: {'energy': -10.5398, 'stress': 5.0},
+            60: {'energy': -10.5399, 'stress': 4.2},
+        }
+        
+        reference = {'energy': -10.54, 'stress': 1.5}
+        criteria_tolerances = {'energy_tolerance': 1e-3, 'stress_tolerance': 1.0}
+        
+        # Should NOT converge because stress doesn't meet tolerance
+        converged = workflow._check_convergence_vs_reference(
+            results, reference, criteria_tolerances, ['energy', 'stress']
+        )
+        
+        assert converged is False
     
     def test_check_convergence_energy_single_value(self, si_atoms, pseudo_dict):
         """Test energy convergence check with single parameter value."""
@@ -334,14 +507,14 @@ class TestConvergenceMultiProperty:
             atoms=si_atoms,
             pseudopotentials=pseudo_dict,
             precision='low',
-            convergence_criteria_list=['stress']  # Not yet implemented
+            convergence_criteria_list=['geometry']  # Not yet implemented (requires VC-RELAX)
         )
         
-        # Should raise NotImplementedError when validation runs
+        # Should raise NotImplementedError during configuration validation
         with pytest.raises(NotImplementedError) as exc_info:
-            workflow.run_convergence_independent(verbose=False)
+            workflow._get_calculation_config(['geometry'])
         
-        assert 'not yet implemented' in str(exc_info.value).lower()
+        assert 'geometry' in str(exc_info.value).lower()
     
     def test_tolerance_values_by_precision(self, si_atoms, pseudo_dict):
         """Test that tolerance values are correctly set by precision level."""

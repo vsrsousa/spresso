@@ -984,21 +984,24 @@ class ConvergenceWorkflow:
         }
         
         # Validate which criteria are implemented
-        valid_criteria = {'energy', 'forces'}  # energy and forces are implemented
+        valid_criteria = {'energy', 'forces', 'stress'}  # energy, forces, stress are implemented
         unsupported = set(convergence_criteria_list) - valid_criteria
         
         if unsupported:
             unsupported_str = ', '.join(sorted(unsupported))
             raise NotImplementedError(
                 f"Convergence criteria not yet implemented: {unsupported_str}\n"
-                f"Currently supported: 'energy', 'forces'\n"
-                f"Coming soon: 'stress' (SCF+tstress), 'geometry' (VC-RELAX), "
-                f"'magnetic_moments' (nspin=2)"
+                f"Currently supported: 'energy', 'forces', 'stress'\n"
+                f"Coming soon: 'geometry' (VC-RELAX), 'magnetic_moments' (nspin=2)"
             )
         
         # Add QE input flags for forces if needed
         if 'forces' in convergence_criteria_list:
             config['input_data_overrides']['tprnfor'] = True
+        
+        # Add QE input flags for stress if needed
+        if 'stress' in convergence_criteria_list:
+            config['input_data_overrides']['tstress'] = True
         
         return config
     
@@ -1041,10 +1044,18 @@ class ConvergenceWorkflow:
                 return np.nan
         
         elif property_name == 'stress':
-            raise NotImplementedError(
-                "Stress extraction not yet implemented. "
-                "Coming soon: will extract hydrostatic pressure."
-            )
+            # Extract hydrostatic pressure from stress tensor
+            if 'stress' in completion:
+                stress_array = np.array(completion['stress'])  # Shape: (3, 3) in kBar
+                # Compute hydrostatic pressure: P = -(trace(σ) / 3)
+                trace = np.trace(stress_array)
+                hydrostatic_pressure = -(trace / 3.0)  # in kBar, negative for pressure
+                # Convert kBar to GPa: 1 kBar = 0.1 GPa
+                hydrostatic_pressure_gpa = hydrostatic_pressure * 0.1
+                # Return absolute value of pressure in GPa
+                return float(abs(hydrostatic_pressure_gpa))
+            else:
+                return np.nan
         
         elif property_name == 'geometry':
             raise NotImplementedError(
@@ -1118,6 +1129,20 @@ class ConvergenceWorkflow:
                 
                 if force_diff >= tolerance:
                     return False  # Forces not converged
+            
+            elif criterion == 'stress':
+                # Stress convergence: hydrostatic pressure in test results vs reference < tolerance
+                stresses = [props.get('stress', np.nan) for props in results_dict.values()]
+                if not stresses or all(np.isnan(s) for s in stresses):
+                    return False
+                
+                max_stress = max(s for s in stresses if not np.isnan(s))
+                reference_stress = reference_properties.get('stress', 0)
+                stress_diff = abs(max_stress - reference_stress)
+                tolerance = criteria_tolerances.get('stress_tolerance', 1.0)  # GPa
+                
+                if stress_diff >= tolerance:
+                    return False  # Stress not converged
             
             else:
                 # Other criteria not yet implemented, but we already validated in

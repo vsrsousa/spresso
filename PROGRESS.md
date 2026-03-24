@@ -1,8 +1,8 @@
 # Convergence Workflow - Implementation Progress
 
-**Last Updated**: 2026-03-05  
-**Status**: ✅ Working - Range expansion & incremental testing refactored  
-**Current Focus**: Multi-property convergence criteria implementation (stress, geometry, magnetic moments)
+**Last Updated**: 2026-03-24  
+**Status**: ✅ Working - Stress convergence implemented & tested  
+**Current Focus**: Multi-property convergence criteria implementation (geometry, magnetic moments)
 
 ---
 
@@ -12,7 +12,8 @@ The `ConvergenceWorkflow` class implements a **two-phase independent algorithm**
 - **Phase 1**: ecutwfc convergence with fixed kspacing (0.3 Å⁻¹)
 - **Phase 2**: kspacing convergence with optimal ecutwfc from Phase 1
 
-Currently only `'energy'` criterion is implemented. This document tracks the implementation of additional criteria: `'forces'`, `'stress'`, `'geometry'`, `'magnetic_moments'`.
+**Implemented criteria**: `'energy'` (complete), `'forces'` (complete), `'stress'` (complete)  
+**In progress**: `'geometry'` (requires VC-RELAX), `'magnetic_moments'` (requires nspin=2)
 
 ---
 
@@ -130,38 +131,41 @@ expansion_limit = max_kspacing
 
 ### Phase 2: Stress Convergence
 
-**Status**: ⏳ Ready to implement  
-**Priority**: HIGH  
-**Effort**: MEDIUM (identical to forces structure)
+**Status**: ✅ **COMPLETE** (2026-03-24)  
+**Commits**: Implementation + Unit tests  
 
-**What needs to happen**:
+**What was implemented**:
 
-1. **Extract hydrostatic pressure** (lines 880-920):
-   - In `_extract_property_from_result()`, handle `'stress'` criterion
-   - Stress tensor from QE is 3×3 symmetric matrix (in kBar)
-   - Hydrostatic pressure = -(trace(σ) / 3)
+1. ✅ **Enable stress calculation** (lines 880-920):
+   - In `_extract_property_from_result()`, added 'stress' criterion
+   - Extract hydrostatic pressure from `completion['stress']` array (shape: 3×3 in kBar)
+   - Compute hydrostatic pressure: P = -(trace(σ) / 3)
    - Convert kBar → GPa: `value_kbar * 0.1 = value_GPa`
-   - Return: `float` with hydrostatic pressure in GPa
+   - Return absolute value of pressure in GPa
 
-2. **Code location**: `xespresso/workflow/convergence_workflow.py:880-920`
-   - Add elif block after forces
-   - Parse stress tensor and compute pressure
-   - Return `abs(pressure)` or signed depending on convention
+2. ✅ **QE configuration** (lines 960-1010):
+   - Updated `_get_calculation_config()` to accept 'stress' criterion
+   - Added 'stress' to valid_criteria set
+   - Automatically inserts `'tstress': True` when 'stress' in criteria_list
 
-3. **Enable in convergence check** (lines 1010-1044):
-   - Add elif for `'stress'` criterion
-   - Compare hydrostatic pressure in test results vs reference
-   - Use `criteria_tolerances.get('stress_tolerance', 1.0)` (GPa)
+3. ✅ **Enable in convergence check** (lines 1065-1160):
+   - Added elif for 'stress' criterion in `_check_convergence_vs_reference()`
+   - Compares max hydrostatic pressure in test results vs reference
+   - Uses `criteria_tolerances.get('stress_tolerance', 1.0)` (GPa)
 
-4. **QE configuration**:
-   - Add `tstress=True` when 'stress' criterion requested
-   - Location: Update `_get_calculation_config()` (lines 827-857)
-   - Logic: If 'stress' in criteria_list → add `'tstress': True` to overrides
+4. ✅ **Unit Tests** (test_convergence_multi_property.py):
+   - `test_get_calculation_config_stress_implemented`: Config returns tstress=True
+   - `test_get_calculation_config_energy_forces_stress`: Stress works with other criteria
+   - `test_extract_property_stress_implemented`: Extract hydrostatic pressure correctly  
+   - `test_extract_property_stress_kbar_to_gpa_conversion`: kBar → GPa conversion
+   - `test_extract_property_stress_negative_pressure`: Handle tension (negative pressure)
+   - `test_check_convergence_stress_converged`: Stress convergence check passes
+   - `test_check_convergence_stress_not_converged`: Stress convergence check fails properly
+   - `test_check_convergence_energy_and_stress_both_converged`: Both criteria converge
+   - `test_check_convergence_stress_not_converged_energy_does`: Stress blocks convergence
 
-**Technical Details**:
-- Stress tensor shape: (3, 3) symmetric in kBar
-- Definition: Hydrostatic = -trace(σ)/3
-- Unit conversion: kBar to GPa (×0.1)
+**Test Results**: 9/9 stress-specific tests PASSING ✅  
+**Total Tests**: 30/30 passing ✅
 
 ---
 

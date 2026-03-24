@@ -47,22 +47,49 @@ Implement `SlabWorkflow` class for automated surface slab creation, convergence,
   - Status: ✅ COMPLETE & TESTED (2026-03-24)
 
 ### Phase 3: Slab Convergence (Customize for 2D)
-- [ ] **K-point convergence for slabs**
-  - [ ] Replace ConvergenceWorkflow's isotropic k-mesh
-  - [ ] Test: (8,8,1) → (10,10,1) → (12,12,1) → (14,14,1)
-  - [ ] Convergence criterion: ∆E < 1 meV/atom
+- [x] **K-point mesh calculation** (DETERMINISTIC - NOT tested!)
+  - [x] Use bulk recommendation k-spacing for x,y directions
+    - Extract `optimal_kspacing` from `self.bulk_recommendations` (Phase 2)
+    - Calculate k-mesh(x,y) = ceil(|a|/kspacing), ceil(|b|/kspacing)
+    - Always use nkz = 1 for 2D slabs (perpendicular direction)
+  - [x] **No additional k-point testing needed**
+    - K-convergence already completed in Phase 1 bulk
+    - K-mesh derives deterministically from bulk kspacing + slab geometry
+    - This is fixed and not a convergence variable
+  - [x] Example: If bulk convergence gave kspacing=0.04 Å⁻¹
+    - For Au(111) slab: 2.884 Å × 2.884 Å in-plane
+    - nkx = nky = ceil(2.884/0.04) = 72
+    - nkz = 1 (always)
+  - Status: AUTOMATIC (calculated from Phase 2 results)
+
+- [ ] **Vacuum size convergence** (CRITICAL for surface calculations!)
+  - [ ] Test vacuum: [10, 12, 15, 18, 20, 25, 30] Å
+  - [ ] Keep slab thickness fixed during vacuum tests
+  - [ ] Prevents spurious interactions with periodic images
+  - [ ] Criterion: ∆E < 1 meV/atom when increasing vacuum
+  - [ ] Find minimum vacuum for target accuracy
+  - [ ] MUST TEST THIS FIRST - has largest impact on surface energy
   - Status: NOT STARTED
+  - Note: Essential for accurate surface energy calculation
 
 - [ ] **Layer thickness convergence**
   - [ ] Sweep n_layers: [3, 4, 5, 6, 7]
   - [ ] Fix bottom 2 layers, relax top 2-5
+  - [ ] Keep vacuum size fixed (from vacuum convergence)
   - [ ] Find minimum n_layers for convergence
+  - [ ] Criterion: ∆E < 1 meV/atom
   - Status: NOT STARTED
 
-- [ ] **Fixation strategies**
-  - [ ] Test different fix_layer_scheme
-  - [ ] Use ASE FixAtoms constraint automatically
-  - Status: NOT STARTED
+- [ ] **Convergence order (CRITICAL)**
+  - [x] **FIRST**: Vacuum convergence (largest effect on surface energy)
+    - Typical: 15-20 Å minimum for good accuracy
+  - [ ] **FIRST**: Vacuum size convergence (10 → 30 Å)
+    - Largest test, largest impact on surface energy accuracy
+  - [ ] **SECOND**: Layer thickness convergence (3 → 7 layers)
+    - Usually 4-5 layers sufficient
+    - K-points already finalized (derive from Phase 2 bulk)
+  - [ ] All tests use fixed bulk ecutwfc + auto-calculated anisotropic k-mesh
+  - Note: Vacuum has LARGEST impact on surface energy - test this carefully
 
 ### Phase 4: Structure Relaxation
 - [ ] **run_slab_relax()**
@@ -125,28 +152,63 @@ class SlabWorkflow:
 ### Key Methods
 
 ```python
-# Bulk phase
+# Phase 2: Bulk convergence (get optimal ecutwfc and kspacing)
 bulk_results = wf.run_bulk_convergence(label_prefix='bulk_conv')
 bulk_recs = bulk_results['recommendations']
+# → {'optimal_ecutwfc': 50.0, 'optimal_kspacing': 0.04, 'precision': 'low'}
 
-# Slab phase
+# Generate slabs from bulk
 slabs = wf.generate_slabs()  
-# → {"Au111": Atoms, "Au100": Atoms, ...}
+# → {(1,1,1): Atoms, (1,0,0): Atoms, (1,1,0): Atoms, ...}
 
-slab_conv = wf.run_slab_convergence(
-    surface='Au111',
-    nlayers_test=[3,4,5,6],
-    label_prefix='slab_conv'
+# Phase 3a: Vacuum convergence (FIRST - largest impact)
+vacuum_conv = wf.run_slab_convergence(
+    surface_index=(1,1,1),
+    convergence_type='vacuum',
+    test_params=[10, 12, 15, 18, 20, 25, 30],  # Å
+    label_prefix='slab_vacuum_conv'
 )
+# Returns: {'optimal_vacuum': 18.0, 'convergence_data': {...}}
 
-# Relaxation
+# Phase 3b: Layer convergence (with optimal vacuum)
+layer_conv = wf.run_slab_convergence(
+    surface_index=(1,1,1),
+    convergence_type='layers',
+    test_params=[3, 4, 5, 6, 7],  # Number of layers
+    label_prefix='slab_layers_conv',
+    fixed_vacuum=18.0  # From vacuum convergence
+)
+# Returns: {'optimal_nlayers': 5, 'convergence_data': {...}}
+
+# Phase 3c: K-point z-convergence (usually unnecessary)
+kz_conv = wf.run_slab_convergence(
+    surface_index=(1,1,1),
+    convergence_type='kpoints_z',
+    test_params=[1, 2, 3],  # nkz values
+    label_prefix='slab_kz_conv',
+    fixed_vacuum=18.0,
+    fixed_nlayers=5
+)
+# Returns: {'converged_nkz': 1} (usually 1 is sufficient)
+
+# Phase 4: Relaxation
 relaxed = wf.relax_slabs(
-    surfaces=['Au111', 'Au100'],
+    surfaces=[(1,1,1), (1,0,0), (1,1,0)],
     label_prefix='relax'
 )
+# → Relaxed structures with optimal ecutwfc, k-mesh, vacuum, layers
 
-# Analysis
+# Phase 5: Analysis
 surface_energies = wf.calculate_surface_energies(
+    bulk_energy_per_atom=bulk_results['energy'] / len(wf.bulk_atoms),
+)
+# → {(1,1,1): 0.125 J/m², (1,0,0): 0.156 J/m², ...}
+```
+    
+**Note**: run_slab_convergence() should be called in order:
+1. Vacuum (most impact on energy)
+2. Layers (fewer layers = faster later calculations)
+3. K-points z (usually not needed, verify only)surface_energies = wf.calculate_surface_energies(
     bulk_energy=bulk_results['energy'],
     relaxed_slabs=relaxed
 )
@@ -196,6 +258,132 @@ self.relaxed_slabs = {
     },
     ...
 }
+```
+
+---
+
+## 🎯 Phase 3 Implementation Strategy
+
+### A. K-mesh Anisotropic (Using Bulk Recommendation)
+
+**Key Concept**: Slabs are 2D systems, so in-plane k-mesh should match bulk optimization, but perpendicular k-mesh can be minimal.
+
+```python
+def _calculate_anisotropic_kmesh(self, slab: Atoms, nkz: int = 1) -> Tuple[int, int, int]:
+    """
+    Calculate anisotropic k-mesh for slab.
+    
+    Args:
+        slab: Slab structure with cell defined
+        nkz: Number of k-points in z-direction (usually 1)
+    
+    Returns:
+        Tuple of (nkx, nky, nkz) for k-mesh
+    
+    Strategy:
+        1. Get optimal_kspacing from self.bulk_recommendations (Phase 2)
+        2. Calculate nkx = ceil(a/kspacing), nky = ceil(b/kspacing)
+        3. Keep nkz from parameter (usually 1)
+    """
+    optimal_kspacing = self.bulk_recommendations['optimal_kspacing']
+    cell_lengths = slab.cell.lengths()
+    
+    # In-plane k-points from bulk kspacing
+    nkx = max(1, int(np.ceil(cell_lengths[0] / optimal_kspacing)))
+    nky = max(1, int(np.ceil(cell_lengths[1] / optimal_kspacing)))
+    
+    # Perpendicular k-points (test in convergence)
+    nkz_actual = nkz
+    
+    return (nkx, nky, nkz_actual)
+```
+
+### B. Vacuum Convergence (FIRST PRIORITY)
+
+**Why first?** Vacuum spacing has the largest effect on surface energy accuracy.
+
+```python
+def run_slab_convergence(
+    self,
+    surface_index: Tuple[int,int,int],
+    convergence_type: str = 'vacuum',  # 'vacuum', 'layers', 'kpoints'
+    test_params: Optional[List] = None,
+    label_prefix: str = 'slab_conv',
+):
+    """Test vacuum convergence first."""
+    
+    if convergence_type == 'vacuum':
+        # Test vacuum sizes: [10, 12, 15, 18, 20, 25, 30] Å
+        vacuum_sizes = test_params or [10, 12, 15, 18, 20, 25, 30]
+        
+        for vacuum in vacuum_sizes:
+            slab = self.slabs[surface_index].copy()
+            slab.center(vacuum=vacuum, axis=2)  # Re-center with new vacuum
+            
+            # Calculate energy with fixed bulk ecutwfc
+            energy = self._run_slab_calc(
+                slab,
+                ecutwfc=self.bulk_recommendations['optimal_ecutwfc'],
+                kspacing=self.bulk_recommendations['optimal_kspacing'],
+            )
+            
+            # Store and check convergence
+```
+
+### C. Layer Convergence
+
+**After vacuum is set**, test number of layers.
+
+```python
+def run_slab_convergence(
+    self,
+    surface_index: Tuple[int,int,int],
+    convergence_type: str = 'layers',
+    test_params: Optional[List] = None,
+):
+    """Test layer thickness convergence."""
+    
+    if convergence_type == 'layers':
+        # Test layers: [3, 4, 5, 6, 7]
+        n_layers_test = test_params or [3, 4, 5, 6, 7]
+        
+        for n_layers in n_layers_test:
+            # Generate new slab with n_layers
+            slab = self._generate_single_slab(
+                self.bulk_atoms,
+                surface_index,
+                min_slab_size=self.min_slab_size,
+                nlayers=n_layers,
+                min_vacuum_size=optimal_vacuum,  # From vacuum convergence
+            )
+            
+            # Run calculation
+            energy = self._run_slab_calc(slab)
+```
+
+### Recommended Convergence Sequence
+
+```
+PHASE 3 Convergence Steps (NO k-point testing - already done in Phase 1):
+
+1. Generate slab with initial parameters (nlayers=4, vacuum=15Å)
+   - Use bulk_recommendations['optimal_ecutwfc'] for all calculations
+   - Use bulk_recommendations['optimal_kspacing'] to compute anisotropic k-mesh
+     nk_x = ceil(|b1|/kspacing), nk_y = ceil(|b2|/kspacing), nk_z = 1
+
+2. Test VACUUM CONVERGENCE: [10, 12, 15, 18, 20, 25, 30] Å
+   - Find minimum vacuum where ∆E < 1 meV/atom as vacuum increases
+   - Keep nlayers fixed (e.g., 4)
+   - This has LARGEST impact on surface energy accuracy
+   
+3. Test LAYER CONVERGENCE: [3, 4, 5, 6, 7] with optimal_vacuum from step 2
+   - Find minimum nlayers where ∆E < 1 meV/atom as layers increase
+   - Keep vacuum fixed
+   
+4. K-points: DETERMINISTIC (NOT tested)
+   - Already converged in Phase 1 bulk
+   - Apply anisotropically: nk_x,y from bulk kspacing; nk_z = 1
+   - No additional testing needed
 ```
 
 ---
@@ -421,12 +609,29 @@ def test_slab_relax():
 ## 📌 Notes for Continuity
 
 If restarting work:
-1. Read this file first
+1. Read this file first (especially Phase 3 section)
 2. Check which phase is in progress
 3. Look at corresponding test file
 4. Run tests to verify current state
 5. Continue with next incomplete component
 
-Current blocker (if any): _______
-Next action: Phase 1 - Create slab_workflow.py skeleton
+**IMPORTANT FOR PHASE 3**: 
+- K-mesh MUST be compatible with bulk recommendation from Phase 2
+- Vacuum convergence must be FIRST (largest impact)
+- Use convergence_type parameter: 'vacuum' → 'layers' → 'kpoints_z'
 
+**Phase 3 Implementation Notes**:
+- Test vacuum sizes: [10, 12, 15, 18, 20, 25, 30] Å (7 calculations per surface)
+- After vacuum found, test layers: [3, 4, 5, 6, 7] (5× calculations per surface)  
+- K-points usually not needed (nkz=1 sufficient)
+- For 3 surfaces (100, 110, 111): ~36 total calculations in Phase 3
+- Time estimate: 8-10 hours for full convergence study
+
+**K-mesh Compatibility**:
+- Get optimal_kspacing from bulk_recommendations
+- Calculate nkx, nky = ceil(cell_length / optimal_kspacing)
+- Keep as-is for in-plane directions
+- For z-direction: only test nkz = [1, 2] (usually 1)
+
+Current state: ✅ Phases 1-2 complete, Phase 3 ready to implement
+Next action: Phase 3 - Implement run_slab_convergence() with vacuum→layers→kpoints strategy

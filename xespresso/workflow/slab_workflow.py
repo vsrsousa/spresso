@@ -223,6 +223,7 @@ class SlabWorkflow:
         self.relaxed_slabs = {}
         self.surface_energies = {}
         self.convergence_results = {}
+        self.relax_results = {}
         
         logger.info(
             f"SlabWorkflow initialized:\n"
@@ -802,6 +803,14 @@ class SlabWorkflow:
                     logger.info(f"    (mock) E={energy/num_atoms:.6f} eV/atom")
                 else:
                     # TODO: Integrate CalculationWorkflow when API is stable
+                    # IMPORTANT: Must use precision=self.precision (same as bulk convergence)
+                    # Example:
+                    # cw = CalculationWorkflow(
+                    #     atoms=slab,
+                    #     pseudopotentials=self.pseudopotentials,
+                    #     precision=self.precision,  # <- SAME precision as Phase 1
+                    # )
+                    # results = cw.run_scf(...)
                     logger.info(f"    (skipped - needs CalculationWorkflow)")
                     continue
                 
@@ -862,7 +871,10 @@ class SlabWorkflow:
                     energy = -nlayers * 100.0  # Scales with layer count
                     logger.info(f"    (mock) E={energy/nlayers:.6f} eV/atom")
                 else:
-                    logger.info(f"    (skipped - needs slab regeneration)")
+                    # TODO: Integrate CalculationWorkflow when API is stable
+                    # IMPORTANT: Must use precision=self.precision (same as bulk convergence)
+                    # See _test_vacuum_convergence() for example implementation
+                    logger.info(f"    (skipped - needs slab regeneration + CalculationWorkflow)")
                     continue
                 
                 energies[nlayers] = energy / nlayers
@@ -897,44 +909,169 @@ class SlabWorkflow:
         }
     
     # =========================================================================
-    # PHASE 4: STRUCTURE RELAXATION (PLACEHOLDER - Phase 4 task)
+    # PHASE 4: STRUCTURE RELAXATION
     # =========================================================================
     
-    def relax_slabs(
+    def run_slab_relax(
         self,
-        label_prefix: str = 'relax_slabs',
+        surfaces: Optional[List[Tuple[int, int, int]]] = None,
+        relax_type: str = 'vc-relax',
+        dipole_correction: bool = True,
+        label_prefix: str = 'relax',
     ) -> Dict:
         """
-        Relax slab structures.
+        Relax slab structures with constraints.
         
-        **Status**: ⏳ PHASE 4 task (not yet implemented)
-        
-        Will integrate CalculationWorkflow for structure relaxation
-        with anisotropic k-mesh and layer constraints.
+        Relaxes slabs using CalculationWorkflow with:
+        - Fixed bottom layers (FixAtoms constraint)
+        - Anisotropic k-mesh from Phase 3
+        - ecutwfc from Phase 1 bulk convergence
+        - Optional dipole correction for 2D systems
         
         Parameters
         ----------
-        label_prefix : str, default='relax_slabs'
+        surfaces : Optional[List[Tuple[int, int, int]]], default=None
+            List of surface indices to relax. If None, relaxes all generated slabs.
+            Example: [(1,0,0), (1,1,1)]
+            
+        relax_type : str, default='vc-relax'
+            Type of relaxation: 'relax' (ions only) or 'vc-relax' (ions + cell)
+            
+        dipole_correction : bool, default=True
+            Add dipole correction for 2D systems (automatically sets dipole='z')
+            
+        label_prefix : str, default='relax'
             Prefix for calculation directories
             
         Returns
         -------
         Dict
-            Relaxed calculations
+            Results dictionary with keys:
+            - 'surface_index': Tuple of Miller indices
+            - 'relaxed_slab': Relaxed Atoms object
+            - 'calculator': Espresso calculator
+            - 'energy': Final total energy (eV)
+            - 'converged': Whether relaxation converged
+            - 'results': Full Espresso results dict
             
         Raises
         ------
+        ValueError
+            If slabs not generated or bulk convergence not completed
         NotImplementedError
-            Currently a Phase 4 task
+            If CalculationWorkflow not available
         """
-        logger.warning("="*70)
-        logger.warning("PHASE 4: STRUCTURE RELAXATION")
-        logger.warning("="*70)
-        logger.warning("⏳ This is a Phase 4 implementation task")
+        from xespresso.workflow.calculation_workflow import CalculationWorkflow
         
-        raise NotImplementedError(
-            "relax_slabs() is a Phase 4 task."
-        )
+        # Validate prerequisites
+        if not self.convergence_results:
+            raise ValueError(
+                "Phase 3 slab convergence not completed. "
+                "Run run_slab_convergence() first."
+            )
+        
+        if not surfaces:
+            surfaces = list(self.slabs.keys())
+        
+        logger.info("="*70)
+        logger.info(f"PHASE 4: SLAB RELAXATION ({len(surfaces)} surfaces)")
+        logger.info("="*70)
+        logger.info(f"  Relax type: {relax_type}")
+        logger.info(f"  Dipole correction: {dipole_correction}")
+        logger.info(f"  Surfaces: {surfaces}")
+        
+        results = {}
+        
+        for surface in surfaces:
+            logger.info(f"\n{'─'*70}")
+            logger.info(f"Relaxing surface {surface}")
+            logger.info(f"{'─'*70}")
+            
+            if surface not in self.slabs:
+                logger.warning(f"  Surface {surface} not generated, skipping")
+                continue
+            
+            try:
+                # Get slab and apply constraints
+                slab = self.slabs[surface].copy()
+                
+                # Apply FixAtoms to bottom layers
+                if self.fix_layer_indices:
+                    slab.set_constraint(FixAtoms(indices=self.fix_layer_indices))
+                    logger.info(f"  Applied FixAtoms constraint to bottom {len(self.fix_layer_indices)} atoms")
+                
+                # Get optimal parameters from Phase 3
+                conv_data = self.convergence_results[surface]
+                kmesh = conv_data['kmesh_calc']
+                ecutwfc = self.bulk_recommendations['optimal_ecutwfc']
+                optimal_vacuum = conv_data['optimal_vacuum']
+                optimal_nlayers = conv_data['optimal_nlayers']
+                
+                logger.info(f"  Using parameters:")
+                logger.info(f"    ecutwfc: {ecutwfc} Ry")
+                logger.info(f"    k-mesh: {kmesh}")
+                logger.info(f"    vacuum: {optimal_vacuum} Å")
+                logger.info(f"    layers: {optimal_nlayers}")
+                
+                # Create CalculationWorkflow for relaxation
+                calc_wf = CalculationWorkflow(
+                    atoms=slab,
+                    protocol=self.protocol,
+                    pseudopotentials_config=self.pseudopotentials_config,
+                    machine=self.machine,
+                    queue=self.queue,
+                    code_version=self.code_version,
+                )
+                
+                # Override with Phase 1 parameters
+                calc_wf.input_data['ecutwfc'] = ecutwfc
+                calc_wf.input_data.pop('kspacing', None)  # Remove kspacing, use k-mesh
+                
+                # Add dipole correction if requested
+                if dipole_correction:
+                    calc_wf.input_data['dipole'] = 'z'
+                    logger.info(f"  Added dipole correction (2D system)")
+                
+                # Run relaxation
+                label = f"{label_prefix}/{surface[0]}{surface[1]}{surface[2]}"
+                logger.info(f"  Running {relax_type} calculation...")
+                
+                calc = calc_wf.run_relax(
+                    label=label,
+                    relax_type=relax_type,
+                    kpts=kmesh,  # Explicit k-mesh from Phase 3
+                )
+                
+                # Store results
+                relaxed_slab = calc_wf.atoms
+                energy = calc_wf.atoms.get_potential_energy()
+                
+                results[surface] = {
+                    'surface_index': surface,
+                    'relaxed_slab': relaxed_slab,
+                    'calculator': calc,
+                    'energy': energy,
+                    'converged': True,
+                    'results': calc.results if hasattr(calc, 'results') else {},
+                }
+                
+                logger.info(f"  ✓ Relaxation complete: E = {energy:.6f} eV")
+                
+            except Exception as e:
+                logger.error(f"  ✗ Relaxation failed: {e}")
+                results[surface] = {
+                    'surface_index': surface,
+                    'converged': False,
+                    'error': str(e),
+                }
+        
+        # Store results
+        self.relax_results = results
+        logger.info(f"\n{'='*70}")
+        logger.info(f"PHASE 4 COMPLETE: {len([r for r in results.values() if r.get('converged')])} / {len(surfaces)} relaxations successful")
+        logger.info(f"{'='*70}")
+        
+        return results
     
     # =========================================================================
     # PHASE 5: ANALYSIS (PLACEHOLDER - Phase 5 task)

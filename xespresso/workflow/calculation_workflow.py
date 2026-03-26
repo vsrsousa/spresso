@@ -98,6 +98,7 @@ class CalculationWorkflow:
         protocol: str = 'moderate',
         pseudopotentials: Optional[Dict[str, str]] = None,
         pseudopotentials_config: Optional[str] = None,
+        pseudopotentials_base_path: Optional[str] = None,
         kspacing: Optional[float] = None,
         input_data: Optional[Dict] = None,
         magnetic_config: Optional[Union[str, Dict]] = None,
@@ -122,6 +123,11 @@ class CalculationWorkflow:
                                    needed for elements present in the structure.
                                    Configuration must exist in ~/.xespresso/pseudopotentials/
                                    Example: 'SSSP_efficiency' loads from SSSP_efficiency.json
+            pseudopotentials_base_path: Optional base directory for pseudopotential files when using
+                                      explicit pseudopotentials dict (not config). This is used to set
+                                      the ESPRESSO_PSEUDO environment variable so the remote scheduler
+                                      can find the pseudopotential files.
+                                      Usually autodiscovered, but can be overridden if needed.
             kspacing: K-point spacing in Angstrom^-1 (physical units). If None, uses preset value.
                      The workflow automatically handles the 2π normalization when converting to k-points.
                      Example: kspacing=0.20 will give the same k-points as
@@ -149,7 +155,7 @@ class CalculationWorkflow:
         self.protocol = protocol
         self.extra_kwargs = kwargs
         self.expand_cell = expand_cell
-        self.pseudopotentials_base_path = None  # Will be set if loading from config
+        self.pseudopotentials_base_path = pseudopotentials_base_path  # Can be passed in or set from config
         self._pseudo_config = None  # Will store config object if loaded from config
         
         # Handle pseudopotentials: either config name or explicit dict (config takes precedence)
@@ -161,6 +167,12 @@ class CalculationWorkflow:
                 "Must provide either 'pseudopotentials' dictionary or "
                 "'pseudopotentials_config' name to load from ~/.xespresso/pseudopotentials/"
             )
+        
+        # If pseudopotentials_base_path is provided (from ConvergenceWorkflow), set env var
+        # This ensures Espresso can find pseudopotentials via ESPRESSO_PSEUDO when remote transfer happens
+        if pseudopotentials_base_path:
+            os.environ['ESPRESSO_PSEUDO'] = pseudopotentials_base_path
+            logger.info(f"Set ESPRESSO_PSEUDO={pseudopotentials_base_path}")
         
         self.original_pseudopotentials = pseudopotentials
         
@@ -1139,15 +1151,12 @@ class CalculationWorkflow:
                     self.atoms,
                     protocol=self.protocol,
                     pseudopotentials=self.pseudopotentials,
+                    pseudopotentials_base_path=getattr(self, 'pseudopotentials_base_path', None),
                     kspacing=params.get('kspacing', self.preset.get('kspacing')),
                     input_data=input_data_override,
                     queue=self.queue,
                     **self.extra_kwargs
                 )
-                
-                # Copy the pseudopotentials_base_path if it exists (for remote transfer)
-                if hasattr(self, 'pseudopotentials_base_path'):
-                    temp_workflow.pseudopotentials_base_path = self.pseudopotentials_base_path
                 
                 # Submit this calculation
                 result = temp_workflow.submit_scf_batch(label=label, wait_for_completion=False)

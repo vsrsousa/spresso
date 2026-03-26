@@ -371,3 +371,142 @@ def detect_pseudopotentials_remote(directory: str,
     except Exception as e:
         print(f"Error detecting remote pseudopotentials: {e}")
         return {}
+
+
+def get_suggested_min_ecutwfc_from_pseudos(
+    element_pseudos: Dict[str, str],
+    pseudopotentials_base_path: Optional[str] = None
+) -> Optional[float]:
+    """
+    Extract suggested minimum ecutwfc from pseudopotential files for given elements.
+    
+    Analyzes the UPF header of each pseudopotential file to find the suggested
+    ecutwfc cutoff energy. Returns the maximum suggested value (to be safe for
+    all elements in the structure), or None if no suggestions found.
+    
+    This is a **general-purpose function** that works with any pseudopotential set:
+    - SSSP efficiency, PAW, norm-conserving, etc.
+    - Handles missing suggestions gracefully (returns None)
+    - Returns the highest suggestion to ensure all elements converge
+    
+    Example:
+        >>> # For Gd pseudo: suggests 35.0 Ry
+        >>> pseudo_dict = {'Gd': 'Gd.pbe-spdn-rrkjus_psl.1.0.0.UPF'}
+        >>> min_ecut = get_suggested_min_ecutwfc_from_pseudos(pseudo_dict, base_path='/path')
+        >>> print(min_ecut)  # 35.0 (extracted from Gd UPF header)
+        
+        >>> # For multi-element structure
+        >>> pseudo_dict = {'Al': 'Al.pbe.UPF', 'Mg': 'Mg.pbe.UPF'}
+        >>> # Returns max(suggested values) to be conservative
+    
+    Args:
+        element_pseudos: Dict mapping element symbol (str) to UPF filename or full path (str)
+        pseudopotentials_base_path: Optional base directory for UPF files. If provided,
+                                   looks for UPF files in this directory.
+    
+    Returns:
+        Maximum suggested ecutwfc value (float) found across all pseudos,
+        or None if no suggestions found in any UPF header.
+    """
+    suggested_values = []
+    
+    for element, pseudo_path in element_pseudos.items():
+        # Build full path if base_path provided
+        if pseudopotentials_base_path and not os.path.isabs(pseudo_path):
+            full_path = os.path.join(pseudopotentials_base_path, pseudo_path)
+        else:
+            full_path = pseudo_path
+        
+        # Skip if file doesn't exist
+        if not os.path.exists(full_path):
+            continue
+        
+        # Parse UPF header to extract suggested ecutwfc
+        try:
+            info = parse_upf_header(full_path)
+            if 'suggested_ecutwfc' in info:
+                suggested_values.append((element, info['suggested_ecutwfc']))
+        except Exception:
+            # Silently skip files that can't be parsed
+            continue
+    
+    # Return the maximum suggested value (conservative approach for multi-element structures)
+    if suggested_values:
+        max_element, max_value = max(suggested_values, key=lambda x: x[1])
+        return max_value
+    
+    return None
+
+
+def get_ecutrho_ratio_from_pseudos(
+    element_pseudos: Dict[str, str],
+    pseudopotentials_base_path: Optional[str] = None
+) -> float:
+    """
+    Auto-detect ecutrho_ratio from pseudopotential types in the set.
+    
+    Analyzes the UPF header of pseudopotential files to determine their type
+    (Ultrasoft, Norm-Conserving, PAW, etc.) and returns the appropriate ecutrho_ratio:
+    
+    - Ultrasoft (US): ecutrho_ratio = 8.0 (default)
+    - Norm-Conserving (NC): ecutrho_ratio = 4.0
+    - PAW: ecutrho_ratio = 8.0 (default)
+    - Mixed or Unknown: ecutrho_ratio = 8.0 (safe default)
+    
+    This function examines ALL pseudopotentials in the structure and uses the most
+    restrictive ratio (highest value) to ensure proper convergence for all elements.
+    
+    Example:
+        >>> # Ultrasoft pseudo (like SSSP PSL)
+        >>> pseudo_dict = {'Gd': 'Gd.pbe-spfn-kjpaw_psl.1.0.0.UPF'}
+        >>> ratio = get_ecutrho_ratio_from_pseudos(pseudo_dict, base_path='/path')
+        >>> print(ratio)  # 8.0 (PAW type requires higher ratio)
+        
+        >>> # Norm-Conserving pseudo  
+        >>> pseudo_dict = {'Si': 'Si.pbe.UPF'}  # NC type
+        >>> ratio = get_ecutrho_ratio_from_pseudos(pseudo_dict, base_path='/path')
+        >>> print(ratio)  # 4.0 (NC requires lower ratio)
+    
+    Args:
+        element_pseudos: Dict mapping element symbol (str) to UPF filename or full path (str)
+        pseudopotentials_base_path: Optional base directory for UPF files
+    
+    Returns:
+        ecutrho_ratio (float): 4.0 for NC, 8.0 for US/PAW/Mixed/Unknown
+    """
+    pseudo_types = []
+    
+    for element, pseudo_path in element_pseudos.items():
+        # Build full path if base_path provided
+        if pseudopotentials_base_path and not os.path.isabs(pseudo_path):
+            full_path = os.path.join(pseudopotentials_base_path, pseudo_path)
+        else:
+            full_path = pseudo_path
+        
+        # Skip if file doesn't exist
+        if not os.path.exists(full_path):
+            continue
+        
+        # Parse UPF header to extract type
+        try:
+            info = parse_upf_header(full_path)
+            if 'type' in info:
+                pseudo_types.append((element, info['type']))
+        except Exception:
+            # If can't parse, assume US/PAW (safer default)
+            pseudo_types.append((element, 'Ultrasoft'))
+    
+    # Determine ecutrho_ratio based on detected types
+    # If ALL are Norm-Conserving, use 4.0. Otherwise (mixed or US/PAW), use 8.0
+    if pseudo_types:
+        unique_types = set(ptype for _, ptype in pseudo_types)
+        
+        # If all are norm-conserving, use lower ratio
+        if unique_types == {'Norm-Conserving'}:
+            return 4.0
+        
+        # Otherwise (Ultrasoft, PAW, or mixed), use higher ratio
+        return 8.0
+    
+    # Default: use safe value for unknown types
+    return 8.0

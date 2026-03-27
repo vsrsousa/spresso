@@ -2,12 +2,113 @@ import os
 from ase.geometry import get_layers
 from ase.constraints import FixAtoms
 from ase.io.espresso import construct_namelist, kspacing_to_grid
+from ase.io import read as ase_read
 from xespresso import Espresso
 from xespresso.xio import build_atomic_species_str
 from ase.dft.bandgap import bandgap
 import pickle
 import multiprocessing
 import numpy as np
+
+# ====================================================
+# Structure I/O utilities
+# ====================================================
+
+
+def read_structure(filename, primitive=True, verbose=True):
+    """
+    Read crystal structure from file with automatic handling of primitive vs conventional cells.
+    
+    Uses spglib to automatically reduce to primitive cell by default, which is more
+    efficient for DFT calculations while maintaining crystal symmetry information.
+    
+    Parameters
+    ----------
+    filename : str
+        Path to structure file (CIF, POSCAR, etc.)
+    primitive : bool, default True
+        If True, return primitive cell (fewer atoms, using spglib)
+        If False, return conventional cell (ASE default)
+    verbose : bool, default True
+        Print structure information
+        
+    Returns
+    -------
+    atoms : ase.Atoms
+        Atomic structure
+        
+    Examples
+    --------
+    >>> # Read primitive cell (default, most efficient)
+    >>> atoms = read_structure('GdNiSi3.cif')  # 10 atoms
+    >>> 
+    >>> # Read conventional cell (larger, better for k-points)
+    >>> atoms = read_structure('GdNiSi3.cif', primitive=False)  # 20 atoms
+    
+    Notes
+    -----
+    - Primitive cells have fewer atoms but may have non-orthogonal lattice vectors
+    - Conventional cells are easier to visualize and typically better for k-point sampling
+    - For DFT calculations, primitive cells usually converge faster (fewer k-points needed)
+    """
+    try:
+        import spglib
+    except ImportError:
+        raise ImportError(
+            "spglib is required for primitive cell reduction. "
+            "Install with: pip install spglib"
+        )
+    
+    # Read structure with ASE
+    atoms = ase_read(filename)
+    
+    if primitive:
+        try:
+            # Extract structure data for spglib
+            lattice = atoms.cell[:]
+            positions = atoms.get_scaled_positions()
+            numbers = atoms.get_atomic_numbers()
+            
+            # Find primitive cell
+            prim_tuple = spglib.find_primitive((lattice, positions, numbers), symprec=1e-4)
+            
+            if prim_tuple is None:
+                if verbose:
+                    print("⚠️  Could not reduce to primitive cell, using conventional instead")
+                return atoms
+            
+            prim_lattice, prim_positions, prim_numbers = prim_tuple
+            
+            # Reconstruct Atoms object with primitive cell
+            from ase import Atoms
+            atoms = Atoms(
+                numbers=prim_numbers,
+                positions=prim_positions @ prim_lattice,
+                cell=prim_lattice,
+                pbc=True
+            )
+            cell_type = "primitive"
+            
+        except Exception as e:
+            if verbose:
+                print(f"⚠️  Error reducing to primitive cell: {e}")
+                print("   Using conventional cell instead")
+            cell_type = "conventional"
+    else:
+        cell_type = "conventional"
+    
+    if verbose:
+        from collections import Counter
+        comp = Counter(atoms.get_chemical_symbols())
+        comp_str = ", ".join(f"{el}({cnt})" for el, cnt in sorted(comp.items()))
+        print(f"✓ Structure loaded ({cell_type}): {len(atoms)} atoms")
+        print(f"  Composition: {comp_str}")
+        cell_params = atoms.cell.cellpar()
+        print(f"  Cell: a={cell_params[0]:.4f}, b={cell_params[1]:.4f}, c={cell_params[2]:.4f} Å")
+        print(f"        α={cell_params[3]:.2f}°, β={cell_params[4]:.2f}°, γ={cell_params[5]:.2f}°")
+    
+    return atoms
+
 
 # ====================================================
 # K-point utilities

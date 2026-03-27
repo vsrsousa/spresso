@@ -24,11 +24,15 @@ def _get_default_orbital(element: str) -> str:
     For main-group: p orbitals
     
     Args:
-        element: Chemical symbol (e.g., 'Fe', 'Mn', 'Gd')
+        element: Chemical symbol (e.g., 'Fe', 'Mn', 'Gd') or species label (e.g., 'Gd1', 'Fe2')
     
     Returns:
         Default orbital (e.g., '3d')
     """
+    # Extract base element by stripping trailing digits
+    # This handles species labels like 'Gd1', 'Fe2' from magnetic configurations
+    base_element = element.rstrip('0123456789')
+    
     try:
         json_path = os.path.join(
             os.path.dirname(__file__), 
@@ -39,7 +43,7 @@ def _get_default_orbital(element: str) -> str:
             data = json.load(f)
         
         # Get orbitals for this element, use first one as default
-        orbitals = data.get('orbitals', {}).get(element, [])
+        orbitals = data.get('orbitals', {}).get(base_element, [])
         if orbitals:
             # For lanthanides/actinides, prefer f orbitals (most important for Hubbard)
             for orb in orbitals:
@@ -60,18 +64,18 @@ def _get_default_orbital(element: str) -> str:
     
     # Fallback defaults based on element
     # Transition metals (3d)
-    if element in ['Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn']:
+    if base_element in ['Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn']:
         return '3d'
     # Late transition metals (4d)
-    elif element in ['Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd']:
+    elif base_element in ['Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd']:
         return '4d'
     # Early transition metals (5d)
-    elif element in ['La', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg']:
+    elif base_element in ['La', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg']:
         return '5d'
     # Lanthanides/actinides (f orbitals) - highest priority
-    elif element in ['Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu']:
+    elif base_element in ['Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu']:
         return '4f'
-    elif element in ['U', 'Np', 'Pu', 'Am', 'Cm']:
+    elif base_element in ['U', 'Np', 'Pu', 'Am', 'Cm']:
         return '5f'
     # Main group (p orbitals)
     else:

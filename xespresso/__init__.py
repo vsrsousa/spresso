@@ -23,6 +23,7 @@ _EXPORTS = {
         'set_ferromagnetic',
         'setup_magnetic_config',
         'kpts_from_spacing',
+        'read_structure',
     ],
     'xespresso.workflow': ['CalculationWorkflow', 'quick_scf', 'quick_relax', 'PRESETS'],
     'xespresso.pseudopotentials': [

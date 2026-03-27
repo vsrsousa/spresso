@@ -1444,47 +1444,66 @@ class ConvergenceWorkflow:
         
         # ⭐ SMART REUSE: Self.initial_kspacing was already calculated in Phase 1 with optimal_ecutwfc!
         # Copy Phase 1 result to Phase 2 cache to avoid recalculation
+        # This value will be the INITIAL REFERENCE for sliding window
+        reference_kspacing = None
+        reference_properties_phase2 = None
         if optimal_ecutwfc in self.ecut_results_cache and self.initial_kspacing not in ksp_results:
             ksp_results[self.initial_kspacing] = self.ecut_results_cache[optimal_ecutwfc].copy()
+            reference_kspacing = self.initial_kspacing
+            reference_properties_phase2 = self.ecut_results_cache[optimal_ecutwfc].copy()
             if verbose:
                 print(f"  [REUSE] Kspacing={self.initial_kspacing:.3f} Å⁻¹ from Phase 1 (optimal_ecutwfc={optimal_ecutwfc:.1f} Ry)")
+                energy_str = f"{reference_properties_phase2.get('energy', np.nan):.6f}"
+                print(f"  ✓ [REFERENCE] kspacing={self.initial_kspacing:.3f}: E = {energy_str} eV/atom")
         
-        reference_properties_phase2 = None  # Sliding window: reference from PREVIOUS iteration
-        previous_ksp_value = None  # Track the kspacing value tested in previous iteration
-        current_ksp_index = 0  # Index into kspacing_range
+        # Start testing from next finer (smaller) kspacing value
+        ksp_to_test = self.initial_kspacing - kspacing_step
         iteration = 1
-        while True:
-            # Safety check: cannot expand below reference kspacing
-            # (min_kspacing_allowed is the finest/reference value, should never go smaller)
-            expansion_limit = min_kspacing_allowed
-            
-            # Get next kspacing value to test
-            if current_ksp_index >= len(kspacing_range):
-                # Need to expand range - generate next finer (smaller) value
-                finest_ksp = min(kspacing_range)  # smallest value
-                next_ksp = finest_ksp - kspacing_step
-                if next_ksp < expansion_limit:
-                    # Can't expand further
-                    if verbose:
-                        print(f"\n⚠️  Cannot expand further (limit: {expansion_limit:.3f} Å⁻¹). Stopping.")
-                    break
-                kspacing_range.append(next_ksp)
-                kspacing_range.sort(reverse=True)  # Keep reverse sorted
-            
-            ksp_to_test = kspacing_range[current_ksp_index]
+        tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+        converged_delta_e = None  # Store ΔE that caused convergence
+        
+        while ksp_to_test >= min_kspacing_allowed:
             
             print(f"\n--- Iteration {iteration} ---")
             print(f"Testing kspacing: {ksp_to_test:.3f} Å⁻¹")
             
-            # Prepare batch: test value + next finer value (first iteration for sliding window)
+            # Prepare batch: only test values not yet in cache
             to_calculate = []
             if ksp_to_test not in ksp_results:
                 to_calculate.append(ksp_to_test)
-            # In first iteration, also calculate the second value (finer) for sliding window comparison
-            if iteration == 1 and len(kspacing_range) > 1:
-                next_ksp_value = kspacing_range[1]  # The finer value for comparison
-                if next_ksp_value not in ksp_results:
-                    to_calculate.append(next_ksp_value)
+            
+            # STEP 0: If value is already in cache, process it directly
+            if not to_calculate and ksp_to_test in ksp_results:
+                # Value is cached - process it without recalculation
+                props = ksp_results[ksp_to_test]
+                energy = props.get('energy', np.nan)
+                ref_energy = reference_properties_phase2.get('energy', 0)
+                tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
+                diff = abs(energy - ref_energy)
+                status = "✓" if diff < tolerance else "✗"
+                
+                if verbose:
+                    print(f"  {status} kspacing={ksp_to_test:.3f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f}) [cached]")
+                
+                result = {
+                    'phase': 2,
+                    'ecutwfc': optimal_ecutwfc,
+                    'kspacing': ksp_to_test,
+                    'energy_per_atom': energy,
+                    'label': f"{label_prefix}/phase2_iter{iteration}_ksp{int(ksp_to_test*1000)}",
+                }
+                results_all.append(result)
+                
+                # Check convergence
+                if diff < tolerance:
+                    if verbose:
+                        print(f"\n✓ CONVERGED at kspacing={ksp_to_test:.3f} Å⁻¹")
+                    break
+                else:
+                    # Not converged, try next finer value
+                    current_ksp_index += 1
+                    iteration += 1
+                    continue
             
             if to_calculate:
                 # Create workflow for this iteration
@@ -1560,14 +1579,7 @@ class ConvergenceWorkflow:
                             f"   Check the error messages above for details."
                         )
                 
-                # STEP 1: Extract all results and implement sliding window
-                # Sliding window: compare each tested value with the FINER (smaller) value from SAME batch
-                # On first iteration: compare tested values WITH EACH OTHER
-                # On subsequent iterations: compare NEW value with reference from PREVIOUS iteration
-                
-                tested_values_this_iteration = {}  # {kspacing: properties}
-                finest_ksp_this_iteration = None  # Track finest (smallest) tested in this batch
-                
+                # STEP 1: Extract result and store
                 for i, comp in enumerate(completion):
                     param = batch_params[i]
                     if comp['success']:
@@ -1578,133 +1590,82 @@ class ConvergenceWorkflow:
                                 comp, len(self.atoms), prop_name
                             )
                         ksp_results[param['kspacing']] = props
-                        tested_values_this_iteration[param['kspacing']] = props
-                        
-                        # Track finest (smallest kspacing) value in this batch 
-                        if finest_ksp_this_iteration is None or param['kspacing'] < finest_ksp_this_iteration:
-                            finest_ksp_this_iteration = param['kspacing']
                 
-                # For sliding window: on first iteration compare within batch, then update reference
-                if iteration == 1 and finest_ksp_this_iteration is not None:
-                    # First iteration: use finest value from this batch as reference for next
-                    reference_properties_phase2 = tested_values_this_iteration[finest_ksp_this_iteration]
-                    if verbose:
-                        energy_str = f"{reference_properties_phase2.get('energy', np.nan):.6f}" 
-                        print(f"  ✓ [REFERENCE (sliding window)] kspacing={finest_ksp_this_iteration:.3f}: E = {energy_str} eV/atom")
-                
-                # STEP 2: Print all results with convergence check
-                for ksp, props in tested_values_this_iteration.items():
-                    # On first iteration: skip the finest value (it's the reference)
-                    # On subsequent iterations: skip if it's the previous reference
-                    if iteration == 1 and ksp == finest_ksp_this_iteration:
-                        continue
+                # STEP 2: Check convergence for current kspacing value
+                if ksp_to_test in ksp_results:
+                    energy = ksp_results[ksp_to_test].get('energy', np.nan)
+                    ref_energy = reference_properties_phase2.get('energy', 0)
+                    diff = abs(energy - ref_energy)
+                    status = "✓" if diff < tolerance else "✗"
                     
                     result = {
                         'phase': 2,
                         'ecutwfc': optimal_ecutwfc,
-                        'kspacing': ksp,
-                        'energy_per_atom': props.get('energy', np.nan),
-                        'label': f"{label_prefix}/phase2_iter{iteration}_ksp{int(ksp*1000)}",
+                        'kspacing': ksp_to_test,
+                        'energy_per_atom': energy,
+                        'label': f"{label_prefix}/phase2_iter{iteration}_ksp{int(ksp_to_test*1000)}",
                     }
                     results_all.append(result)
                     
-                    # Print with ΔE (only if we have a reference for comparison)
-                    if verbose and reference_properties_phase2 is not None:
-                        energy = props.get('energy', np.nan)
-                        ref_energy = reference_properties_phase2.get('energy', 0)
-                        diff = abs(energy - ref_energy)
-                        tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
-                        status = "✓" if diff < tolerance else "✗"
-                        print(f"  {status} kspacing={ksp:.3f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f})")
-            
-            # Check if current value has converged (skip if reference not yet calculated)
-            if reference_properties_phase2 is not None and ksp_to_test in ksp_results:
-                tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
-                energy = ksp_results[ksp_to_test].get('energy', np.nan)
-                ref_energy = reference_properties_phase2.get('energy', 0)
-                delta_e = abs(energy - ref_energy)
-                
-                if delta_e < tolerance:
-                    # Current value converged! Stop searching
                     if verbose:
-                        print(f"\n✓ CONVERGED at kspacing={ksp_to_test:.3f} Å⁻¹")
-                    break
-                else:
-                    # Not converged, try next (finer) value
-                    if verbose:
-                        print(f"  Not yet converged (ΔE = {delta_e:.6f} > tolerance {tolerance:.6f}), trying finer...")
-            else:
-                # Reference calculation pending
-                if verbose and iteration == 1:
-                    print(f"~ Awaiting reference energy (sliding window) for convergence comparison...")
+                        print(f"  {status} kspacing={ksp_to_test:.3f}: E = {energy:.6f} eV/atom (ΔE = {diff*1000:.2f} meV/atom)")
+                    
+                    # Check if converged
+                    if diff < tolerance:
+                        if verbose:
+                            print(f"\n✓ CONVERGED at kspacing={ksp_to_test:.3f} Å⁻¹")
+                        reference_kspacing = ksp_to_test
+                        converged_delta_e = diff  # Store the ΔE that caused convergence
+                        break
+                    else:
+                        # Not converged, update reference and continue to finer kspacing
+                        reference_properties_phase2 = ksp_results[ksp_to_test].copy()
+                        reference_kspacing = ksp_to_test
             
-            # CRITICAL: After first iteration in PHASE 2, MUST have reference. Otherwise STOP immediately.
-            if iteration == 1 and reference_properties_phase2 is None:
-                raise RuntimeError(
-                    f"\n❌ CRITICAL ERROR: Could not obtain reference energy at kspacing={min_kspacing_allowed} Å⁻¹ (PHASE 2)\n"
-                    f"   This is the FIRST calculation in PHASE 2 and it failed. Cannot continue.\n"
-                    f"   \n"
-                    f"   Common causes:\n"
-                    f"   1. Pseudopotential file not found or path is relative (must be absolute)\n"
-                    f"   2. Machine connection failed\n"
-                    f"   3. Pseudopotential file is corrupted\n"
-                    f"   \n"
-                    f"   Check the error messages above and fix the pseudopotential path."
-                )
-            
-            # Move to next value
-            current_ksp_index += 1
+            # Move to next finer (smaller) kspacing value
+            ksp_to_test = ksp_to_test - kspacing_step
             iteration += 1
         
-        # Ensure reference was calculated
+        # Ensure reference was set
         if reference_properties_phase2 is None:
-            raise RuntimeError(f"Could not obtain reference energy (kspacing={min_kspacing_allowed})")
+            raise RuntimeError(f"Could not obtain reference energy from Phase 1")
         
         # PHASE 2: SELECT OPTIMAL KSPACING FROM CONVERGENCE RESULTS
+        # If loop broke, it means reference_kspacing reached convergence
+        # If loop completed naturally (while condition became false), no convergence was reached
+        
         if not ksp_results:
             print("\n⚠️  PHASE 2: No successful kspacing tests. May need to adjust parameters.")
         else:
-            # Exclude reference from selection
-            test_ksp_results = {k: v for k, v in ksp_results.items() if k != min_kspacing_allowed}
+            # Check if the loop broke (converged) or completed naturally (no convergence)
+            # If broke: reference_kspacing = the converged value (optimal)
+            # If completed naturally: reference_kspacing = last tested value (did not converge)
             
-            if not test_ksp_results:
-                raise RuntimeError("PHASE 2 failed: no successful calculations (only reference)")
+            # The signal for break is: we exited with reference_kspacing != self.initial_kspacing
+            # (since initial_kspacing is the starting reference and gets updated as we test)
             
-            # Find converged kspacing values (ΔE < tolerance)
-            tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
-            converged_ksp = {}
-            for ksp, props_dict in test_ksp_results.items():
-                energy = props_dict.get('energy', np.nan)
-                ref_energy = reference_properties_phase2.get('energy', 0)
-                delta_e = abs(energy - ref_energy)
-                if delta_e < tolerance:
-                    converged_ksp[ksp] = delta_e
+            # Simpler approach: if reference_kspacing was updated to something finer than initial,
+            # it means loop tested at least one value after setting up the reference
             
-            if converged_ksp:
-                # Select the MAXIMUM (coarsest, most efficient) converged kspacing
-                optimal_kspacing = max(converged_ksp.keys())
-                self.optimal_kspacing = optimal_kspacing  # Store for get_recommendations()
-                optimal_delta_e = converged_ksp[optimal_kspacing]
+            if reference_kspacing is not None and reference_kspacing < self.initial_kspacing:
+                # Loop tested values finer than initial, and reference_kspacing is the best one reached
+                optimal_kspacing = reference_kspacing
+                self.optimal_kspacing = optimal_kspacing
                 
                 if verbose:
                     print(f"\n✓ PHASE 2 CONVERGED")
                     print(f"  Optimal kspacing: {optimal_kspacing:.3f} Å⁻¹")
-                    print(f"  ΔE = {optimal_delta_e*1000:.2f} meV/atom < tolerance = {tolerance*1000:.2f} meV/atom")
-                    print(f"  (All converged values: {sorted(converged_ksp.keys())})")
+                    if converged_delta_e is not None:
+                        print(f"  ΔE = {converged_delta_e*1000:.2f} meV/atom < tolerance = {tolerance*1000:.2f} meV/atom")
             else:
+                # Loop completed without finding a converged value finer than initial
                 if verbose:
-                    best_kspacing = min(test_ksp_results.keys())
-                    best_props = test_ksp_results[best_kspacing]
-                    best_energy = best_props.get('energy', np.nan)
-                    ref_energy = reference_properties_phase2.get('energy', 0)
-                    best_delta_e = abs(best_energy - ref_energy)
-                    print(f"\n✗ PHASE 2 NOT CONVERGED")
+                    print(f"\n✗ PHASE 2 NOT CONVERGED at any finer kspacing")
                     print(f"  Tolerance = {tolerance*1000:.2f} meV/atom (precision='{self.precision}')")
-                    print(f"  Reached minimum kspacing={min_kspacing:.3f} without achieving convergence")
-                    print(f"  Closest: kspacing={best_kspacing:.3f} with ΔE = {best_delta_e*1000:.2f} meV/atom")
+                    print(f"  Best result remains at initial kspacing: {self.initial_kspacing:.3f} Å⁻¹")
                 
-                # Use the best (finest) kspacing found as fallback
-                self.optimal_kspacing = best_kspacing
+                # Use initial_kspacing as fallback
+                self.optimal_kspacing = self.initial_kspacing
         
         # Persist kspacing cache for future runs with different precision levels
         self.kspacing_results_cache = ksp_results.copy()

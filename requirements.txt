@@ -1,6 +1,7 @@
 ase>=3.22.0             # Atomic Simulation Environment - compatible with latest versions
 numpy>=1.21.0            # Cálculos numéricos
 scipy>=1.7.0             # Operações científicas
+spglib>=2.0.0            # Symmetry analysis and primitive cell reduction
 matplotlib>=3.4.0        # Visualização de dados
 pandas>=1.3.0            # Manipulação de dados tabulares
 tqdm>=4.62.0             # Barra de progresso

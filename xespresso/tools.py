@@ -208,7 +208,7 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
         # Auto-detect from version
         try:
             major, minor = map(int, qe_version.split('.')[:2])
-            use_new_hubbard_format = (major >= 7)
+            use_new_hubbard_format = (major > 7) or (major == 7 and minor >= 1)
         except (ValueError, AttributeError):
             pass
     

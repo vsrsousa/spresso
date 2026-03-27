@@ -102,6 +102,7 @@ class CalculationWorkflow:
         kspacing: Optional[float] = None,
         input_data: Optional[Dict] = None,
         magnetic_config: Optional[Union[str, Dict]] = None,
+        hubbard_config: Optional[Union[str, Dict]] = None,
         expand_cell: bool = False,
         queue: Optional[Dict] = None,
         machine: Optional[str] = None,
@@ -138,6 +139,9 @@ class CalculationWorkflow:
                            - 'antiferro' or 'antiferromagnetic': Alternating spin
                            - Dict: Element-based config, e.g. {'Fe': [1, -1], 'O': [0]}
                            Also supports Hubbard parameters in the dict format
+            hubbard_config: Hubbard parameter configuration for DFT+U calculations.
+                          Can be dict with U values or string specification.
+                          Merged into input_data for proper format handling.
             expand_cell: If True, expand cell to accommodate magnetic configuration
             queue: Queue configuration dictionary for job submission (local or remote).
                    This is directly passed to the Espresso calculator.
@@ -209,6 +213,30 @@ class CalculationWorkflow:
         self.input_data = self.preset.copy()
         if input_data:
             self.input_data.update(input_data)
+        
+        # Auto-convert code_version to qe_version for Hubbard format detection
+        # If code_version is provided and qe_version is not already set, use code_version
+        if code_version is not None and 'qe_version' not in self.input_data:
+            self.input_data['qe_version'] = code_version
+            logger.info(f"Auto-set qe_version={code_version} from code_version for Hubbard format detection")
+        
+        # Process hubbard_config if provided
+        if hubbard_config is not None:
+            if isinstance(hubbard_config, dict):
+                # Check if it's already in new format (has 'u', 'v', 'projector' keys)
+                if 'u' in hubbard_config or 'v' in hubbard_config or 'projector' in hubbard_config:
+                    # New format
+                    self.input_data['hubbard'] = hubbard_config
+                else:
+                    # Old format - element: U_value mapping
+                    if 'input_ntyp' not in self.input_data:
+                        self.input_data['input_ntyp'] = {}
+                    if 'Hubbard_U' not in self.input_data['input_ntyp']:
+                        self.input_data['input_ntyp']['Hubbard_U'] = {}
+                    self.input_data['input_ntyp']['Hubbard_U'].update(hubbard_config)
+                    # Enable DFT+U
+                    self.input_data['lda_plus_u'] = True
+            logger.info(f"Hubbard parameters added to input_data")
         
         # Handle magnetic configuration if provided
         if magnetic_config is not None:

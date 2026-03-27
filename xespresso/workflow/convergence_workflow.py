@@ -33,10 +33,9 @@ from xespresso.pseudopotentials.detector import parse_upf_header, get_suggested_
 from xespresso.utils.pseudo_utils import discover_pseudopotential_directory, get_ecutrho_ratio
 
 
-# Minimum ecutwfc determined from SSSP_efficiency pseudopotentials analysis:
-# Mg requires minimum 13.0 Ry (smallest in SSSP efficiency set)
-# This is data-driven default when no pseudopotentials can be analyzed
-DEFAULT_MIN_ECUTWFC = 13.0
+# Minimum ecutwfc default: 30.0 Ry
+# User can override with min_ecutwfc parameter if needed
+DEFAULT_MIN_ECUTWFC = 30.0
 DEFAULT_MAX_ECUTWFC = 200.0
 DEFAULT_INITIAL_KSPACING = 0.3  # Coarse k-mesh for Phase 1 (configurable)
 DEFAULT_MIN_KSPACING = 0.1      # Minimum k-spacing limit (convergence stops here)
@@ -128,9 +127,9 @@ class ConvergenceWorkflow:
                      Options: 'low', 'medium', 'high', 'ultra'.
                      Overrides ecutwfc_range and kspacing_range.
                      Default: 'low' (fast convergence)
-            min_ecutwfc: Minimum ecutwfc cutoff for convergence study (default: 13.0 Ry from SSSP data).
+            min_ecutwfc: Minimum ecutwfc cutoff for convergence study (default: 30.0 Ry).
                         Convergence will start from this value and increase until convergence is reached.
-                        If None, uses DEFAULT_MIN_ECUTWFC (13.0 Ry, data-driven from SSSP efficiency pseudos).
+                        If None, uses DEFAULT_MIN_ECUTWFC (30.0 Ry).
             max_ecutwfc: Maximum ecutwfc cutoff for convergence study (default: 200.0 Ry).
                         Upper bound for convergence range.
             initial_kspacing: Initial k-spacing value for Phase 1 (and Phase 2 starting point) in Å⁻¹.
@@ -195,7 +194,6 @@ class ConvergenceWorkflow:
                 # This matches the pseudoconfig behavior: store filenames, not full paths
                 self.pseudopotentials = {}
                 for element, full_path in resolved_pseudos.items():
-                    import os
                     filename = os.path.basename(full_path)
                     self.pseudopotentials[element] = filename
                     logger.info(f"  Discovered {element}: {filename} from {self.pseudopotentials_base_path}")
@@ -271,6 +269,11 @@ class ConvergenceWorkflow:
         self.magnetic_config = magnetic_config
         self.hubbard_config = hubbard_config
         self.extra_kwargs = kwargs
+        
+        # Store code_version to be passed to CalculationWorkflow instances
+        # It will be auto-converted to qe_version in input_data for Hubbard format detection
+        if code_version is not None:
+            logger.info(f"Code version set to {code_version} - will be used for Hubbard format selection")
         
         # Results storage
         self.results = None  # DataFrame will be created after tests
@@ -618,9 +621,12 @@ class ConvergenceWorkflow:
         verbose: bool = True,
         batch_timeout: int = 3600,
         label_prefix: str = 'convergence',
+        min_ecutwfc: Optional[float] = None,
         max_ecutwfc: float = 200.0,
         ecutwfc_step: float = 10.0,
         magnetic_config: Optional[Union[str, Dict]] = None,
+        hubbard_config: Optional[Union[str, Dict]] = None,
+        **kwargs
     ) -> 'ConvergenceWorkflow':
         """
         Create and run convergence workflow with automatic parameter optimization.
@@ -641,18 +647,22 @@ class ConvergenceWorkflow:
             verbose: Print progress information (default: True)
             batch_timeout: Timeout for batch jobs in seconds (default: 3600)
             label_prefix: Prefix for calculation directories (default: 'convergence')
+            min_ecutwfc: Minimum ecutwfc to test (default: None, uses DEFAULT_MIN_ECUTWFC=30.0)
             max_ecutwfc: Maximum ecutwfc to test (default: 200.0)
             ecutwfc_step: Step size for ecutwfc increases (default: 10.0)
             magnetic_config: Magnetic configuration string or dict (optional)
+            hubbard_config: Hubbard parameter configuration (optional).
+                          Can be dict with U values or string for new/old format selection.
+            **kwargs: Additional parameters passed to CalculationWorkflow (e.g., nbnd, conv_thr)
             
         Returns:
             ConvergenceWorkflow instance with completed convergence study
         """
         # If a pseudopotentials_config name is provided, pass it to the ctor
         if pseudopotentials_config is not None:
-            workflow = cls(atoms, pseudopotentials_config=pseudopotentials_config, precision=precision, queue=queue, machine=machine, code_version=code_version, convergence_criteria_list=convergence_criteria_list, magnetic_config=magnetic_config)
+            workflow = cls(atoms, pseudopotentials_config=pseudopotentials_config, precision=precision, queue=queue, machine=machine, code_version=code_version, convergence_criteria_list=convergence_criteria_list, magnetic_config=magnetic_config, hubbard_config=hubbard_config, min_ecutwfc=min_ecutwfc, **kwargs)
         else:
-            workflow = cls(atoms, pseudopotentials, precision=precision, queue=queue, machine=machine, code_version=code_version, convergence_criteria_list=convergence_criteria_list, magnetic_config=magnetic_config)
+            workflow = cls(atoms, pseudopotentials, precision=precision, queue=queue, machine=machine, code_version=code_version, convergence_criteria_list=convergence_criteria_list, magnetic_config=magnetic_config, hubbard_config=hubbard_config, min_ecutwfc=min_ecutwfc, **kwargs)
         
         # Run convergence study with specified parameters
         workflow.run_convergence_study(
@@ -1209,7 +1219,7 @@ class ConvergenceWorkflow:
                     'atoms': self.atoms,
                     'protocol': self.protocol,
                     'kspacing': fixed_kspacing_phase1,
-                    'code_version': self.code_version,
+                    'code_version': self.code_version,  # Will auto-convert to qe_version in CalculationWorkflow
                 }
                 
                 if self._pseudo_config_name:
@@ -1230,6 +1240,8 @@ class ConvergenceWorkflow:
                 if self.hubbard_config is not None:
                     wf_kwargs['hubbard_config'] = self.hubbard_config
                 
+                # Pass extra kwargs (e.g., nbnd, conv_thr) to CalculationWorkflow
+                wf_kwargs.update(self.extra_kwargs)
                 wf1 = CalculationWorkflow(**wf_kwargs)
                 
                 # Prepare batch for new values only
@@ -1329,6 +1341,22 @@ class ConvergenceWorkflow:
                             status = "✓" if diff < criteria_tolerances.get('energy_tolerance', 1e-3) else "✗"
                             print(f"  {status} ecutwfc={param['ecutwfc']:.1f}: E = {energy:.6f} eV/atom (ΔE = {diff:.6f})")
                     else:
+                        param = batch_params[i]
+                        # CRITICAL: If reference calculation failed, stop immediately
+                        if param['ecutwfc'] == max_ecutwfc:
+                            raise RuntimeError(
+                                f"\n❌ CRITICAL ERROR: Reference calculation FAILED\n"
+                                f"   ecutwfc={max_ecutwfc:.1f} Ry: {comp.get('error', 'Failed')}\n"
+                                f"   Cannot proceed without reference for convergence comparison.\n"
+                                f"   \n"
+                                f"   Possible causes:\n"
+                                f"   1. ecutwfc={max_ecutwfc} is too high for this system\n"
+                                f"   2. Pseudopotential issue or numerical instability\n"
+                                f"   3. Machine/walltime limit reached\n"
+                                f"   4. Memory/resource limit exceeded\n"
+                                f"   \n"
+                                f"   Try reducing max_ecutwfc and running again."
+                            )
                         if verbose:
                             print(f"  ✗ ecutwfc={batch_params[i]['ecutwfc']}: {comp.get('error', 'Failed')}")
             
@@ -1349,9 +1377,9 @@ class ConvergenceWorkflow:
                     if verbose:
                         print(f"  Not yet converged (ΔE = {delta_e:.6f} > tolerance {tolerance:.6f}), trying next...")
             else:
-                # Reference calculation pending
+                # Reference calculation pending or failed
                 if verbose and iteration == 1:
-                    print(f"~ Reference calculated, continuing with other values...")
+                    print(f"~ Awaiting reference energy for convergence comparison...")
             
             # Move to next value
             current_ecut_index += 1
@@ -1464,7 +1492,7 @@ class ConvergenceWorkflow:
                     'atoms': self.atoms,
                     'protocol': self.protocol,
                     'ecutwfc': optimal_ecutwfc,
-                    'code_version': self.code_version,
+                    'code_version': self.code_version,  # Will auto-convert to qe_version in CalculationWorkflow
                 }
                 
                 if self._pseudo_config_name:
@@ -1485,6 +1513,8 @@ class ConvergenceWorkflow:
                 if self.hubbard_config is not None:
                     wf_kwargs['hubbard_config'] = self.hubbard_config
                 
+                # Pass extra kwargs (e.g., nbnd, conv_thr) to CalculationWorkflow
+                wf_kwargs.update(self.extra_kwargs)
                 wf2 = CalculationWorkflow(**wf_kwargs)
                 
                 # Prepare batch for new values only
@@ -1606,7 +1636,7 @@ class ConvergenceWorkflow:
             else:
                 # Reference calculation pending
                 if verbose and iteration == 1:
-                    print(f"~ Reference calculated, continuing with other kspacing values...")
+                    print(f"~ Awaiting reference energy (sliding window) for convergence comparison...")
             
             # CRITICAL: After first iteration in PHASE 2, MUST have reference. Otherwise STOP immediately.
             if iteration == 1 and reference_properties_phase2 is None:

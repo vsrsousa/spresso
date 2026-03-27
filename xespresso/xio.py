@@ -45,7 +45,7 @@ def write_espresso_in(
     kspacing=None,
     kpts=None,
     koffset=(0, 0, 0),
-    crystal_coordinates=False,
+    crystal_coordinates=True,
     **kwargs
 ):
     """
@@ -132,25 +132,34 @@ def build_section_str(atoms, species_info, input_data, input_parameters, qe_vers
     # different magnetisms means different types
     input_parameters["system"]["ntyp"] = len(species_info)
     input_parameters["system"]["nat"] = len(atoms)
+    
+    # Determine if using new Hubbard format (QE 7.1+)
+    use_new_hubbard = 'hubbard' in input_data
+    if qe_version and not use_new_hubbard:
+        try:
+            major, minor = map(int, qe_version.split('.')[:2])
+            use_new_hubbard = (major > 7) or (major == 7 and minor >= 1)
+        except (ValueError, AttributeError):
+            pass
 
     #
     if "INPUT_NTYP" in input_data:
         for key, value in input_data["INPUT_NTYP"].items():
             # Skip Hubbard parameters if using new format
-            if key.startswith('Hubbard') and 'hubbard' in input_data:
+            if key.startswith('Hubbard') and use_new_hubbard:
                 continue
             for species in value:
                 if species in species_info:
                     mag_str = "{0}({1})".format(key, species_info[species]["index"])
                     input_parameters["system"][mag_str] = value[species]
     
-    # Apply Hubbard parameters to SYSTEM namelist if using old format
-    input_parameters = apply_hubbard_to_system(
-        input_parameters, input_data, species_info, qe_version
-    )
+    # Apply Hubbard parameters to SYSTEM namelist ONLY if using old format
+    if not use_new_hubbard:
+        input_parameters = apply_hubbard_to_system(
+            input_parameters, input_data, species_info, qe_version
+        )
     
     # Old format hubbard_v (only if not using new format)
-    use_new_hubbard = 'hubbard' in input_data or (qe_version and qe_version >= '7.0')
     if "hubbard_v" in input_data and not use_new_hubbard:
         for key, value in input_data["hubbard_v"].items():
             mag_str = "Hubbard_V{0}".format(key)

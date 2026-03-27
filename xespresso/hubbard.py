@@ -11,6 +11,72 @@ The new format is more flexible and recommended for QE 7.0+.
 """
 
 from typing import Dict, List, Optional, Tuple, Any
+import json
+import os
+
+
+def _get_default_orbital(element: str) -> str:
+    """
+    Get default orbital for Hubbard correction for a given element.
+    
+    For transition metals: 3d/4d/5d
+    For lanthanides: 4f
+    For main-group: p orbitals
+    
+    Args:
+        element: Chemical symbol (e.g., 'Fe', 'Mn', 'Gd')
+    
+    Returns:
+        Default orbital (e.g., '3d')
+    """
+    try:
+        json_path = os.path.join(
+            os.path.dirname(__file__), 
+            'data', 
+            'hubbard_orbitals.json'
+        )
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+        
+        # Get orbitals for this element, use first one as default
+        orbitals = data.get('orbitals', {}).get(element, [])
+        if orbitals:
+            # For lanthanides/actinides, prefer f orbitals (most important for Hubbard)
+            for orb in orbitals:
+                if 'f' in orb:
+                    return orb
+            # For transition metals, prefer d orbitals over s orbitals
+            for orb in orbitals:
+                if 'd' in orb:
+                    return orb
+            # For p-block and main group, prefer p orbitals
+            for orb in orbitals:
+                if 'p' in orb:
+                    return orb
+            # Fallback to first orbital
+            return orbitals[0]
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        pass
+    
+    # Fallback defaults based on element
+    # Transition metals (3d)
+    if element in ['Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn']:
+        return '3d'
+    # Late transition metals (4d)
+    elif element in ['Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd']:
+        return '4d'
+    # Early transition metals (5d)
+    elif element in ['La', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg']:
+        return '5d'
+    # Lanthanides/actinides (f orbitals) - highest priority
+    elif element in ['Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu']:
+        return '4f'
+    elif element in ['U', 'Np', 'Pu', 'Am', 'Cm']:
+        return '5f'
+    # Main group (p orbitals)
+    else:
+        return '2p'  # Generic fallback
+
 
 
 class HubbardConfig:
@@ -27,14 +93,14 @@ class HubbardConfig:
         beta_params: Dictionary of beta parameters (for old format)
     """
     
-    def __init__(self, use_new_format: bool = None, projector: str = 'atomic'):
+    def __init__(self, use_new_format: bool = None, projector: str = 'ortho-atomic'):
         """
         Initialize HubbardConfig.
         
         Args:
             use_new_format: If None, auto-detect based on parameters. 
                           If True, force new format. If False, force old format.
-            projector: Projector type for new format (default: 'atomic')
+            projector: Projector type for new format (default: 'ortho-atomic')
         """
         self.use_new_format = use_new_format
         self.projector = projector
@@ -176,6 +242,9 @@ class HubbardConfig:
         """
         Convert to new format HUBBARD card.
         
+        For species without orbital specification (e.g., 'Fe'), 
+        automatically detects the default orbital (e.g., 'Fe-3d').
+        
         Returns:
             List of strings forming the HUBBARD card
         """
@@ -184,12 +253,24 @@ class HubbardConfig:
         
         # U parameters
         for species_orbital, value in self.u_params.items():
+            # If species_orbital doesn't have '-', add default orbital
+            if '-' not in species_orbital:
+                default_orb = _get_default_orbital(species_orbital)
+                species_orbital = f"{species_orbital}-{default_orb}"
+            
             lines.append(f"  U {species_orbital} {value}\n")
         
         # V parameters
         for v_param in self.v_params:
             if len(v_param) == 5:
                 spec1_orb, spec2_orb, i, j, value = v_param
+                
+                # Add default orbitals if not specified
+                if spec1_orb and '-' not in spec1_orb:
+                    spec1_orb = f"{spec1_orb}-{_get_default_orbital(spec1_orb)}"
+                if spec2_orb and '-' not in spec2_orb:
+                    spec2_orb = f"{spec2_orb}-{_get_default_orbital(spec2_orb)}"
+                
                 lines.append(f"  V {spec1_orb} {spec2_orb} {i} {j} {value}\n")
         
         return lines
@@ -207,11 +288,12 @@ class HubbardConfig:
             HubbardConfig object
         """
         # Determine format based on QE version if provided
+        # Note: New HUBBARD card format started in QE 7.1 (not 7.0)
         use_new_format = None
         if qe_version:
             try:
                 major, minor = map(int, qe_version.split('.')[:2])
-                use_new_format = (major >= 7)
+                use_new_format = (major > 7) or (major == 7 and minor >= 1)
             except (ValueError, AttributeError):
                 pass
         

@@ -244,7 +244,7 @@ class CalculationPreparation(BaseCalculationPreparation):
                 # Parse version and determine format
                 try:
                     major = int(qe_version.split(".")[0])
-                    use_new_format = major >= 7
+                    use_new_format = (major > 7) or (major == 7 and minor >= 1)
                 except (ValueError, IndexError):
                     pass
 

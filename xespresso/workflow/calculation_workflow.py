@@ -220,6 +220,9 @@ class CalculationWorkflow:
             self.input_data['qe_version'] = code_version
             logger.info(f"Auto-set qe_version={code_version} from code_version for Hubbard format detection")
         
+        # Store hubbard_config for use in _apply_magnetic_config (for auto-remapping)
+        self.hubbard_config = hubbard_config
+        
         # Process hubbard_config if provided
         if hubbard_config is not None:
             if isinstance(hubbard_config, dict):
@@ -468,6 +471,7 @@ class CalculationWorkflow:
     def _apply_magnetic_config(self, magnetic_config: Union[str, Dict]):
         """Apply magnetic configuration using setup_magnetic_config."""
         from xespresso.tools import set_ferromagnetic, set_antiferromagnetic
+        from xespresso.hubbard import remap_hubbard_config
         
         if isinstance(magnetic_config, str):
             magnetic_config = magnetic_config.lower()
@@ -575,6 +579,34 @@ class CalculationWorkflow:
                 self.input_data['qe_version'] = config.get('qe_version')
             if 'lda_plus_u' in config:
                 self.input_data['lda_plus_u'] = config['lda_plus_u']
+            
+            # AUTO-REMAP HUBBARD CONFIG: If hubbard_config was provided separately,
+            # remap it using the species_order from setup_magnetic_config
+            if self.hubbard_config is not None and 'species_order' in config:
+                remapped_hubbard = remap_hubbard_config(
+                    self.hubbard_config,
+                    config['species_order']
+                )
+                logger.info(f"Auto-remapped Hubbard config: {self.hubbard_config} → {remapped_hubbard}")
+                
+                # Apply remapped Hubbard to input_ntyp (old format)
+                if config['hubbard_format'] == 'old':
+                    if 'input_ntyp' not in self.input_data:
+                        self.input_data['input_ntyp'] = {}
+                    if 'Hubbard_U' not in self.input_data['input_ntyp']:
+                        self.input_data['input_ntyp']['Hubbard_U'] = {}
+                    # REPLACE any existing Hubbard_U values (don't add to them)
+                    # First remove any non-remapped base element keys
+                    keys_to_remove = []
+                    for key in self.input_data['input_ntyp']['Hubbard_U'].keys():
+                        if key in self.hubbard_config:
+                            keys_to_remove.append(key)
+                    for key in keys_to_remove:
+                        del self.input_data['input_ntyp']['Hubbard_U'][key]
+                    # Now add the remapped values
+                    self.input_data['input_ntyp']['Hubbard_U'].update(remapped_hubbard)
+                # For new format, remapped is handled separately via hubbard card
+                # (would need integration with HubbardConfig class for full support)
             
             # Set nspin=2 for polarized magnetic calculation
             self.input_data['nspin'] = 2

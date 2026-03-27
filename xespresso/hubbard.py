@@ -431,3 +431,99 @@ def apply_hubbard_to_system(input_parameters: Dict, input_data: Dict,
         input_parameters['system'].update(old_params)
     
     return input_parameters
+
+
+def remap_hubbard_config(hubbard_config: Dict[str, Any], 
+                        species_order: List[str]) -> Dict[str, Any]:
+    """
+    Remap Hubbard configuration from element basis to species labels using order.
+    
+    When magnetic_config creates multiple species from a single element
+    (e.g., Gd → Gd1, Gd2 for antiferromagnetic), Hubbard parameters specified
+    as lists are distributed to species in the order they were created.
+    
+    Args:
+        hubbard_config: Hubbard configuration dict. Supports:
+            - Simple scalar: {'Gd': 6.0} → applies to all Gd species
+            - List: {'Gd': [5.0, 6.5]} → Gd1=5.0, Gd2=6.5 (in species_order)
+            - Orbital dict: {'Gd': {'3d': 4.3}} → same orbital value for all Gd
+            - Orbital list: {'Gd': {'3d': [4.3, 4.5]}} → different U per species
+        
+        species_order: List of species labels in creation order.
+            Example: ['Gd1', 'Gd2', 'Ni', 'Si']
+            Comes from setup_magnetic_config() result['species_order']
+    
+    Returns:
+        Remapped dict with species labels as keys.
+        
+    Example:
+        >>> hubbard_config = {'Gd': [5.0, 6.5]}
+        >>> species_order = ['Gd1', 'Gd2', 'Ni', 'Si']
+        >>> remapped = remap_hubbard_config(hubbard_config, species_order)
+        >>> # remapped = {'Gd1': 5.0, 'Gd2': 6.5}
+    """
+    if not hubbard_config or not species_order:
+        return hubbard_config or {}
+    
+    remapped = {}
+    
+    # Build reverse map: species_prefix → [species_labels]
+    # E.g., 'Gd' → ['Gd1', 'Gd2', ...], 'Ni' → ['Ni'], etc
+    species_by_element = {}
+    for species in species_order:
+        # Try to extract base element (strip trailing digits)
+        # Gd1 → Gd, Fe2 → Fe, Ni → Ni
+        base_element = species.rstrip('0123456789')
+        if base_element not in species_by_element:
+            species_by_element[base_element] = []
+        species_by_element[base_element].append(species)
+    
+    # Remap each element in hubbard_config
+    for element_key, hubbard_value in hubbard_config.items():
+        # Find species for this element
+        species_list = species_by_element.get(element_key, [])
+        
+        if not species_list:
+            # Element key not found in species_order, keep original
+            remapped[element_key] = hubbard_value
+            continue
+        
+        if isinstance(hubbard_value, dict):
+            # Orbital-based format: {'3d': 4.3} or {'3d': [4.3, 4.5]}
+            remapped_orbital = {}
+            for orbital, orbital_value in hubbard_value.items():
+                if isinstance(orbital_value, (list, tuple)):
+                    # Different value for each species
+                    remapped_orbital[orbital] = {}
+                    for i, species in enumerate(species_list):
+                        if i < len(orbital_value):
+                            remapped_orbital[orbital][species] = orbital_value[i]
+                        else:
+                            # Reuse last value if not enough specified
+                            remapped_orbital[orbital][species] = orbital_value[-1]
+                else:
+                    # Same value for all species
+                    remapped_orbital[orbital] = {}
+                    for species in species_list:
+                        remapped_orbital[orbital][species] = orbital_value
+            
+            # Flatten to species-orbital format
+            for orbital, species_dict in remapped_orbital.items():
+                for species, value in species_dict.items():
+                    remapped[f"{species}-{orbital}"] = value
+        
+        elif isinstance(hubbard_value, (list, tuple)):
+            # List format: [5.0, 6.5] → distribute to species in order
+            for i, species in enumerate(species_list):
+                if i < len(hubbard_value):
+                    remapped[species] = hubbard_value[i]
+                else:
+                    # Reuse last value if not enough specified
+                    remapped[species] = hubbard_value[-1]
+        
+        else:
+            # Scalar format: 6.0 → apply to all species of this element
+            for species in species_list:
+                remapped[species] = hubbard_value
+    
+    return remapped

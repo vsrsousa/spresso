@@ -538,6 +538,30 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
     result['expanded'] = expanded
     result['hubbard_format'] = 'new' if use_new_hubbard_format else 'old'
     
+    # Build species_order: list of species labels in the order they were specified
+    # This preserves the order of magnetic moments for Hubbard remapping
+    # E.g., if magnetic_config={'Gd': [1.0, -1.0]}, species_order=['Gd1', 'Gd2']
+    species_order = []
+    for element in magnetic_config.keys():
+        if isinstance(magnetic_config[element], dict):
+            mags = magnetic_config[element].get('mag', [0])
+        elif isinstance(magnetic_config[element], (list, tuple)):
+            mags = list(magnetic_config[element])
+        else:
+            mags = [magnetic_config[element]]
+        
+        # Find the species labels for this element in species_map
+        element_species = [sp for sp in result['species_map'].keys() 
+                          if result['species_map'][sp] == element]
+        
+        # Add in order (element_species should already be ordered Gd1, Gd2, etc)
+        for i, species in enumerate(sorted(element_species, key=lambda s: (s[:-1] if s[-1].isdigit() else s, 
+                                                                            int(s[-1]) if s[-1].isdigit() else 0))):
+            if i < len(mags):
+                species_order.append(species)
+    
+    result['species_order'] = species_order
+    
     return result
 
 

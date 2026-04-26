@@ -13,7 +13,7 @@ from pathlib import Path
 from ase import Atoms
 from ase.io import read
 from ase.io.espresso import kspacing_to_grid
-from xespresso import Espresso
+from xespresso import Espresso, kpts_from_spacing
 from xespresso.tools import setup_magnetic_config
 from xespresso.machines import load_machine
 from xespresso.pseudopotentials import load_pseudopotentials_config
@@ -98,11 +98,9 @@ class CalculationWorkflow:
         protocol: str = 'moderate',
         pseudopotentials: Optional[Dict[str, str]] = None,
         pseudopotentials_config: Optional[str] = None,
-        pseudopotentials_base_path: Optional[str] = None,
         kspacing: Optional[float] = None,
         input_data: Optional[Dict] = None,
         magnetic_config: Optional[Union[str, Dict]] = None,
-        hubbard_config: Optional[Union[str, Dict]] = None,
         expand_cell: bool = False,
         queue: Optional[Dict] = None,
         machine: Optional[str] = None,
@@ -124,24 +122,17 @@ class CalculationWorkflow:
                                    needed for elements present in the structure.
                                    Configuration must exist in ~/.xespresso/pseudopotentials/
                                    Example: 'SSSP_efficiency' loads from SSSP_efficiency.json
-            pseudopotentials_base_path: Optional base directory for pseudopotential files when using
-                                      explicit pseudopotentials dict (not config). This is used to set
-                                      the ESPRESSO_PSEUDO environment variable so the remote scheduler
-                                      can find the pseudopotential files.
-                                      Usually autodiscovered, but can be overridden if needed.
             kspacing: K-point spacing in Angstrom^-1 (physical units). If None, uses preset value.
                      The workflow automatically handles the 2π normalization when converting to k-points.
                      Example: kspacing=0.20 will give the same k-points as
                      ase.io.espresso.kspacing_to_grid(atoms, 0.20/(2*np.pi))
             input_data: Additional input parameters (merged with preset)
+                       Example: input_data={'ecutwfc': 60.0, 'conv_thr': 1e-8}
             magnetic_config: Magnetic configuration. Can be:
                            - 'ferro' or 'ferromagnetic': All atoms ferromagnetic
                            - 'antiferro' or 'antiferromagnetic': Alternating spin
                            - Dict: Element-based config, e.g. {'Fe': [1, -1], 'O': [0]}
                            Also supports Hubbard parameters in the dict format
-            hubbard_config: Hubbard parameter configuration for DFT+U calculations.
-                          Can be dict with U values or string specification.
-                          Merged into input_data for proper format handling.
             expand_cell: If True, expand cell to accommodate magnetic configuration
             queue: Queue configuration dictionary for job submission (local or remote).
                    This is directly passed to the Espresso calculator.
@@ -153,13 +144,17 @@ class CalculationWorkflow:
                          for that version from ~/.xespresso/codes/ and extracts modules to add to queue.
                          This enables using different QE versions on the same machine.
                          Example: code_version='7.2' loads modules like 'quantum-espresso/7.2'
-            **kwargs: Additional parameters passed to Espresso calculator
+            **kwargs: Additional parameters. Special handling for:
+                     - ecutwfc (float): Plane-wave cutoff in Ry (overrides preset)
+                     - ecutrho (float): Density cutoff in Ry (overrides preset)
+                     - Other kwargs are passed to Espresso calculator
+                     Example: CalculationWorkflow(..., ecutwfc=60.0, ecutrho=240.0)
         """
         self.atoms = atoms.copy()  # Work with a copy to avoid modifying original
         self.protocol = protocol
         self.extra_kwargs = kwargs
         self.expand_cell = expand_cell
-        self.pseudopotentials_base_path = pseudopotentials_base_path  # Can be passed in or set from config
+        self.pseudopotentials_base_path = None  # Will be set if loading from config
         self._pseudo_config = None  # Will store config object if loaded from config
         
         # Handle pseudopotentials: either config name or explicit dict (config takes precedence)
@@ -171,12 +166,6 @@ class CalculationWorkflow:
                 "Must provide either 'pseudopotentials' dictionary or "
                 "'pseudopotentials_config' name to load from ~/.xespresso/pseudopotentials/"
             )
-        
-        # If pseudopotentials_base_path is provided (from ConvergenceWorkflow), set env var
-        # This ensures Espresso can find pseudopotentials via ESPRESSO_PSEUDO when remote transfer happens
-        if pseudopotentials_base_path:
-            os.environ['ESPRESSO_PSEUDO'] = pseudopotentials_base_path
-            logger.info(f"Set ESPRESSO_PSEUDO={pseudopotentials_base_path}")
         
         self.original_pseudopotentials = pseudopotentials
         
@@ -205,7 +194,9 @@ class CalculationWorkflow:
         
         self.preset = PRESETS[protocol].copy()
         
-        # Override k-spacing if provided
+        # Override k-spacing if provided (either as direct param or via kwargs)
+        if 'kspacing' in kwargs:
+            kspacing = kwargs.pop('kspacing')
         if kspacing is not None:
             self.preset['kspacing'] = kspacing
         
@@ -214,32 +205,12 @@ class CalculationWorkflow:
         if input_data:
             self.input_data.update(input_data)
         
-        # Auto-convert code_version to qe_version for Hubbard format detection
-        # If code_version is provided and qe_version is not already set, use code_version
-        if code_version is not None and 'qe_version' not in self.input_data:
-            self.input_data['qe_version'] = code_version
-            logger.info(f"Auto-set qe_version={code_version} from code_version for Hubbard format detection")
-        
-        # Store hubbard_config for use in _apply_magnetic_config (for auto-remapping)
-        self.hubbard_config = hubbard_config
-        
-        # Process hubbard_config if provided
-        if hubbard_config is not None:
-            if isinstance(hubbard_config, dict):
-                # Check if it's already in new format (has 'u', 'v', 'projector' keys)
-                if 'u' in hubbard_config or 'v' in hubbard_config or 'projector' in hubbard_config:
-                    # New format
-                    self.input_data['hubbard'] = hubbard_config
-                else:
-                    # Old format - element: U_value mapping
-                    if 'input_ntyp' not in self.input_data:
-                        self.input_data['input_ntyp'] = {}
-                    if 'Hubbard_U' not in self.input_data['input_ntyp']:
-                        self.input_data['input_ntyp']['Hubbard_U'] = {}
-                    self.input_data['input_ntyp']['Hubbard_U'].update(hubbard_config)
-                    # Enable DFT+U
-                    self.input_data['lda_plus_u'] = True
-            logger.info(f"Hubbard parameters added to input_data")
+        # Handle direct ecutwfc and ecutrho parameters from kwargs (for convenience)
+        # Allow users to pass ecutwfc=60.0 directly instead of input_data={'ecutwfc': 60.0}
+        if 'ecutwfc' in kwargs:
+            self.input_data['ecutwfc'] = kwargs.pop('ecutwfc')
+        if 'ecutrho' in kwargs:
+            self.input_data['ecutrho'] = kwargs.pop('ecutrho')
         
         # Handle magnetic configuration if provided
         if magnetic_config is not None:
@@ -471,7 +442,6 @@ class CalculationWorkflow:
     def _apply_magnetic_config(self, magnetic_config: Union[str, Dict]):
         """Apply magnetic configuration using setup_magnetic_config."""
         from xespresso.tools import set_ferromagnetic, set_antiferromagnetic
-        from xespresso.hubbard import remap_hubbard_config
         
         if isinstance(magnetic_config, str):
             magnetic_config = magnetic_config.lower()
@@ -580,34 +550,6 @@ class CalculationWorkflow:
             if 'lda_plus_u' in config:
                 self.input_data['lda_plus_u'] = config['lda_plus_u']
             
-            # AUTO-REMAP HUBBARD CONFIG: If hubbard_config was provided separately,
-            # remap it using the species_order from setup_magnetic_config
-            if self.hubbard_config is not None and 'species_order' in config:
-                remapped_hubbard = remap_hubbard_config(
-                    self.hubbard_config,
-                    config['species_order']
-                )
-                logger.info(f"Auto-remapped Hubbard config: {self.hubbard_config} → {remapped_hubbard}")
-                
-                # Apply remapped Hubbard to input_ntyp (old format)
-                if config['hubbard_format'] == 'old':
-                    if 'input_ntyp' not in self.input_data:
-                        self.input_data['input_ntyp'] = {}
-                    if 'Hubbard_U' not in self.input_data['input_ntyp']:
-                        self.input_data['input_ntyp']['Hubbard_U'] = {}
-                    # REPLACE any existing Hubbard_U values (don't add to them)
-                    # First remove any non-remapped base element keys
-                    keys_to_remove = []
-                    for key in self.input_data['input_ntyp']['Hubbard_U'].keys():
-                        if key in self.hubbard_config:
-                            keys_to_remove.append(key)
-                    for key in keys_to_remove:
-                        del self.input_data['input_ntyp']['Hubbard_U'][key]
-                    # Now add the remapped values
-                    self.input_data['input_ntyp']['Hubbard_U'].update(remapped_hubbard)
-                # For new format, remapped is handled separately via hubbard card
-                # (would need integration with HubbardConfig class for full support)
-            
             # Set nspin=2 for polarized magnetic calculation
             self.input_data['nspin'] = 2
         else:
@@ -671,17 +613,22 @@ class CalculationWorkflow:
     
     def _get_kpts(self) -> Union[Tuple[int, int, int], str]:
         """
-        Calculate k-points from k-spacing using ase.io.espresso.kspacing_to_grid.
+        Calculate k-points from k-spacing using ASE's kspacing_to_grid() function.
+        
+        This uses the standard ASE implementation which rounds up (int() + 1) to ensure
+        k-point spacing is AT MOST the specified value.
+        
+        NOTE: For convergence studies where kspacing differences should generate different
+        meshes, use run_convergence_independent() which includes automatic fallback logic
+        to detect and skip duplicate k-meshes.
         
         Returns:
             Tuple of k-points or 'gamma'
         """
         if self.kspacing is not None:
-            # Convert kspacing to k-point grid
-            # Note: kspacing_to_grid expects spacing in units of 2*pi/Angstrom
-            # So we need to convert from Angstrom^-1
-            kpts = kspacing_to_grid(self.atoms, self.kspacing / (2 * np.pi))
-            return tuple(kpts)
+            # Use ASE's kspacing_to_grid which applies int() + 1 rounding
+            kpts = kpts_from_spacing(self.atoms, self.kspacing)
+            return kpts
         else:
             # Default to gamma point if no k-spacing specified
             return (1, 1, 1)
@@ -772,7 +719,15 @@ class CalculationWorkflow:
             print(f"Job completed (JOB DONE):    {convergence_info['job_done']}")
             print(f"SCF converged:               {convergence_info['scf_converged']}")
             print(f"SCF iterations:              {convergence_info['scf_iterations']}")
-            print(f"Final energy (Ry):           {convergence_info['final_energy']}")
+            
+            # Print energy from ASE (eV) instead of parsing output (Ry)
+            if hasattr(calc, 'results') and 'energy' in calc.results:
+                energy_ev = calc.results['energy']
+                energy_per_atom = energy_ev / len(self.atoms)
+                print(f"Final energy:                {energy_ev:.6f} eV ({energy_per_atom:.6f} eV/atom)")
+            elif convergence_info['final_energy'] is not None:
+                print(f"Final energy (parsed from output, Ry): {convergence_info['final_energy']}")
+            
             print("-"*70)
             print(convergence_info['message'])
             print("="*70)
@@ -1211,12 +1166,15 @@ class CalculationWorkflow:
                     self.atoms,
                     protocol=self.protocol,
                     pseudopotentials=self.pseudopotentials,
-                    pseudopotentials_base_path=getattr(self, 'pseudopotentials_base_path', None),
                     kspacing=params.get('kspacing', self.preset.get('kspacing')),
                     input_data=input_data_override,
                     queue=self.queue,
                     **self.extra_kwargs
                 )
+                
+                # Copy the pseudopotentials_base_path if it exists (for remote transfer)
+                if hasattr(self, 'pseudopotentials_base_path'):
+                    temp_workflow.pseudopotentials_base_path = self.pseudopotentials_base_path
                 
                 # Submit this calculation
                 result = temp_workflow.submit_scf_batch(label=label, wait_for_completion=False)
@@ -2337,6 +2295,7 @@ class CalculationWorkflow:
         self,
         label: str = 'relax',
         relax_type: str = 'relax',
+        wait_for_completion: Optional[bool] = None,
         **calc_kwargs
     ) -> Espresso:
         """
@@ -2345,6 +2304,8 @@ class CalculationWorkflow:
         Args:
             label: Directory/label for the calculation
             relax_type: Type of relaxation: 'relax' (ions only) or 'vc-relax' (ions + cell)
+            wait_for_completion: If True, block until relaxation completes (default: uses self.queue setting)
+                If False, submit and return immediately (useful for parallel batch submission)
             **calc_kwargs: Additional parameters for the Espresso calculator
             
         Returns:
@@ -2411,9 +2372,11 @@ class CalculationWorkflow:
             logger.debug(f"No previous calculation found: {e}")
             needs_calculation = True
         
-        # If remote non-blocking: control execution steps to avoid retry loop
-        if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
-            logger.info("Remote non-blocking: executing with automatic job monitoring...")
+        # If remote: control execution steps based on wait_for_completion flag
+        if self.queue and self.queue.get('execution') == 'remote':
+            # Use provided wait_for_completion, fallback to queue setting, default to True
+            if wait_for_completion is None:
+                wait_for_completion = self.queue.get('wait_for_completion', True)
             
             # Only write input and execute if calculation is needed
             if needs_calculation:
@@ -2432,7 +2395,7 @@ class CalculationWorkflow:
             if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
                 calc.remote = calc.scheduler.remote
             
-            # Step 3: Monitor SLURM job status (detect stuck jobs)
+            # Step 3: Get job ID for potential monitoring
             job_id = getattr(calc, 'last_job_id', None) if needs_calculation else None
             
             if needs_calculation and job_id is None:
@@ -2441,7 +2404,8 @@ class CalculationWorkflow:
                     "Check scheduler configuration and job submission logs."
                 )
             
-            if needs_calculation:
+            # Step 4: Monitor only if wait_for_completion=True (blocking mode)
+            if wait_for_completion and needs_calculation and job_id:
                 logger.info(f"Remote job {job_id} submitted. Monitoring SLURM status...")
                 timeout = self.queue.get('job_timeout', 3600)
                 job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
@@ -2449,15 +2413,20 @@ class CalculationWorkflow:
                 if not job_monitor_result['success']:
                     raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
                 
-                # Step 4: Job completed in queue, now fetch output using RemoteJobMonitor
+                # Step 5: Job completed in queue, now fetch output using RemoteJobMonitor
                 monitor = RemoteJobMonitor(calc)
                 if monitor.wait(timeout=60, poll_interval=5):  # Short timeout since job already completed
                     monitor.retrieve_output()
                     logger.info("Remote job output retrieved.")
-                    # Step 5: Read results
+                    # Step 6: Read results
                     calc.read_results()
                 else:
                     raise RuntimeError(f"Failed to retrieve output for job {job_id}")
+            elif needs_calculation and job_id:
+                # Non-blocking: Just report submission and return immediately
+                logger.info(f"Remote job {job_id} submitted (non-blocking).")
+                logger.info(f"  Job is now queued on remote scheduler.")
+                logger.info(f"  Use calc.read() or RemoteJobMonitor to check status later.")
         else:
             # Local or remote blocking: use normal run() with retry logic
             calc.run(atoms=self.atoms)

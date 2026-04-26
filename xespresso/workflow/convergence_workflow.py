@@ -28,6 +28,7 @@ from typing import Dict, Optional, Union, Tuple, List
 from pathlib import Path
 from ase import Atoms
 from ase.io import read
+from xespresso import kpts_from_spacing
 from xespresso.workflow.calculation_workflow import CalculationWorkflow
 from xespresso.pseudopotentials.detector import parse_upf_header, get_suggested_min_ecutwfc_from_pseudos, get_ecutrho_ratio_from_pseudos
 from xespresso.utils.pseudo_utils import discover_pseudopotential_directory, get_ecutrho_ratio
@@ -905,6 +906,21 @@ class ConvergenceWorkflow:
         else:
             return []  # Would exceed limit
     
+    def _get_kpts_for_spacing(self, kspacing: float) -> Tuple[int, int, int]:
+        """
+        Calculate k-point mesh for a given k-spacing value.
+        
+        Uses ASE's kspacing_to_grid with automatic 2π normalization
+        (same as kpts_from_spacing utility function).
+        
+        Args:
+            kspacing: K-spacing in Angstrom^-1
+            
+        Returns:
+            Tuple of (nk_x, nk_y, nk_z) k-point grid
+        """
+        return kpts_from_spacing(self.atoms, kspacing)
+    
     def _get_calculation_config(self, convergence_criteria_list: List[str]) -> Dict:
         """
         Determine calculation configuration based on convergence criteria.
@@ -1461,11 +1477,25 @@ class ConvergenceWorkflow:
         iteration = 1
         tolerance = criteria_tolerances.get('energy_tolerance', 1e-3)
         converged_delta_e = None  # Store ΔE that caused convergence
+        last_kpts = self._get_kpts_for_spacing(self.initial_kspacing)  # Track last mesh generated
         
         while ksp_to_test >= min_kspacing_allowed:
             
             print(f"\n--- Iteration {iteration} ---")
             print(f"Testing kspacing: {ksp_to_test:.3f} Å⁻¹")
+            
+            # FALLBACK: Check if kspacing would generate same k-mesh as previous value
+            # If so, skip this value and try the next finer one automatically
+            current_kpts = self._get_kpts_for_spacing(ksp_to_test)
+            if current_kpts == last_kpts:
+                if verbose:
+                    print(f"  ⏭️  K-mesh unchanged: {current_kpts} (same as previous). Skipping to finer kspacing...")
+                ksp_to_test = ksp_to_test - kspacing_step
+                iteration += 1
+                continue
+            
+            # K-mesh changed! Update for next comparison
+            last_kpts = current_kpts
             
             # Prepare batch: only test values not yet in cache
             to_calculate = []

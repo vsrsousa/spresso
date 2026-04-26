@@ -1,0 +1,50 @@
+&CONTROL
+    calculation = 'relax'
+    restart_mode = 'from_scratch'
+    prefix = 'slab'
+    outdir = './'
+    wfcdir = './'
+    pseudo_dir = './pseudos'
+    nstep = 150
+    upscale = 150.0
+    etot_conv_thr = 1.0d-5
+    forc_conv_thr = 1.0d-5
+    verbosity = 'high'
+/
+&SYSTEM
+    ibrav = 0
+    nat = 4
+    ntyp = 1
+    ecutwfc = 60.0
+    ecutrho = 240.0
+    occupations = 'smearing'
+    smearing = 'mv'
+    degauss = 0.01
+    nspin = 1
+/
+&ELECTRONS
+    diagonalization = 'david'
+    mixing_mode = 'plain'
+    mixing_beta = 0.7
+    conv_thr = 1.0d-9
+/
+&IONS
+    ion_dynamics = 'bfgs'
+    upscale = 150.0
+/
+ATOMIC_SPECIES
+Au  None  Au.psp8
+
+CELL_PARAMETERS (angstrom)
+      4.078200      0.000000     -4.078200
+      0.000000     -4.078200      4.078200
+      0.000000      0.000000     28.547400
+
+ATOMIC_POSITIONS (crystal)
+Au      0.285714      0.285714      0.285714  1 1 1
+Au      0.428571      0.428571      0.428571  1 1 1
+Au      0.571429      0.571429      0.571429  1 1 1
+Au      0.714286      0.714286      0.714286  1 1 1
+
+K_POINTS (automatic)
+ 7 7 1  0 0 0

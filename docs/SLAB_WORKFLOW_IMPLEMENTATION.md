@@ -45,7 +45,7 @@ Implement `SlabWorkflow` class for automated surface slab creation, convergence,
 - [x] **K-point mesh calculation** (DETERMINISTIC - NO testing!)
   - [x] `_calculate_anisotropic_kmesh()` method implemented
   - [x] Always derived deterministically from Phase 1 bulk `optimal_kspacing`
-  - [x] K-mesh(x,y) = ceil(lattice_xy / kspacing), nkz = 1 (always for 2D)
+  - [x] K-mesh(x,y) = round(lattice_xy / kspacing), nkz = 1 (always for 2D)
   - [x] **No k-point testing in Phase 3** - k-convergence already done in Phase 1
   - Example: If bulk gave kspacing=0.04 Å⁻¹ and Au(111) slab is 2.884×2.884 Å
     - nkx = nky = ceil(2.884/0.04) = 72, nkz = 1
@@ -285,15 +285,15 @@ def _calculate_anisotropic_kmesh(self, slab: Atoms) -> Tuple[int, int, int]:
     
     Implementation:
         1. Get optimal_kspacing from self.bulk_recommendations (Phase 1)
-        2. Calculate nkx = ceil(|a|/kspacing), nky = ceil(|b|/kspacing)
+        2. Calculate nkx = round(|a|/kspacing), nky = round(|b|/kspacing)
         3. Return (nkx, nky, 1) - no variation in z-direction for 2D
     """
     optimal_kspacing = self.bulk_recommendations['optimal_kspacing']
     cell_lengths = slab.cell.lengths()
     
     # In-plane k-points from bulk kspacing
-    nkx = max(1, int(np.ceil(cell_lengths[0] / optimal_kspacing)))
-    nky = max(1, int(np.ceil(cell_lengths[1] / optimal_kspacing)))
+    nkx = max(1, int(np.round(cell_lengths[0] / optimal_kspacing)))
+    nky = max(1, int(np.round(cell_lengths[1] / optimal_kspacing)))
     
     # Z-direction: ALWAYS 1 for 2D slabs (no perpendicular sampling)
     nkz = 1
@@ -363,7 +363,7 @@ PHASE 3 Convergence Summary (DETERMINISTIC K-MESH - NO TESTING)
 1. Generate slab with initial parameters (nlayers=4, vacuum=15Å)
    - Use bulk_recommendations['optimal_ecutwfc'] for all calculations
    - Use bulk_recommendations['optimal_kspacing'] to compute anisotropic k-mesh
-     nk_x = ceil(|b1|/kspacing), nk_y = ceil(|b2|/kspacing), nk_z = 1
+     nk_x = round(|b1|/kspacing), nk_y = round(|b2|/kspacing), nk_z = 1
 
 2. Test VACUUM CONVERGENCE: [10, 12, 15, 18, 20, 25, 30] Å
    - Find minimum vacuum where ∆E < 1 meV/atom as vacuum increases
@@ -620,13 +620,13 @@ If restarting work:
 - Test vacuum sizes: [10, 12, 15, 18, 20, 25, 30] Å (7 calculations per surface)
 - Test layers: [3, 4, 5, 6, 7] after optimal vacuum (5 calculations per surface)  
 - K-mesh: Fixed and deterministic (NO testing needed)
-  - nkx = ceil(|a|/kspacing_bulk), nky = ceil(|b|/kspacing_bulk), nkz = 1
+  - nkx = round(|a|/kspacing_bulk), nky = round(|b|/kspacing_bulk), nkz = 1
 - For 3 surfaces (100, 110, 111): 3 × (7 + 5) = 36 total calculations in Phase 3
 - Time estimate: 8-10 hours for full convergence study
 
 **K-mesh (FIXED/DETERMINISTIC)**:
 - Get optimal_kspacing from bulk_recommendations (Phase 2)
-- Calculate nkx, nky = ceil(cell_length / optimal_kspacing) ONCE
+- Calculate nkx, nky = round(cell_length / optimal_kspacing) ONCE
 - Always nkz = 1 (perpendicular to surface, no sampling)
 - This k-mesh is applied to ALL vacuum and layer tests (never re-calculated)
 

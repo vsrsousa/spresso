@@ -401,7 +401,7 @@ Building modern surface slab calculation workflow using xespresso's `Convergence
   
 - `_calculate_anisotropic_kmesh()`: Deterministic k-mesh
   - Derives from Phase 1's optimal_kspacing
-  - nkx = ceil(|a|/kspacing), nky = ceil(|b|/kspacing), nkz = 1
+  - nkx = round(|a|/kspacing), nky = round(|b|/kspacing), nkz = 1
   - K-convergence NOT re-tested (already done in Phase 1)
   
 - `_test_vacuum_convergence()`: Vacuum size optimization

@@ -13,7 +13,7 @@ graph TD
     A["optimize_parameters()"] -->|classmethod| B["cls inicializa ConvergenceWorkflow"]
     B --> C["workflow.run_convergence_study()"]
     
-    C --> D["run_convergence_independent()"]
+    C --> D["run_convergence()"]
     
     D --> E["🔴 PHASE 1: Ecutwfc Convergence"]
     E --> E1["CalculationWorkflow()"]
@@ -67,7 +67,7 @@ graph TD
 | **1** | `optimize_parameters()` | Método de classe que cria instância de `ConvergenceWorkflow` |
 | **2** | `__init__` | Inicializa o workflow com structure, pseudopotenciais, precisão, etc |
 | **3** | `run_convergence_study()` | Wrapper que passa args para o método principal |
-| **4** | `run_convergence_independent()` | **Começo do algoritmo real** - executa 2 fases |
+| **4** | `run_convergence()` | **Começo do algoritmo real** - executa 2 fases |
 | | **PHASE 1** | Fixa `kspacing=0.3`, testa múltiplos `ecutwfc` |
 | **5** | `CalculationWorkflow()` | Cria workflow de cálculo (de `xespresso.workflow`) |
 | **6** | `submit_scf_batch_multiple()` | Submete batch de cálculos (`ecutwfc` valores diferentes) |

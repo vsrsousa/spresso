@@ -155,7 +155,7 @@ bulk_conv = ConvergenceWorkflow(
     precision='low',
     machine="medusa"
 )
-bulk_results = bulk_conv.run_convergence_independent(
+bulk_results = bulk_conv.run_convergence(
     label_prefix='bulk_conv'
 )
 bulk_recommendations = bulk_conv.get_recommendations()

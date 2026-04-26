@@ -63,7 +63,7 @@ def demonstrate_adaptive_precision():
         else:
             print(f"  Base range: {base_range} (no extension needed)")
         
-        print(f"  Actual ranges: ecutwfc={workflow.ecutwfc_range}, kspacing={workflow.kspacing_range}")
+        print(f"  Actual ranges: ecut={workflow.ecut_range}, kspacing={workflow.kspacing_range}")
         print()
 
     print("=== Key Benefits ===")

@@ -397,7 +397,7 @@ conv_wf = ConvergenceWorkflow(
     machine=self.machine,
     queue=self.queue,
 )
-self.bulk_results = conv_wf.run_convergence_independent(...)
+self.bulk_results = conv_wf.run_convergence(...)
 ```
 
 ### With CalculationWorkflow

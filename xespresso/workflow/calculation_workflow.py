@@ -619,7 +619,7 @@ class CalculationWorkflow:
         k-point spacing is AT MOST the specified value.
         
         NOTE: For convergence studies where kspacing differences should generate different
-        meshes, use run_convergence_independent() which includes automatic fallback logic
+        meshes, use run_convergence() which includes automatic fallback logic
         to detect and skip duplicate k-meshes.
         
         Returns:

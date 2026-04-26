@@ -29,7 +29,7 @@ conv_si = ConvergenceWorkflow(
     pseudopotentials={'Si': 'Si.pbe.UPF'},
     protocol='moderate',
     # Test modest ranges for quick demo
-    ecutwfc_range=[40, 50, 60],
+    ecut_range=[40, 50, 60],
     kspacing_range=[0.3, 0.2, 0.15],
 )
 
@@ -69,14 +69,14 @@ conv_fe = ConvergenceWorkflow(
     pseudopotentials={'Fe': 'Fe.pbe-spn.UPF'},
     protocol='moderate',
     # More comprehensive ranges
-    ecutwfc_range=[30, 40, 50, 60, 70, 80],
+    ecut_range=[30, 40, 50, 60, 70, 80],
     kspacing_range=[0.5, 0.4, 0.3, 0.2, 0.15, 0.1],
 )
 
 print("\nParameter ranges:")
-print(f"  ecutwfc: {conv_fe.ecutwfc_range}")
+print(f"  ecutwfc: {conv_fe.ecut_range}")
 print(f"  kspacing: {conv_fe.kspacing_range}")
-print(f"  Total tests: {len(conv_fe.ecutwfc_range) * len(conv_fe.kspacing_range)}")
+print(f"  Total tests: {len(conv_fe.ecut_range) * len(conv_fe.kspacing_range)}")
 
 print("""
 To run this extended study:
@@ -188,7 +188,7 @@ Use ConvergenceWorkflow to compare different pseudopotentials:
         conv = ConvergenceWorkflow(
             atoms=bulk('Fe'),
             pseudopotentials={'Fe': pp_file},
-            ecutwfc_range=[40, 60, 80],
+            ecut_range=[40, 60, 80],
             kspacing_range=[0.3, 0.2, 0.1],
         )
         
@@ -218,7 +218,7 @@ conv_mag = ConvergenceWorkflow(
     pseudopotentials={'Mn': 'Mn.pbe-spn.UPF'},
     protocol='moderate',
     magnetic_config='ferro',  # Magnetic configuration
-    ecutwfc_range=[50, 60, 70],
+    ecut_range=[50, 60, 70],
     kspacing_range=[0.3, 0.2, 0.15],
 )
 
@@ -233,7 +233,7 @@ Example:
         atoms=structure,
         pseudopotentials=pseudopotentials,
         magnetic_config={'Mn': [2.0]},  # Initial Mn moment
-        ecutwfc_range=[50, 60, 70],
+        ecut_range=[50, 60, 70],
         kspacing_range=[0.3, 0.2]
     )
     

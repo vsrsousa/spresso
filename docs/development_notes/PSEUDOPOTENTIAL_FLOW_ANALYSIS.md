@@ -26,7 +26,7 @@ Armazena:
 - `self.pseudopotentials`: `{'Gd': 'Gd.pbe-spfn-rrkjus_psl.1.0.0.UPF'}`  (FILENAME ONLY)
 - `self.pseudopotentials_base_path`: `/home/vinicius/scratch/projects/spresso/pseudo`
 
-### 2. ConvergenceWorkflow.run_convergence_independent
+### 2. ConvergenceWorkflow.run_convergence
 ```python
 if self._pseudo_config_name:
     wf_kwargs['pseudopotentials_config'] = self._pseudo_config_name
@@ -98,7 +98,7 @@ else:  # pseudopotentials_config is None, recebeu dict
     self.ecutrho_ratio = 4.0  # Default
 ```
 
-### 2. ConvergenceWorkflow.run_convergence_independent
+### 2. ConvergenceWorkflow.run_convergence
 ```python
 if self._pseudo_config_name:
     wf_kwargs['pseudopotentials_config'] = self._pseudo_config_name

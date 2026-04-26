@@ -55,8 +55,8 @@ def demonstrate_smart_ranges():
                 ranges = ConvergenceWorkflow._get_smart_ranges_for_pseudopotentials_static(
                     precision, scenario['pseudopotentials']
                 )
-                ecutwfc_range, kspacing_range = ranges
-                print(f"  ecutwfc range: {ecutwfc_range}")
+                ecut_range, kspacing_range = ranges
+                print(f"  ecutwfc range: {ecut_range}")
                 print(f"  kspacing range: {kspacing_range}")
             except Exception as e:
                 print(f"  (Would analyze pseudopotentials: {e})")

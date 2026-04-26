@@ -54,9 +54,9 @@ def main():
             }
 
             print(f"  Base range: {base_ranges[precision]}")
-            print(f"  Adjusted range: {workflow.ecutwfc_range}")
-            print(f"  Max value: {max(workflow.ecutwfc_range)} Ry")
-            print(f"  Covers requirement: {max(workflow.ecutwfc_range) >= 100.0}")
+            print(f"  Adjusted range: {workflow.ecut_range}")
+            print(f"  Max value: {max(workflow.ecut_range)} Ry")
+            print(f"  Covers requirement: {max(workflow.ecut_range) >= 100.0}")
             print()
 
     print("=== Key Benefits ===")

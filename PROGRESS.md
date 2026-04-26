@@ -252,7 +252,7 @@ expansion_limit = max_kspacing
 
 ## 📍 KEY CODE LOCATIONS
 
-### Main Algorithm: `run_convergence_independent()`
+### Main Algorithm: `run_convergence()`
 - **PHASE 1** (ecutwfc): lines 1149-1315
 - **PHASE 2** (kspacing): lines 1323-1538
 - Both phases use same convergence logic via `_check_convergence_vs_reference()`

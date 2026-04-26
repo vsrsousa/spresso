@@ -45,7 +45,7 @@ def main():
     # Method 4: Advanced usage with custom ranges still available
     print("\n4. Advanced usage (custom ranges still supported):")
     print("   workflow = ConvergenceWorkflow(atoms, pseudopotentials,")
-    print("                                 ecutwfc_range=[40, 60, 80],")
+    print("                                 ecut_range=[40, 60, 80],")
     print("                                 kspacing_range=[0.3, 0.2, 0.1])")
     print("   results = workflow.run_convergence_study()")
     print()

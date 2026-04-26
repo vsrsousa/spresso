@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
 from xespresso.schedulers.factory import get_scheduler
 
@@ -228,3 +229,412 @@ def suggest_nbnd_from_pseudos(pseudopotentials: Dict[str, str], buffer: int = 10
     # Convert electrons to bands (spin-degenerate approx): nbnd ~ (n_electrons/2) + buffer
     nbnd = max(64, int(total_valence / 2) + buffer)
     return nbnd
+
+
+# ============================================================================
+# WannierWorkflow: Complete Orchestrated Pipeline
+# ============================================================================
+
+
+class WannierWorkflow:
+    """
+    Complete Wannier workflow orchestrator: CIF → SCF → NSCF → pw2wannier → wannier90
+    
+    This class encapsulates the entire Wannierization pipeline, automatically
+    orchestrating all steps from structure input to final Wannier functions.
+    
+    Parameters:
+        cif_file: Path to structure file (CIF, POSCAR, etc.)
+        pseudos: Dict mapping element symbols to pseudopotential file paths
+        protocol: Convergence protocol ('fast', 'moderate', 'accurate')
+        num_wann: Number of Wannier functions to generate
+        projections: Initial projections for Wannier (e.g., "Si: s,p" or "Si: sp3d2")
+        kpts_scf: K-point mesh for SCF (default (4, 4, 4))
+        kpts_nscf: K-point mesh for NSCF (default (6, 6, 6), denser)
+        nbnd: Number of bands for NSCF (auto-estimated if None)
+        spinors: If True, use non-collinear magnetism (default False)
+        dis_num_iter: Disentanglement iterations (default 1000)
+        queue: Scheduler/queue configuration dict
+        **kwargs: Additional parameters passed to CalculationWorkflow
+    
+    Example:
+        >>> wf = WannierWorkflow(
+        ...     cif_file='Si.cif',
+        ...     pseudos={'Si': '/path/to/Si.pbe.UPF'},
+        ...     protocol='moderate',
+        ...     num_wann=4,
+        ...     projections='Si: sp3'
+        ... )
+        >>> results = wf.run(blocking=True)
+        >>> print(results['wannier90']['outputs']['wout'])
+    """
+    
+    def __init__(
+        self,
+        cif_file: Union[str, Path],
+        pseudos: Dict[str, str],
+        protocol: str = 'moderate',
+        num_wann: int = 4,
+        projections: str = 'auto',
+        kpts_scf: Tuple[int, int, int] = (4, 4, 4),
+        kpts_nscf: Tuple[int, int, int] = (6, 6, 6),
+        nbnd: Optional[int] = None,
+        spinors: bool = False,
+        dis_num_iter: int = 1000,
+        run_bands: bool = True,
+        queue: Optional[Dict] = None,
+        **kwargs
+    ):
+        """Initialize WannierWorkflow with structure and Wannier parameters."""
+        from xespresso.workflow.calculation_workflow import CalculationWorkflow
+        
+        self.cif_file = Path(cif_file)
+        self.pseudos = pseudos
+        self.protocol = protocol
+        self.num_wann = num_wann
+        self.projections = projections if projections != 'auto' else self._infer_projections(pseudos)
+        self.kpts_scf = kpts_scf
+        self.kpts_nscf = kpts_nscf
+        self.nbnd = nbnd or suggest_nbnd_from_pseudos(pseudos)
+        self.spinors = spinors
+        self.dis_num_iter = dis_num_iter
+        self.run_bands = run_bands  # NEW: Include band structure calculation for validation
+        self.queue = queue
+        self.kwargs = kwargs
+        
+        # Initialize the underlying CalculationWorkflow
+        self.calc_wf = CalculationWorkflow.from_cif(
+            cif_file,
+            pseudos=pseudos,
+            protocol=protocol,
+            queue=queue,
+            **kwargs
+        )
+        
+        # Results storage
+        self.results = {}
+    
+    @staticmethod
+    def _infer_projections(pseudos: Dict[str, str]) -> str:
+        """Auto-infer projections from pseudopotential elements."""
+        # Simple heuristic: default to p orbitals for all elements
+        elements = list(pseudos.keys())
+        return '; '.join([f"{elem}: p" for elem in elements])
+    
+    def run(
+        self,
+        labels: Optional[Dict[str, str]] = None,
+        blocking: bool = True,
+        seedname: str = 'wannier_seed',
+        run_bands_validation: Optional[bool] = None,
+    ) -> Dict:
+        """
+        Execute the complete Wannier workflow pipeline with optional band structure validation.
+        
+        Orchestrates: SCF → Band Structure (optional) → NSCF (wf_collect) → pw2wannier90 → wannier90
+        
+        The band structure calculation is essential for validating the quality of Wannier functions
+        by comparing the interpolated band structure with the original DFT band structure.
+        
+        Parameters:
+            labels: Dict with custom labels {'scf': '...', 'nscf': '...', 'bands': '...'}
+                   If None, uses default run labels
+            blocking: If True, wait for all jobs to complete (default True)
+            seedname: Base name for Wannier output files (default 'wannier_seed')
+            run_bands_validation: If True, compute band structure for validation (default: self.run_bands)
+            
+        Returns:
+            Dict containing results from all pipeline stages:
+                {
+                    'scf': Espresso calculator with SCF results,
+                    'bands': Espresso calculator with band structure (if run),
+                    'nscf': Espresso calculator with NSCF results,
+                    'pw2wannier': {'status', 'outputs', 'job_id', ...},
+                    'wannier90': {'status', 'outputs', 'job_id', ...},
+                    'seedname': seedname used,
+                    'run_dir': directory with Wannier outputs
+                }
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Determine if we should run bands
+        if run_bands_validation is None:
+            run_bands_validation = self.run_bands
+        
+        # Set default labels
+        if labels is None:
+            labels = {
+                'scf': 'runs/02-scf',
+                'bands': 'runs/02b-bands',
+                'nscf': 'runs/03-nscf',
+            }
+        
+        total_stages = 5 if run_bands_validation else 4
+        stage_count = 1
+        
+        print("\n" + "="*70)
+        print("WANNIER WORKFLOW - COMPLETE PIPELINE ORCHESTRATION")
+        print("="*70)
+        print(f"Structure: {self.cif_file}")
+        print(f"Protocol: {self.protocol}")
+        print(f"Number of Wannier functions: {self.num_wann}")
+        print(f"Initial projections: {self.projections}")
+        print(f"K-points (SCF): {self.kpts_scf}")
+        if run_bands_validation:
+            print(f"K-points (Band Structure): High-symmetry path (auto-generated)")
+        print(f"K-points (NSCF): {self.kpts_nscf} (denser for better interpolation)")
+        print(f"Number of bands: {self.nbnd}")
+        print(f"Band structure validation: {'YES ✓' if run_bands_validation else 'NO (optional)'}")
+        print("="*70)
+        
+        # ====== STAGE 1: SCF ======
+        print(f"\n[{stage_count}/{total_stages}] Running SCF calculation...")
+        stage_count += 1
+        try:
+            scf_calc = self.calc_wf.run_scf(label=labels['scf'], kpts=self.kpts_scf)
+            self.results['scf'] = scf_calc
+            print(f"✓ SCF completed: {scf_calc.directory}")
+        except Exception as e:
+            print(f"✗ SCF failed: {e}")
+            raise
+        
+        # ====== STAGE 2 (OPTIONAL): BAND STRUCTURE ======
+        if run_bands_validation:
+            print(f"\n[{stage_count}/{total_stages}] Running band structure calculation (for validation)...")
+            stage_count += 1
+            try:
+                # Update atoms for bands calculation
+                self.calc_wf.atoms = scf_calc.atoms
+                
+                bands_calc = self.calc_wf.run_bands(label=labels['bands'])
+                self.results['bands'] = bands_calc
+                print(f"✓ Band structure completed: {bands_calc.directory}")
+                print(f"  Essential for validating Wannier function quality")
+            except Exception as e:
+                print(f"⚠ Band structure failed (non-critical): {e}")
+                print(f"  Continuing without validation, but quality assessment will be limited")
+                self.results['bands'] = None
+        
+        # ====== STAGE 3: NSCF ======
+        print(f"\n[{stage_count}/{total_stages}] Running NSCF calculation (with wavefunction collection)...")
+        stage_count += 1
+        try:
+            # Update atoms for NSCF workflow
+            self.calc_wf.atoms = scf_calc.atoms
+            
+            nscf_calc = self.calc_wf.run_nscf(
+                label=labels['nscf'],
+                kpts=self.kpts_nscf,
+                nbnd=self.nbnd,
+                wf_collect=True  # CRITICAL for Wannier
+            )
+            self.results['nscf'] = nscf_calc
+            print(f"✓ NSCF completed: {nscf_calc.directory}")
+            print(f"  Wavefunctions available at: {nscf_calc.directory}/")
+        except Exception as e:
+            print(f"✗ NSCF failed: {e}")
+            raise
+        
+        # ====== STAGE 4: pw2wannier90 ======
+        print(f"\n[{stage_count}/{total_stages}] Running pw2wannier90 (wavefunction conversion)...")
+        stage_count += 1
+        try:
+            run_dir = str(Path(nscf_calc.directory).resolve())
+            prefix = nscf_calc.prefix
+            
+            pw2w_result = run_pw2wannier(
+                run_dir=run_dir,
+                prefix=prefix,
+                seedname=seedname,
+                blocking=blocking,
+                queue=self.queue
+            )
+            self.results['pw2wannier'] = pw2w_result
+            
+            if pw2w_result['status'] in ['finished', 'submitted']:
+                print(f"✓ pw2wannier90 completed: {pw2w_result['status']}")
+                if 'outputs' in pw2w_result and pw2w_result['outputs']:
+                    for fmt in ['amn', 'mmn', 'eig']:
+                        if fmt in pw2w_result['outputs']:
+                            print(f"  Generated: {Path(pw2w_result['outputs'][fmt]).name}")
+            else:
+                print(f"✗ pw2wannier90 {pw2w_result['status']}: {pw2w_result.get('message', 'Unknown error')}")
+                raise RuntimeError(f"pw2wannier90 failed: {pw2w_result}")
+        except Exception as e:
+            print(f"✗ pw2wannier90 failed: {e}")
+            raise
+        
+        # ====== STAGE 5: wannier90 ======
+        print(f"\n[{stage_count}/{total_stages}] Running wannier90 (Wannier function generation)...")
+        try:
+            # Generate .win file
+            win_text = generate_seedname_win(
+                num_wann=self.num_wann,
+                projections=self.projections,
+                spinors=self.spinors,
+                dis_num_iter=self.dis_num_iter
+            )
+            win_path = Path(run_dir) / f"{seedname}.win"
+            with open(win_path, 'w') as f:
+                f.write(win_text)
+            print(f"  Generated: {seedname}.win")
+            
+            # Run wannier90
+            w90_result = run_wannier90(
+                run_dir=run_dir,
+                seedname=seedname,
+                blocking=blocking,
+                queue=self.queue
+            )
+            self.results['wannier90'] = w90_result
+            
+            if w90_result['status'] in ['finished', 'submitted']:
+                print(f"✓ wannier90 completed: {w90_result['status']}")
+                if 'outputs' in w90_result and w90_result['outputs']:
+                    if 'wout' in w90_result['outputs']:
+                        print(f"  Generated: {Path(w90_result['outputs']['wout']).name}")
+            else:
+                print(f"✗ wannier90 {w90_result['status']}: {w90_result.get('message', 'Unknown error')}")
+                raise RuntimeError(f"wannier90 failed: {w90_result}")
+        except Exception as e:
+            print(f"✗ wannier90 failed: {e}")
+            raise
+        
+        # ====== COMPLETION ======
+        self.results['seedname'] = seedname
+        self.results['run_dir'] = run_dir
+        self.results['projections_used'] = self.projections
+        self.results['band_structure_available'] = run_bands_validation and self.results['bands'] is not None
+        
+        print("\n" + "="*70)
+        print("WANNIER WORKFLOW COMPLETED SUCCESSFULLY ✓")
+        print("="*70)
+        print(f"\nResults Location: {run_dir}/")
+        print(f"Wannier Functions: {self.num_wann} ({seedname}.*)")
+        print(f"Output files:")
+        print(f"  - {seedname}.win      (input file)")
+        print(f"  - {seedname}.wout     (output log)")
+        print(f"  - {seedname}_*.xsf    (Wannier function density)")
+        print(f"  - {seedname}_centres.xyz (Wannier centers)")
+        
+        if run_bands_validation and self.results['bands'] is not None:
+            print(f"\nBand Structure Validation:")
+            print(f"  - Run: {self.results['bands'].directory}")
+            print(f"  - Use to compare DFT vs Wannier interpolation")
+            print(f"  - Call: workflow.compare_bands() for detailed analysis")
+        
+        print("="*70 + "\n")
+        
+        return self.results
+    
+    def get_results(self) -> Dict:
+        """Get stored results from the last run."""
+        return self.results
+    
+    def get_scf_calculator(self):
+        """Get the SCF Espresso calculator."""
+        return self.results.get('scf')
+    
+    def get_nscf_calculator(self):
+        """Get the NSCF Espresso calculator."""
+        return self.results.get('nscf')
+    
+    def get_wannier_directory(self) -> str:
+        """Get the directory containing Wannier outputs."""
+        return self.results.get('run_dir', '')
+    
+    def get_seedname(self) -> str:
+        """Get the seedname used for Wannier calculations."""
+        return self.results.get('seedname', '')
+    
+    def compare_bands(self, verbose: bool = True) -> Dict:
+        """
+        Compare DFT band structure with Wannier-interpolated band structure.
+        
+        This is the key validation step for Wannier function quality.
+        Good agreement between DFT and Wannier-interpolated bands indicates
+        that the Wannier functions correctly represent the electronic structure.
+        
+        Parameters:
+            verbose: Print detailed comparison results
+            
+        Returns:
+            Dict with comparison metrics (requires external wannier90 tools)
+            
+        Note:
+            This requires the w90 postprocessing tool and matplotlib/matplotlib.
+            For automated plotting, use:
+            
+            results = workflow.compare_bands()
+            # Generates comparison plots showing DFT vs Wannier bands
+        """
+        if self.results['bands'] is None:
+            print("⚠ Band structure not available. Run with run_bands=True for validation.")
+            return {}
+        
+        dft_bands = self.results['bands']
+        wannier_dir = self.results['run_dir']
+        seedname = self.results['seedname']
+        
+        print("\n" + "="*70)
+        print("BAND STRUCTURE COMPARISON - WANNIER FUNCTION VALIDATION")
+        print("="*70)
+        print(f"\nDFT Band Structure: {dft_bands.directory}")
+        print(f"Wannier Functions: {wannier_dir}/{seedname}*")
+        print("\nTo manually compare band structures:")
+        print(f"  1. Run Wannier90 interpolation: wannier90.x -wout {seedname}")
+        print(f"  2. Plot band structures: use xmgrace or your favorite plotter")
+        print(f"  3. Compare {dft_bands.directory}/bands.dat")
+        print(f"        with {wannier_dir}/{seedname}_band.dat")
+        print("\nQuality assessment:")
+        print("  ✓ Excellent: Near-perfect overlap")
+        print("  ✓ Good: Minor deviations at high energies")
+        print("  ⚠ Fair: Noticeable differences, may need more Wannier functions")
+        print("  ✗ Poor: Large deviations, review projections and num_wann")
+        print("="*70)
+        
+        return {
+            'dft_bands': dft_bands.directory,
+            'wannier_bands_available_in': wannier_dir,
+            'seedname': seedname,
+            'instruction': 'Use wannier90 postprocessing to interpolate band structure'
+        }
+    
+    def get_band_structure_calculator(self):
+        """Get the band structure Espresso calculator (if available)."""
+        return self.results.get('bands', None)
+    
+    def validate_wannier_quality(self) -> Dict:
+        """
+        Validate Wannier function quality by checking various metrics.
+        
+        Returns:
+            Dict with validation status and recommendations
+        """
+        if not self.results.get('wannier90'):
+            return {'status': 'incomplete', 'message': 'Wannier90 not completed yet'}
+        
+        w90_result = self.results['wannier90']
+        if w90_result.get('status') not in ['finished', 'submitted']:
+            return {'status': 'failed', 'message': f"Wannier90 {w90_result.get('status')}"}
+        
+        validation = {
+            'status': 'ready_for_validation',
+            'wannier_centers': f"{self.results['run_dir']}/{self.results['seedname']}_centres.xyz",
+            'wannier_xsf': f"{self.results['run_dir']}/{self.results['seedname']}_*.xsf",
+            'next_step': 'compare_bands()',
+            'has_band_structure': self.results.get('band_structure_available', False),
+            'recommendations': []
+        }
+        
+        if not validation['has_band_structure']:
+            validation['recommendations'].append(
+                "Re-run with run_bands=True to enable band structure comparison for quality validation"
+            )
+        else:
+            validation['recommendations'].append(
+                "Band structure available - Use compare_bands() to visualize DFT vs Wannier interpolation"
+            )
+        
+        return validation

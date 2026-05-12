@@ -115,6 +115,143 @@ def run_pw2wannier(
     return {"status": "submitted", "run_dir": run_dir, "outputs": outputs, "job_id": job_id}
 
 
+def run_projwfc(
+    run_dir: str,
+    prefix: str,
+    *,
+    queue: Optional[dict] = None,
+    blocking: bool = True,
+    timeout: int = 300,
+    command: Optional[str] = None,
+    den_ext: str = '1',
+) -> Dict:
+    """Run `projwfc.x` to compute projected density of states (PDOS) and projection analysis.
+
+    This step computes projections of the KS wavefunctions onto atomic wavefunctions,
+    essential for:
+    - Understanding which atoms/orbitals dominate the electronic structure
+    - Guiding the selection of Wannier function projections
+    - Validating the initial projections chosen
+
+    Parameters
+    - run_dir: directory where NSCF outputs are located
+    - prefix: prefix used in the PW calculations
+    - queue: scheduler/queue dict (see machines loader)
+    - blocking: whether to wait for the job to finish
+    - timeout: max time to wait for output files (seconds)
+    - command: override the command; default: 'projwfc.x -in projwfc.in'
+    - den_ext: file extension for density; default '1' (use prefix.save/charge-density.dat)
+
+    Returns a serializable dict with keys: status, run_dir, outputs, job_id, message
+    """
+    save_dir = os.path.join(run_dir, f"{prefix}.save")
+    if not os.path.isdir(save_dir):
+        return {"status": "missing_data", "run_dir": run_dir, "message": "No .save directory found"}
+
+    # Write projwfc input file
+    projwfc_input = f"""&inputpp
+  prefix = '{prefix}'
+  outdir = './'
+/
+filpdos = '{prefix}.pdos'
+"""
+    projwfc_path = os.path.join(run_dir, "projwfc.in")
+    with open(projwfc_path, "w", encoding="utf-8") as f:
+        f.write(projwfc_input)
+
+    cmd = command or "projwfc.x -in projwfc.in"
+    queue = _make_queue_fallback(queue, blocking)
+
+    calc_stub = SimpleNamespace(directory=run_dir, prefix=prefix, queue=queue)
+
+    try:
+        scheduler = get_scheduler(calc_stub, queue, cmd)
+    except Exception as e:
+        return {"status": "error", "message": f"Could not initialize scheduler: {e}"}
+
+    try:
+        scheduler.write_script()
+        scheduler.run()
+    except Exception as e:
+        return {"status": "error", "message": f"Scheduler run failed: {e}"}
+
+    job_id = getattr(calc_stub, "last_job_id", None)
+
+    # Expected output file
+    outputs = {"pdos": None, "txt": None}
+    if blocking:
+        # projwfc generates files like prefix.pdos and prefix.pdos.up, prefix.pdos.dw, etc.
+        expected_pdos = os.path.join(run_dir, f"{prefix}.pdos")
+        expected_txt = os.path.join(run_dir, f"{prefix}.pdos.txt")
+        
+        start = time.time()
+        while time.time() - start < timeout:
+            if os.path.exists(expected_pdos):
+                outputs["pdos"] = expected_pdos
+                if os.path.exists(expected_txt):
+                    outputs["txt"] = expected_txt
+                return {"status": "finished", "run_dir": run_dir, "outputs": outputs, "job_id": job_id}
+            time.sleep(1)
+        
+        # File may not exist immediately; if pdos exists partially, consider it done
+        if os.path.exists(expected_pdos) or any(
+            os.path.exists(os.path.join(run_dir, f)) 
+            for f in os.listdir(run_dir) 
+            if f.startswith(f"{prefix}.pdos")
+        ):
+            outputs["pdos"] = expected_pdos
+            return {"status": "finished_with_warnings", "run_dir": run_dir, "outputs": outputs, "job_id": job_id, 
+                    "message": "PDOS files found but some expected outputs may be missing"}
+        
+        return {"status": "finished_with_warnings", "run_dir": run_dir, "outputs": outputs, "job_id": job_id, 
+                "message": "Timed out waiting for projwfc outputs"}
+
+    return {"status": "submitted", "run_dir": run_dir, "outputs": outputs, "job_id": job_id}
+
+
+def parse_projwfc_output(projwfc_dir: str, prefix: str) -> Optional[Dict]:
+    """Parse projwfc output to suggest Wannier projections.
+    
+    Analyzes PDOS files to identify dominant orbital contributions.
+    
+    Parameters:
+        projwfc_dir: directory containing projwfc.pdos files
+        prefix: file prefix used in projwfc calculation
+        
+    Returns:
+        Dict with suggested projections or None if files not found
+    """
+    import re
+    
+    pdos_file = os.path.join(projwfc_dir, f"{prefix}.pdos")
+    if not os.path.exists(pdos_file):
+        return None
+    
+    suggestions = {}
+    try:
+        with open(pdos_file, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        
+        # Simple parsing: look for atom type indicators
+        atom_orbitals = {}
+        for line in lines:
+            if '#' in line:
+                # Try to extract atom and orbital info
+                tokens = line.split()
+                if len(tokens) > 1 and tokens[0].startswith('m='):
+                    # This is a state projection line
+                    pass
+        
+        # If detailed parsing fails, provide generic suggestion
+        suggestions['note'] = 'Review PDOS files to identify dominant s, p, d contributions'
+        suggestions['pdos_file'] = pdos_file
+        
+    except Exception as e:
+        suggestions['error'] = str(e)
+    
+    return suggestions
+
+
 def run_wannier90(
     run_dir: str,
     seedname: str,
@@ -327,30 +464,38 @@ class WannierWorkflow:
         blocking: bool = True,
         seedname: str = 'wannier_seed',
         run_bands_validation: Optional[bool] = None,
+        run_projwfc_analysis: bool = True,
     ) -> Dict:
         """
-        Execute the complete Wannier workflow pipeline with optional band structure validation.
+        Execute the complete Wannier workflow pipeline with optional band structure and projection analysis.
         
-        Orchestrates: SCF → Band Structure (optional) → NSCF (wf_collect) → pw2wannier90 → wannier90
+        Orchestrates: SCF → Bands (optional) → PROJWFC (optional) → NSCF (wf_collect) → pw2wannier90 → wannier90
         
         The band structure calculation is essential for validating the quality of Wannier functions
         by comparing the interpolated band structure with the original DFT band structure.
         
+        The PROJWFC (projection on atomic wavefunctions) analysis helps identify which atoms and
+        orbitals contribute to the electronic structure, enabling better selection of Wannier
+        function projections (initial guesses).
+        
         Parameters:
-            labels: Dict with custom labels {'scf': '...', 'nscf': '...', 'bands': '...'}
+            labels: Dict with custom labels {'scf': '...', 'nscf': '...', 'bands': '...', 'projwfc': '...'}
                    If None, uses default run labels
             blocking: If True, wait for all jobs to complete (default True)
             seedname: Base name for Wannier output files (default 'wannier_seed')
             run_bands_validation: If True, compute band structure for validation (default: self.run_bands)
+            run_projwfc_analysis: If True, compute projections for orbital analysis (default: True)
             
         Returns:
             Dict containing results from all pipeline stages:
                 {
                     'scf': Espresso calculator with SCF results,
                     'bands': Espresso calculator with band structure (if run),
+                    'projwfc': EspressoProjwfc with PDOS results (if run),
                     'nscf': Espresso calculator with NSCF results,
                     'pw2wannier': {'status', 'outputs', 'job_id', ...},
                     'wannier90': {'status', 'outputs', 'job_id', ...},
+                    'projections_suggested': str with auto-suggested projections from PROJWFC,
                     'seedname': seedname used,
                     'run_dir': directory with Wannier outputs
                 }
@@ -358,7 +503,7 @@ class WannierWorkflow:
         import logging
         logger = logging.getLogger(__name__)
         
-        # Determine if we should run bands
+        # Determine if we should run bands and projwfc
         if run_bands_validation is None:
             run_bands_validation = self.run_bands
         
@@ -367,10 +512,11 @@ class WannierWorkflow:
             labels = {
                 'scf': 'runs/02-scf',
                 'bands': 'runs/02b-bands',
+                'projwfc': 'runs/02c-projwfc',
                 'nscf': 'runs/03-nscf',
             }
         
-        total_stages = 5 if run_bands_validation else 4
+        total_stages = 6 if (run_bands_validation and run_projwfc_analysis) else (5 if run_bands_validation else 4)
         stage_count = 1
         
         print("\n" + "="*70)

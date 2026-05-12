@@ -516,7 +516,11 @@ class WannierWorkflow:
                 'nscf': 'runs/03-nscf',
             }
         
-        total_stages = 6 if (run_bands_validation and run_projwfc_analysis) else (5 if run_bands_validation else 4)
+        total_stages = 5  # Base: SCF + NSCF + pw2wannier + wannier90
+        if run_bands_validation:
+            total_stages += 1  # Add bands
+        if run_projwfc_analysis:
+            total_stages += 1  # Add projwfc
         stage_count = 1
         
         print("\n" + "="*70)
@@ -562,7 +566,48 @@ class WannierWorkflow:
                 print(f"  Continuing without validation, but quality assessment will be limited")
                 self.results['bands'] = None
         
-        # ====== STAGE 3: NSCF ======
+        # ====== STAGE 3 (OPTIONAL): PROJWFC ======
+        projwfc_projections_suggested = None
+        if run_projwfc_analysis:
+            print(f"\n[{stage_count}/{total_stages}] Running projwfc (projection analysis for Wannier guidance)...")
+            stage_count += 1
+            try:
+                # Use SCF results for projwfc
+                run_dir = str(Path(scf_calc.directory).resolve())
+                prefix = scf_calc.prefix
+                
+                projwfc_result = run_projwfc(
+                    run_dir=run_dir,
+                    prefix=prefix,
+                    blocking=blocking,
+                    queue=self.queue
+                )
+                self.results['projwfc'] = projwfc_result
+                
+                if projwfc_result['status'] in ['finished', 'finished_with_warnings', 'submitted']:
+                    print(f"✓ projwfc completed: {projwfc_result['status']}")
+                    if 'outputs' in projwfc_result and projwfc_result['outputs']['pdos']:
+                        print(f"  PDOS analysis: {Path(projwfc_result['outputs']['pdos']).name}")
+                        
+                        # Try to extract suggestions from PDOS output
+                        suggestions = parse_projwfc_output(run_dir, prefix)
+                        if suggestions:
+                            self.results['projwfc_analysis'] = suggestions
+                            projwfc_projections_suggested = suggestions.get('projections', None)
+                            if projwfc_projections_suggested:
+                                print(f"  Suggested projections from PDOS: {projwfc_projections_suggested}")
+                        
+                        print(f"  ➜ Check {run_dir}/{prefix}.pdos* for detailed orbital contributions")
+                else:
+                    print(f"✗ projwfc {projwfc_result['status']}: {projwfc_result.get('message', 'Unknown error')}")
+                    print(f"  Continuing with user-specified projections...")
+                    self.results['projwfc'] = None
+            except Exception as e:
+                print(f"⚠ projwfc failed (non-critical): {e}")
+                print(f"  Continuing with user-specified projections...")
+                self.results['projwfc'] = None
+        
+        # ====== STAGE 4: NSCF ======
         print(f"\n[{stage_count}/{total_stages}] Running NSCF calculation (with wavefunction collection)...")
         stage_count += 1
         try:
@@ -582,7 +627,7 @@ class WannierWorkflow:
             print(f"✗ NSCF failed: {e}")
             raise
         
-        # ====== STAGE 4: pw2wannier90 ======
+        # ====== STAGE 5: pw2wannier90 ======
         print(f"\n[{stage_count}/{total_stages}] Running pw2wannier90 (wavefunction conversion)...")
         stage_count += 1
         try:
@@ -611,7 +656,7 @@ class WannierWorkflow:
             print(f"✗ pw2wannier90 failed: {e}")
             raise
         
-        # ====== STAGE 5: wannier90 ======
+        # ====== STAGE 6: wannier90 ======
         print(f"\n[{stage_count}/{total_stages}] Running wannier90 (Wannier function generation)...")
         try:
             # Generate .win file
@@ -652,6 +697,7 @@ class WannierWorkflow:
         self.results['run_dir'] = run_dir
         self.results['projections_used'] = self.projections
         self.results['band_structure_available'] = run_bands_validation and self.results['bands'] is not None
+        self.results['projwfc_available'] = run_projwfc_analysis and self.results.get('projwfc') is not None
         
         print("\n" + "="*70)
         print("WANNIER WORKFLOW COMPLETED SUCCESSFULLY ✓")
@@ -669,6 +715,12 @@ class WannierWorkflow:
             print(f"  - Run: {self.results['bands'].directory}")
             print(f"  - Use to compare DFT vs Wannier interpolation")
             print(f"  - Call: workflow.compare_bands() for detailed analysis")
+        
+        if run_projwfc_analysis and self.results.get('projwfc') is not None:
+            print(f"\nProjection Analysis (PROJWFC):")
+            print(f"  - PDOS files: {prefix}.pdos*")
+            print(f"  - Shows orbital contributions to electronic structure")
+            print(f"  - Use to refine Wannier projections in next iterations")
         
         print("="*70 + "\n")
         
@@ -751,6 +803,28 @@ class WannierWorkflow:
         """Get the band structure Espresso calculator (if available)."""
         return self.results.get('bands', None)
     
+    def get_projwfc_analysis(self) -> Optional[Dict]:
+        """Get PROJWFC analysis results.
+        
+        Returns:
+            Dict with PDOS file paths and analysis, or None if PROJWFC was not run
+        """
+        if not self.results.get('projwfc'):
+            return None
+        
+        projwfc_result = self.results['projwfc']
+        analysis = {
+            'status': projwfc_result.get('status'),
+            'pdos_file': projwfc_result.get('outputs', {}).get('pdos'),
+            'run_dir': projwfc_result.get('run_dir'),
+            'job_id': projwfc_result.get('job_id'),
+        }
+        
+        if 'projwfc_analysis' in self.results:
+            analysis['parsed'] = self.results['projwfc_analysis']
+        
+        return analysis
+    
     def validate_wannier_quality(self) -> Dict:
         """
         Validate Wannier function quality by checking various metrics.
@@ -771,6 +845,7 @@ class WannierWorkflow:
             'wannier_xsf': f"{self.results['run_dir']}/{self.results['seedname']}_*.xsf",
             'next_step': 'compare_bands()',
             'has_band_structure': self.results.get('band_structure_available', False),
+            'has_projwfc': self.results.get('projwfc_available', False),
             'recommendations': []
         }
         
@@ -781,6 +856,15 @@ class WannierWorkflow:
         else:
             validation['recommendations'].append(
                 "Band structure available - Use compare_bands() to visualize DFT vs Wannier interpolation"
+            )
+        
+        if validation['has_projwfc']:
+            validation['recommendations'].append(
+                "PROJWFC analysis available - Review PDOS to understand orbital contributions"
+            )
+        else:
+            validation['recommendations'].append(
+                "Consider re-running with run_projwfc_analysis=True for orbital analysis guidance"
             )
         
         return validation

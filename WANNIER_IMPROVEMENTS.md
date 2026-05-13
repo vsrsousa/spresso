@@ -2,6 +2,68 @@
 
 ## Outstanding Issues
 
+Certo! Aqui está o plano de refatoração que sugeri:
+
+## 🎯 PLANO DE REFATORAÇÃO WANNIER_WORKFLOW.PY
+
+### **PROBLEMA ATUAL:**
+- Arquivo: 1341 linhas
+- Método `run()`: 383 linhas (muito grande, difícil manter)
+- Múltiplas responsabilidades misturadas
+
+### **SOLUÇÃO PROPOSTA:**
+
+#### **ETAPA 1 - Quebrar o método run() em sub-métodos (PRIORIDADE 1)**
+Dividir `WannierWorkflow.run()` em 6 sub-métodos temáticos:
+- [ ] `_run_scf_stage()` - executar SCF
+- [ ] `_run_nscf_stage()` - executar NSCF  
+- [ ] `_run_projwfc_stage()` - executar PROJWFC
+- [ ] `_run_pw2wannier_stage()` - executar pw2wannier90
+- [ ] `_run_wannier_stage()` - executar wannier90
+- [ ] `_run_bands_stage()` - executar band structure (opcional)
+
+Depois o `run()` fica apenas orquestrando esses 6 sub-métodos em sequência.
+
+#### **ETAPA 2 - Extrair wannier_helpers.py (PRIORIDADE 2)**
+Mover 8 funções standalone (459 linhas) para novo arquivo:
+- [ ] `run_pw2wannier()`
+- [ ] `run_projwfc()`
+- [ ] `run_wannier90()`
+- [ ] `generate_pw2wannier_input()`
+- [ ] `generate_seedname_win()`
+- [ ] `parse_projwfc_output()`
+- [ ] `suggest_nbnd_from_pseudos()`
+- [ ] `_make_queue_fallback()`
+
+**Arquivo:** `xespresso/workflow/wannier_helpers.py`
+**Depois atualizar imports** em wannier_workflow.py
+
+#### **ETAPA 3 - Extrair wannier_analysis.py (PRIORIDADE 3)**
+Mover análises e validação (145 linhas) para novo arquivo:
+- [ ] `validate_wannier_quality()` (método)
+- [ ] `compare_bands()` (método)
+- [ ] Métodos auxiliares de validação
+
+**Arquivo:** `xespresso/workflow/wannier_analysis.py`
+**Depois atualizar imports** em wannier_workflow.py
+
+#### **ETAPA 4 - Resultado Final**
+- wannier_workflow.py ~ 400 linhas (core orquestração apenas)
+- `wannier_helpers.py` ~ 459 linhas (helpers independentes)
+- `wannier_analysis.py` ~ 145 linhas (análise/validação)
+- **Total**: dividido em 3 arquivos focados, muito mais mantenível
+
+### **ORDEM DE EXECUÇÃO:**
+1. Etapa 1 (quebrar run() em sub-métodos) ← **COMEÇA AQUI**
+2. Testar imports e funcionalidade
+3. Etapa 2 (extrair helpers.py)
+4. Testar novamente
+5. Etapa 3 (extrair analysis.py)
+6. Teste final completo
+7. Commit: "refactor: modularize WannierWorkflow"
+
+---
+
 ### 1. Wannier Class Feature Enhancements
 **Location:** `xespresso/post/wannier90.py` / `xespresso/workflow/wannier_workflow.py`
 

@@ -871,9 +871,9 @@ class WannierWorkflow:
         if labels is None:
             labels = {
                 'scf': 'runs/01-scf',
-                'bands': 'runs/02-bands',
-                'projwfc': 'runs/03-projwfc',
-                'nscf': 'runs/04-nscf',
+                'bands': 'bands',        # Subfolder of SCF
+                'projwfc': 'projwfc',    # Subfolder of SCF
+                'nscf': 'nscf',          # Subfolder of SCF
                 'wan': 'runs/05-wan',
             }
         
@@ -929,8 +929,10 @@ class WannierWorkflow:
                 # Update atoms for bands calculation
                 self.calc_wf.atoms = scf_calc.atoms
                 
+                # BANDS is a subfolder of SCF (reads SCF density)
+                bands_label = os.path.join(labels['scf'], labels['bands'])  # 'runs/01-scf/bands'
                 bands_calc = self.calc_wf.run_bands(
-                    label=labels['bands'],
+                    label=bands_label,
                     prefix=system_name,  # Use system name for file naming
                     dry_run=dry_run
                 )
@@ -951,8 +953,9 @@ class WannierWorkflow:
             print(f"\n[{stage_count}/{total_stages}] Running projwfc (projection analysis for Wannier guidance)...")
             stage_count += 1
             try:
-                # Create 03-projwfc directory
-                projwfc_dir = str(Path(labels['projwfc']).resolve())
+                # PROJWFC is a subfolder of SCF (reads SCF density)
+                projwfc_subfolder_dir = os.path.join(labels['scf'], labels['projwfc'])  # 'runs/01-scf/projwfc'
+                projwfc_dir = str(Path(projwfc_subfolder_dir).resolve())
                 os.makedirs(projwfc_dir, exist_ok=True)
                 
                 # Use SCF results for projwfc (read density from SCF output)
@@ -1015,8 +1018,9 @@ class WannierWorkflow:
             input_data_nscf['noinv'] = True
             
             nscf_calc = self.calc_wf.run_nscf(
-                label=labels['nscf'],
-                prefix=system_name,  # Use system name for file naming
+                label='nscf',                   # Subfolder of SCF
+                scf_directory=labels['scf'],    # NSCF reads from SCF density (not BANDS)
+                prefix=system_name,             # Same prefix as parent SCF calculation
                 kpts=kpts_nscf_explicit,
                 nbnd=self.nbnd,
                 wf_collect=True,  # CRITICAL for Wannier

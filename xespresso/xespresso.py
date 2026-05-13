@@ -141,8 +141,6 @@ class Espresso(FileIOCalculator):
         self.parallel = parallel
         self.debug = debug
 
-        # self.discard_results_on_any_change = False
-
     def calculate(self, atoms=None, properties=['energy'], system_changes=None):
         """
         Calculate properties for the given atoms.

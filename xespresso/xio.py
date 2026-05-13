@@ -92,6 +92,7 @@ def write_espresso_in(
     section_str, input_parameters = build_section_str(
         atoms, species_info, input_data, input_parameters, qe_version
     )
+    
     pwi.extend(section_str)
     # Pseudopotentials
     pwi.extend(atomic_species_str)

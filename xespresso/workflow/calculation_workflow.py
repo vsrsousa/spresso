@@ -14,6 +14,8 @@ from ase import Atoms
 from ase.io import read
 from ase.io.espresso import kspacing_to_grid
 from xespresso import Espresso, kpts_from_spacing
+from xespresso.post.nscf import EspressoNscf
+from xespresso.post.bands import EspressoBands
 from xespresso.tools import setup_magnetic_config, read_structure
 from xespresso.machines import load_machine
 from xespresso.pseudopotentials import load_pseudopotentials_config
@@ -1426,6 +1428,7 @@ class CalculationWorkflow:
         self,
         label: str = 'scf',
         dry_run: bool = False,
+        clean_after: bool = False,
         **calc_kwargs
     ) -> Espresso:
         """
@@ -1434,6 +1437,7 @@ class CalculationWorkflow:
         Args:
             label: Directory/label for the calculation
             dry_run: If True, only generate input files without running (default False)
+            clean_after: If True, removes wavefunction files after calculation completes (default False)
             **calc_kwargs: Additional parameters for the Espresso calculator
             
         Returns:
@@ -1452,6 +1456,11 @@ class CalculationWorkflow:
             'input_data': self.input_data.copy(),
             'kpts': self._get_kpts(),
         }
+        
+        # Set outdir for proper file organization
+        # Each calculation writes to its own outdir: prefix.save/
+        # Use '.' (current directory) so subdirectories don't nest
+        params['input_data']['outdir'] = '.'
         
         # Add ecutwfc and ecutrho at top level
         params['ecutwfc'] = self.input_data.get('ecutwfc', 50.0)
@@ -1556,182 +1565,168 @@ class CalculationWorkflow:
         # Check convergence and inform user
         self._check_convergence(calc, calculation_type='scf')
         
+        # Clean temporary files if requested
+        if clean_after:
+            is_remote_nonblocking = self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False)
+            
+            if is_remote_nonblocking:
+                # Clean on remote server
+                try:
+                    if hasattr(calc, 'remote') and calc.remote:
+                        remote = calc.remote
+                        remote_label = calc.label if hasattr(calc, 'label') else label
+                        logger.info(f"Cleaning remote directory: {remote_label}/")
+                        # Remove remote temporary files
+                        remote.execute(f"cd {remote_label} && rm -f *.wfc *.hub *.mix *.scf")
+                        logger.info(f"Cleaned temporary files from remote {remote_label}/")
+                    else:
+                        logger.warning(f"clean_after=True but could not access remote connection")
+                except Exception as e:
+                    logger.warning(f"Could not clean remote files: {e}")
+            else:
+                # Clean locally (for local or remote blocking)
+                try:
+                    calc.clean()
+                    logger.info(f"Cleaned temporary files from {label}/")
+                except Exception as e:
+                    logger.warning(f"Could not clean temporary files: {e}")
+        
         return calc
     
     def run_nscf(
         self,
         label: str = 'nscf',
+        scf_directory: str = 'scf',
+        prefix: Optional[str] = None,
         kpts: tuple = None,
         nbnd: int = None,
         wf_collect: bool = True,
         npools: int = None,
         dry_run: bool = False,
-        input_data: dict = None,
         **calc_kwargs
-    ) -> Espresso:
+    ) -> EspressoNscf:
         """
         Run a non-self-consistent field (NSCF) calculation for band structure.
         
-        NSCF reads the charge density from a previous SCF calculation and computes
-        electronic structure on a denser k-point mesh without updating electron density.
-        Essential for Wannier interpolation and band structure analysis.
+        Uses EspressoNscf class (proven, legacy implementation) which:
+        - Reads all SCF parameters from scf_directory/{prefix}.asei
+        - Creates NSCF as subfolder: scf_directory/nscf/
+        - Uses SAME prefix as parent SCF (no prefix mismatch issues)
+        - Sets outdir="../" to read parent density
         
         Args:
-            label: Directory/label for the calculation
+            label: Name of NSCF subfolder (default 'nscf'). Created inside scf_directory
+            scf_directory: Path where SCF calculation was done (e.g., 'scf', '01_scf')
+            prefix: Prefix of parent calculation (same as SCF, e.g., 'si', 'fe_bcc')
+                   If None, tries to auto-detect from scf_directory/.asei files
             kpts: K-point mesh tuple (e.g., (12, 12, 12) for dense mesh)
-                  If None, uses self.kpts from initialization
             nbnd: Number of bands to compute (must be > n_electrons/2)
-                  If None, uses preset value or estimates from pseudopotentials
-            wf_collect: If True, collect wavefunctions on each k-point (required for Wannier)
-            npools: Number of k-point pools for parallelization (e.g., -npools 4)
-                    Allows distributing k-points across processes
-            dry_run: If True, only generate input files without running (default False)
-            **calc_kwargs: Additional Espresso calculator parameters
-            
+            wf_collect: If True, collect wavefunctions (required for Wannier)
+            npools: Number of k-point pools for parallelization
+            dry_run: If True, only generate input files without running
+            **calc_kwargs: Additional parameters (parallel='', queue=None, debug=False, etc.)
+        
         Returns:
-            Espresso: Calculator object with NSCF results
+            EspressoNscf: Calculator object with NSCF results
             
-        Notes:
-            - Must run SCF first to generate charge density
-            - Generates prefix.save/wavefunction.* files (can be large!)
-            - Set wf_collect=True for Wannier calculations
-            - High nbnd increases memory but necessary for accurate interpolation
+        Examples:
+            >>> scf = workflow.run_scf(label='scf', prefix='si')
+            >>> nscf = workflow.run_nscf(
+            ...     label='nscf',
+            ...     scf_directory='scf',
+            ...     prefix='si'  # SAME as SCF
+            ... )
         """
         if kpts is None:
             kpts = self._get_kpts()
         
         if nbnd is None:
-            # Estimate nbnd from pseudopotentials if not specified
             nbnd = self._estimate_nbnd()
         
         # Set ESPRESSO_PSEUDO if we have pseudopotentials_config
         if self.pseudopotentials_base_path:
             os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
         
-        # Prepare input_data (copy from preset)
-        nscf_input_data = self.input_data.copy()
+        # Auto-detect prefix if not provided
+        if prefix is None:
+            # Look for .asei files in scf_directory
+            scf_path = Path(scf_directory)
+            asei_files = list(scf_path.glob('*.asei'))
+            if asei_files:
+                # Extract prefix from first .asei file found
+                prefix = asei_files[0].stem
+                logger.info(f"Auto-detected prefix from {scf_directory}: {prefix}")
+            else:
+                # Fallback: use scf_directory name as prefix
+                prefix = scf_directory.split('/')[-1] if '/' in scf_directory else scf_directory
+                logger.warning(f"No .asei file found. Assuming prefix: {prefix}")
         
-        # Merge with additional input_data if provided (e.g., nosym, noinv from Wannier workflow)
-        if input_data is not None:
-            nscf_input_data.update(input_data)
+        logger.info(f"NSCF will read density from: {scf_directory}/{prefix}.save/")
+        logger.info(f"NSCF structure: {scf_directory}/{label}/")
         
-        # NSCF-specific parameters
-        nscf_input_data['nbnd'] = nbnd  # Override with larger value for band structure
-        
-        if wf_collect:
-            nscf_input_data['wf_collect'] = True  # Collect wavefunctions for post-processing
-        
-        if npools is not None:
-            # Note: -npools is a command-line argument, not in &control
-            # Will be passed as extra kwargs to Espresso
-            calc_kwargs['npools'] = npools
-        
-        # Prepare parameters
-        params = {
-            'pseudopotentials': self.pseudopotentials,
-            'label': label,
-            'calculation': 'nscf',
-            'input_data': nscf_input_data,
+        # Prepare kwargs for EspressoNscf
+        nscf_kwargs = {
             'kpts': kpts,
+            'parallel': calc_kwargs.pop('parallel', ''),
+            'queue': self.queue or calc_kwargs.pop('queue', None),
+            'debug': calc_kwargs.pop('debug', False),
         }
         
-        # Add ecutwfc and ecutrho at top level
-        params['ecutwfc'] = nscf_input_data.get('ecutwfc', 50.0)
-        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
-        ratio = self._get_ecutrho_ratio_for_pseudos()
-        params['ecutrho'] = params['ecutwfc'] * ratio
-        
-        # Set pseudo_dir when using pseudopotentials_config
-        if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
-            params['input_data']['pseudo_dir'] = './pseudo'
-        
-        # Add queue configuration if provided
-        if self.queue is not None:
-            params['queue'] = self.queue
-        
-        # Merge with extra kwargs
-        params.update(self.extra_kwargs)
-        params.update(calc_kwargs)
-        
-        # Create calculator
-        calc = Espresso(**params)
-        self.atoms.calc = calc
-        self.last_calc = calc  # Track last calculator for monitoring
-        
-        # Dry run: only generate input files (before any other checks)
-        if dry_run:
-            calc.write_input(self.atoms)
-            calc.atoms = self.atoms  # Ensure atoms are available for downstream steps
-            logger.info(f"DRY RUN: NSCF input files generated in {label}/ (no execution)")
-            return calc
-        
-        # Check for previous calculation (load .asei if exists)
-        needs_calculation = True
-        try:
-            calc.read(calc.directory)  # Load previous results if they exist
-            if hasattr(calc, 'restart_atoms') and calc.restart_atoms is not None:
-                # Check if calculation state changed
-                needs_calculation = calc.check_state(self.atoms)
-                if not needs_calculation:
-                    logger.info(f"Skipping calculation (parameters unchanged): {label}")
-                    if hasattr(calc, 'read_results'):
-                        try:
-                            calc.read_results()
-                        except Exception as e:
-                            logger.debug(f"Could not read previous results: {e}")
-                            needs_calculation = True
-        except Exception as e:
-            logger.debug(f"No previous calculation found: {e}")
-            needs_calculation = True
-        
-        # If remote non-blocking: control execution steps to avoid retry loop
-        if self.queue and self.queue.get('execution') == 'remote' and not self.queue.get('wait_for_completion', False):
-            logger.info("Remote non-blocking: executing NSCF with automatic job monitoring...")
-            
-            # Only write input and execute if calculation is needed
-            if needs_calculation:
-                # Step 1: Write input
-                calc.write_input(self.atoms)
-                calc.atoms = self.atoms
-                
-                # Step 2: Execute (submits job remotely)
-                calc.execute()
-            else:
-                logger.info(f"Using cached results for: {label}")
-            
-            # IMPORTANT: Store remote connection on calc for RemoteJobMonitor to access
-            if hasattr(calc, 'scheduler') and hasattr(calc.scheduler, 'remote'):
-                calc.remote = calc.scheduler.remote
-            
-            # Step 3: Monitor SLURM job status
-            logger.info(f"Remote job {calc.last_job_id} submitted. Monitoring SLURM status...")
-            job_id = calc.last_job_id
-            timeout = self.queue.get('job_timeout', 7200)  # NSCF may take longer
-            job_monitor_result = self._monitor_remote_job(calc, job_id, timeout=timeout, poll_interval=30)
-            
-            if not job_monitor_result['success']:
-                raise RuntimeError(f"Remote job {job_id} failed: {job_monitor_result['message']}")
-            
-            # Step 4: Fetch output
-            monitor = RemoteJobMonitor(calc)
-            if monitor.wait(timeout=60, poll_interval=5):
-                monitor.retrieve_output()
-                logger.info("Remote NSCF output retrieved.")
-                calc.read_results()
-            else:
-                raise RuntimeError(f"Failed to retrieve NSCF output for job {job_id}")
-        else:
-            # Local or remote blocking: use normal run()
-            calc.run(atoms=self.atoms)
-        
-        # Check convergence and inform user
-        self._check_convergence(calc, calculation_type='nscf')
-        
-        logger.info(f"NSCF calculation completed. Wavefunctions saved in {label}/")
         if wf_collect:
-            logger.info(f"  wf_collect=True: Wavefunctions available for post-processing (Wannier, bands, etc)")
+            nscf_kwargs['wf_collect'] = True
         
-        return calc
+        if nbnd:
+            nscf_kwargs['nbnd'] = nbnd
+        
+        if npools is not None:
+            nscf_kwargs['npools'] = npools
+        
+        # Merge remaining kwargs
+        nscf_kwargs.update(calc_kwargs)
+        
+        # Create NSCF calculator using EspressoNscf class
+        # This class handles:
+        # - Reading SCF params from scf_directory/{prefix}.asei
+        # - Creating nscf subfolder automatically
+        # - Setting outdir="../" for density reading
+        # - Same prefix throughout
+        # 
+        # Handle label that might contain paths (extract basename)
+        # e.g., 'runs/04-nscf' -> '04-nscf', or 'nscf' -> 'nscf'
+        label_basename = Path(label).name
+        nscf_label = os.path.join(scf_directory, label_basename)  # e.g., 'scf/nscf' or 'runs/02-bands/04-nscf'
+        nscf_calc = EspressoNscf(
+            label=nscf_label,
+            scf_directory=scf_directory,
+            prefix=prefix,
+            **nscf_kwargs
+        )
+        
+        # No need to rename - label already specifies the full path
+        
+        # Set atoms for the calculator
+        nscf_calc.atoms = self.atoms
+        self.last_calc = nscf_calc
+        
+        # Dry run: only generate input files
+        if dry_run:
+            nscf_calc.write_input(self.atoms)
+            logger.info(f"DRY RUN: NSCF input files generated in {scf_directory}/{label}/ (no execution)")
+            return nscf_calc
+        
+        # Execute NSCF calculation
+        logger.info(f"Running NSCF calculation...")
+        nscf_calc.run()
+        
+        # Check convergence
+        self._check_convergence(nscf_calc, calculation_type='nscf')
+        
+        logger.info(f"NSCF calculation completed.")
+        if wf_collect:
+            logger.info(f"  wf_collect=True: Wavefunctions available for post-processing")
+        
+        return nscf_calc
+    
     
     def run_dos(
         self,
@@ -1980,38 +1975,46 @@ class CalculationWorkflow:
         if self.pseudopotentials_base_path:
             os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
         
-        # Prepare input_data (copy from preset)
-        input_data = self.input_data.copy()
+        # Determine SCF directory and bands label
+        # If label='runs/01-scf/bands', extract scf_directory='runs/01-scf'
+        label_path = Path(label)
+        label_basename = label_path.name  # e.g., 'bands'
         
-        # Prepare parameters
-        params = {
-            'pseudopotentials': self.pseudopotentials,
-            'label': label,
-            'calculation': 'bands',  # High-symmetry k-path calculation
-            'input_data': input_data,
+        # Infer scf_directory from label (parent directory)
+        # If label is just 'bands', assume scf_directory='.'  (current dir has .asei)
+        # If label is 'scf/bands', then scf_directory='scf'
+        if label_path.parent != Path('.'):
+            scf_directory = str(label_path.parent)
+        else:
+            scf_directory = '.'
+        
+        logger.info(f"BANDS will read density from: {scf_directory}")
+        logger.info(f"BANDS structure: {label}/")
+        
+        # Prepare kwargs for EspressoBands
+        # EspressoBands will auto-detect prefix from scf_directory/{prefix}.asei
+        bands_kwargs = {
             'kpts': kpts,
+            'parallel': calc_kwargs.pop('parallel', ''),
+            'queue': self.queue or calc_kwargs.pop('queue', None),
+            'debug': calc_kwargs.pop('debug', False),
         }
         
-        # Add ecutwfc and ecutrho at top level
-        params['ecutwfc'] = input_data.get('ecutwfc', 50.0)
-        # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
-        ratio = self._get_ecutrho_ratio_for_pseudos()
-        params['ecutrho'] = params['ecutwfc'] * ratio
+        # Merge remaining kwargs
+        bands_kwargs.update(calc_kwargs)
         
-        # Set pseudo_dir when using pseudopotentials_config
-        if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
-            params['input_data']['pseudo_dir'] = './pseudo'
+        # Create BANDS calculator using EspressoBands class
+        # This class handles:
+        # - Auto-detecting prefix from scf_directory/{prefix}.asei
+        # - Creating bands subfolder automatically
+        # - Setting outdir="../" for density reading
+        # - Same prefix throughout
+        calc = EspressoBands(
+            label=label,
+            scf_directory=scf_directory,
+            **bands_kwargs
+        )
         
-        # Add queue configuration if provided
-        if self.queue is not None:
-            params['queue'] = self.queue
-        
-        # Merge with extra kwargs
-        params.update(self.extra_kwargs)
-        params.update(calc_kwargs)
-        
-        # Create calculator for band structure
-        calc = Espresso(**params)
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
         
@@ -2147,6 +2150,7 @@ class CalculationWorkflow:
             pawproj: PAW projector type (0=Rydberg, 1=m_j dependent). Default 0
             filpdos: Prefix for output PDOS files. If None, uses nscf prefix
             lowdin: If True, calculate and output Lowdin charges to file (default False)
+            dry_run: If True, only generate input files without running (default False)
             
         Returns:
             EspressoProjwfc: Post-processing calculator with PDOS results
@@ -2357,6 +2361,7 @@ class CalculationWorkflow:
             wait_for_completion: If True, block until relaxation completes (default: uses self.queue setting)
                 If False, submit and return immediately (useful for parallel batch submission)
             dry_run: If True, only generate input files without running (default False)
+            clean_after: If True, removes wavefunction files after calculation completes (default False)
             **calc_kwargs: Additional parameters for the Espresso calculator
             
         Returns:
@@ -2380,6 +2385,10 @@ class CalculationWorkflow:
             'input_data': self.input_data.copy(),
             'kpts': self._get_kpts(),
         }
+        
+        # Set outdir for proper file organization
+        # Use '.' (current directory) so files go directly to label/ without nesting
+        params['input_data']['outdir'] = '.'
         
         # Add ecutwfc and ecutrho at top level
         params['ecutwfc'] = self.input_data.get('ecutwfc', 50.0)

@@ -734,19 +734,25 @@ class WannierWorkflow:
             pw2wannier90.x -in prefix_SPIN.pw2wannier90i > prefix_SPIN.pw2wannier90o
             wannier90.x seedname_SPIN
             
-        Or with SLURM scheduler:
+        Or with SLURM scheduler (with full #SBATCH directives):
             #!/bin/bash
-            #SBATCH --job-name=...
-            ... other #SBATCH directives ...
-            srun ... wannier90.x -pp seedname_SPIN
-            srun ... pw2wannier90.x ...
-            srun ... wannier90.x ...
+            #SBATCH --job-name=wannier
+            #SBATCH --output=wannier.out
+            #SBATCH --error=wannier.err
+            #SBATCH --nodes=1
+            #SBATCH --ntasks-per-node=16
+            #SBATCH --time=01:00:00
+            #SBATCH --partition=parallel
+            
+            srun --mpi=pmi2 wannier90.x -pp seedname_SPIN
+            srun --mpi=pmi2 pw2wannier90.x -in prefix_SPIN.pw2wannier90i > prefix_SPIN.pw2wannier90o
+            srun --mpi=pmi2 wannier90.x seedname_SPIN
         
         Parameters:
             seedname: Base seedname (e.g., 'wannier')
             spin_component: Spin component ('up', 'down', or 'none')
             prefix: Prefix for pw2wannier90 input files (e.g., 'Fe_bcc')
-            queue: Optional scheduler/queue dict (if provided and SLURM, adds #SBATCH directives)
+            queue: Optional scheduler/queue dict (if provided and SLURM, adds full #SBATCH directives)
             
         Returns:
             str: Bash script content
@@ -769,22 +775,20 @@ class WannierWorkflow:
         launcher = ""
         if queue and queue.get('scheduler') == 'slurm':
             script_lines.append("")
-            # Add SLURM directives
-            job_name = queue.get('job_name', 'wannier')
-            if job_name:
-                script_lines.append(f"#SBATCH --job-name={job_name}")
-            if queue.get('output'):
-                script_lines.append(f"#SBATCH --output={queue['output']}")
-            if queue.get('error'):
-                script_lines.append(f"#SBATCH --error={queue['error']}")
-            if queue.get('nodes'):
-                script_lines.append(f"#SBATCH --nodes={queue['nodes']}")
-            if queue.get('ntasks_per_node'):
-                script_lines.append(f"#SBATCH --ntasks-per-node={queue['ntasks_per_node']}")
-            if queue.get('time'):
-                script_lines.append(f"#SBATCH --time={queue['time']}")
-            if queue.get('partition'):
-                script_lines.append(f"#SBATCH --partition={queue['partition']}")
+            
+            # Main SBATCH directives (job-name, output, error)
+            job_name = queue.get('job_name', seedname)
+            output_file = queue.get('output', f'{seedname}.out')
+            error_file = queue.get('error', f'{seedname}.err')
+            
+            script_lines.append(f"#SBATCH --job-name={job_name}")
+            script_lines.append(f"#SBATCH --output={output_file}")
+            script_lines.append(f"#SBATCH --error={error_file}")
+            
+            # Resource directives from queue["resources"]
+            resources = queue.get('resources', {})
+            for key, value in resources.items():
+                script_lines.append(f"#SBATCH --{key}={value}")
             
             # Get launcher command (e.g., 'srun --mpi=pmi2')
             launcher = queue.get('launcher', '') or ''

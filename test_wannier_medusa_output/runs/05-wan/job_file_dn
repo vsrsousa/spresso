@@ -1,6 +1,12 @@
 #!/bin/bash
 
 #SBATCH --job-name=wannier
+#SBATCH --output=wannier.out
+#SBATCH --error=wannier.err
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=16
+#SBATCH --time=01:00:00
+#SBATCH --partition=parallel
 
 
 

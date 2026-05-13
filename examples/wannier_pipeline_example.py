@@ -30,7 +30,7 @@ def main():
     # Create complete Wannier workflow WITH band structure for validation
     wf = WannierWorkflow(
         cif_file=cif_file,
-        pseudos=pseudos,
+        pseudopotentials=pseudopotentials,
         protocol=protocol,
         num_wann=4,                    # Generate 4 Wannier functions
         projections="Si: sp3",         # Initial projections
@@ -44,7 +44,8 @@ def main():
     # This runs: SCF → Band Structure → NSCF (wf_collect) → pw2wannier → wannier90
     results = wf.run(
         blocking=True,
-        run_bands_validation=True  # Explicitly enable band structure validation
+        run_bands_validation=True,  # Explicitly enable band structure validation
+        dry_run=True  # Generate input files only (no calculations)
     )
     
     # Access results

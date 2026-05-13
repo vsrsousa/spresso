@@ -87,6 +87,9 @@ def get_bandpath(atoms, with_time_reversal=True):
     path_str = sg_data['path']
     special_points = sg_data['special_points'].copy()
     
+    # Remove spaces after commas for proper parsing (e.g., "GXU, KGLWX" → "GXU,KGLWX")
+    path_str = path_str.replace(', ', ',')
+    
     # Map GAMMA → G for Wannier90 compatibility
     path_str = path_str.replace('GAMMA', 'G')
     special_points = {
@@ -94,5 +97,7 @@ def get_bandpath(atoms, with_time_reversal=True):
         for k, v in special_points.items()
     }
     
-    # Create and return ASE BandPath object
-    return BandPath(path=path_str, special_points=special_points, cell=atoms.cell)
+    # Create and return ASE BandPath object with interpolated k-points
+    # Interpolate to 50 points per segment for band structure calculation
+    bandpath = BandPath(path=path_str, special_points=special_points, cell=atoms.cell)
+    return bandpath.interpolate(npoints=50)

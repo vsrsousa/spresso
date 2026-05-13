@@ -382,10 +382,11 @@ class WannierWorkflow:
     
     Parameters:
         cif_file: Path to structure file (CIF, POSCAR, etc.)
-        pseudos: Dict mapping element symbols to pseudopotential file paths
+        pseudopotentials: Dict mapping element symbols to pseudopotential file paths (or None if using pseudopotentials_config)
+        pseudopotentials_config: Name of pseudopotential config to load from ~/.xespresso/pseudopotentials/ (or None if using pseudopotentials)
         protocol: Convergence protocol ('fast', 'moderate', 'accurate')
         num_wann: Number of Wannier functions to generate
-        projections: Initial projections for Wannier (e.g., "Si: s,p" or "Si: sp3d2")
+        projections: Initial projections for Wannier (e.g., "Si: s,p" or "Si: sp3d2", or 'auto' to infer from pseudopotentials)
         kpts_scf: K-point mesh for SCF (default (4, 4, 4))
         kpts_nscf: K-point mesh for NSCF (default (6, 6, 6), denser)
         nbnd: Number of bands for NSCF (auto-estimated if None)
@@ -397,7 +398,7 @@ class WannierWorkflow:
     Example:
         >>> wf = WannierWorkflow(
         ...     cif_file='Si.cif',
-        ...     pseudos={'Si': '/path/to/Si.pbe.UPF'},
+        ...     pseudopotentials={'Si': '/path/to/Si.pbe.UPF'},
         ...     protocol='moderate',
         ...     num_wann=4,
         ...     projections='Si: sp3'
@@ -409,7 +410,8 @@ class WannierWorkflow:
     def __init__(
         self,
         cif_file: Union[str, Path],
-        pseudos: Dict[str, str],
+        pseudopotentials: Optional[Dict[str, str]] = None,
+        pseudopotentials_config: Optional[str] = None,
         protocol: str = 'moderate',
         num_wann: int = 4,
         projections: str = 'auto',
@@ -419,43 +421,131 @@ class WannierWorkflow:
         spinors: bool = False,
         dis_num_iter: int = 1000,
         run_bands: bool = True,
+        magnetic_config: Optional[Union[str, Dict]] = None,
         queue: Optional[Dict] = None,
         **kwargs
     ):
         """Initialize WannierWorkflow with structure and Wannier parameters."""
+        import os
+        import logging
         from xespresso.workflow.calculation_workflow import CalculationWorkflow
+        from xespresso.pseudopotentials.manager import load_pseudopotentials_config
+        from xespresso.utils.pseudo_utils import discover_pseudopotential_directory
+        
+        logger = logging.getLogger(__name__)
         
         self.cif_file = Path(cif_file)
-        self.pseudos = pseudos
         self.protocol = protocol
         self.num_wann = num_wann
-        self.projections = projections if projections != 'auto' else self._infer_projections(pseudos)
         self.kpts_scf = kpts_scf
         self.kpts_nscf = kpts_nscf
-        self.nbnd = nbnd or suggest_nbnd_from_pseudos(pseudos)
         self.spinors = spinors
         self.dis_num_iter = dis_num_iter
-        self.run_bands = run_bands  # NEW: Include band structure calculation for validation
+        self.run_bands = run_bands
         self.queue = queue
         self.kwargs = kwargs
         
+        # Handle pseudopotentials with same logic as ConvergenceWorkflow
+        self.pseudopotentials = {}
+        self.pseudopotentials_base_path = None
+        self._pseudo_config_name = pseudopotentials_config
+        
+        if pseudopotentials_config is not None:
+            # Load from config file
+            cfg = load_pseudopotentials_config(pseudopotentials_config, verbose=False)
+            if cfg is None:
+                raise ValueError(f"Pseudopotentials configuration '{pseudopotentials_config}' not found")
+            
+            # Extract filenames and base path (same as ConvergenceWorkflow)
+            self.pseudopotentials_base_path = cfg.base_path if hasattr(cfg, 'base_path') else None
+            for el, pseudo in cfg.pseudopotentials.items():
+                filename = pseudo.filename if hasattr(pseudo, 'filename') else str(pseudo)
+                self.pseudopotentials[el] = filename
+        else:
+            if pseudopotentials is None:
+                raise ValueError("Must provide 'pseudopotentials' mapping or 'pseudopotentials_config' name")
+            
+            # Discover base directory from dict (same as ConvergenceWorkflow)
+            try:
+                resolved_pseudos, self.pseudopotentials_base_path = discover_pseudopotential_directory(pseudopotentials)
+                # Extract FILENAMES from resolved absolute paths
+                for element, full_path in resolved_pseudos.items():
+                    filename = os.path.basename(full_path)
+                    self.pseudopotentials[element] = filename
+            except FileNotFoundError as e:
+                raise FileNotFoundError(str(e))
+        
+        # Set ESPRESSO_PSEUDO environment variable if we discovered a base path
+        if self.pseudopotentials_base_path:
+            os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
+        
+        # Infer projections from pseudopotentials
+        self.projections = projections if projections != 'auto' else self._infer_projections(self.pseudopotentials)
+        self.nbnd = nbnd or suggest_nbnd_from_pseudos(self.pseudopotentials)
+        
         # Initialize the underlying CalculationWorkflow
-        self.calc_wf = CalculationWorkflow.from_cif(
-            cif_file,
-            pseudos=pseudos,
-            protocol=protocol,
-            queue=queue,
-            **kwargs
-        )
+        if pseudopotentials_config:
+            self.calc_wf = CalculationWorkflow.from_cif(
+                cif_file,
+                pseudopotentials_config=pseudopotentials_config,
+                protocol=protocol,
+                magnetic_config=magnetic_config,
+                queue=queue,
+                **kwargs
+            )
+        else:
+            # Pass self.pseudopotentials (filenames only) not the original pseudopotentials dict
+            self.calc_wf = CalculationWorkflow.from_cif(
+                cif_file,
+                pseudopotentials=self.pseudopotentials,
+                protocol=protocol,
+                magnetic_config=magnetic_config,
+                queue=queue,
+                **kwargs
+            )
         
         # Results storage
         self.results = {}
     
+    def _get_explicit_kpts(self, kpts_grid: Tuple[int, int, int], atoms) -> list:
+        """Convert automatic k-point grid to explicit list of k-points.
+        
+        For Wannier workflow, NSCF needs explicit uniform k-point mesh.
+        
+        Parameters
+        ----------
+        kpts_grid : tuple of 3 ints
+            Monkhorst-Pack grid (e.g., (4, 4, 4))
+        atoms : ase.Atoms
+            Atomic structure
+            
+        Returns
+        -------
+        list
+            List of k-points in scaled coordinates
+        """
+        import numpy as np
+        from ase.calculators.calculator import kpts2ndarray
+        
+        # Generate all k-points in the grid [0, 1) with uniform spacing
+        kpts = []
+        for i in range(kpts_grid[0]):
+            for j in range(kpts_grid[1]):
+                for k in range(kpts_grid[2]):
+                    kpt = np.array([
+                        i / kpts_grid[0],
+                        j / kpts_grid[1],
+                        k / kpts_grid[2]
+                    ])
+                    kpts.append(kpt)
+        
+        return np.array(kpts)
+    
     @staticmethod
-    def _infer_projections(pseudos: Dict[str, str]) -> str:
+    def _infer_projections(pseudopotentials: Dict[str, str]) -> str:
         """Auto-infer projections from pseudopotential elements."""
         # Simple heuristic: default to p orbitals for all elements
-        elements = list(pseudos.keys())
+        elements = list(pseudopotentials.keys())
         return '; '.join([f"{elem}: p" for elem in elements])
     
     def run(
@@ -465,6 +555,7 @@ class WannierWorkflow:
         seedname: str = 'wannier_seed',
         run_bands_validation: Optional[bool] = None,
         run_projwfc_analysis: bool = True,
+        dry_run: bool = False,
     ) -> Dict:
         """
         Execute the complete Wannier workflow pipeline with optional band structure and projection analysis.
@@ -485,16 +576,17 @@ class WannierWorkflow:
             seedname: Base name for Wannier output files (default 'wannier_seed')
             run_bands_validation: If True, compute band structure for validation (default: self.run_bands)
             run_projwfc_analysis: If True, compute projections for orbital analysis (default: True)
+            dry_run: If True, only generate input files without executing any calculations (default False)
             
         Returns:
             Dict containing results from all pipeline stages:
                 {
-                    'scf': Espresso calculator with SCF results,
-                    'bands': Espresso calculator with band structure (if run),
-                    'projwfc': EspressoProjwfc with PDOS results (if run),
-                    'nscf': Espresso calculator with NSCF results,
-                    'pw2wannier': {'status', 'outputs', 'job_id', ...},
-                    'wannier90': {'status', 'outputs', 'job_id', ...},
+                    'scf': Espresso calculator with SCF results or input files (if dry_run),
+                    'bands': Espresso calculator with band structure input files (if run and dry_run),
+                    'projwfc': EspressoProjwfc with PDOS input files (if run and dry_run),
+                    'nscf': Espresso calculator with NSCF input files (if dry_run),
+                    'pw2wannier': {'status', 'outputs', 'job_id', ...} (skipped if dry_run),
+                    'wannier90': {'status', 'outputs', 'job_id', ...} (skipped if dry_run),
                     'projections_suggested': str with auto-suggested projections from PROJWFC,
                     'seedname': seedname used,
                     'run_dir': directory with Wannier outputs
@@ -516,7 +608,10 @@ class WannierWorkflow:
                 'nscf': 'runs/03-nscf',
             }
         
+        # Adjust stage count based on options
         total_stages = 5  # Base: SCF + NSCF + pw2wannier + wannier90
+        if dry_run:
+            total_stages -= 2  # Skip pw2wannier + wannier90
         if run_bands_validation:
             total_stages += 1  # Add bands
         if run_projwfc_analysis:
@@ -526,6 +621,8 @@ class WannierWorkflow:
         print("\n" + "="*70)
         print("WANNIER WORKFLOW - COMPLETE PIPELINE ORCHESTRATION")
         print("="*70)
+        if dry_run:
+            print("MODE: DRY RUN (Input files only, no execution)")
         print(f"Structure: {self.cif_file}")
         print(f"Protocol: {self.protocol}")
         print(f"Number of Wannier functions: {self.num_wann}")
@@ -542,9 +639,16 @@ class WannierWorkflow:
         print(f"\n[{stage_count}/{total_stages}] Running SCF calculation...")
         stage_count += 1
         try:
-            scf_calc = self.calc_wf.run_scf(label=labels['scf'], kpts=self.kpts_scf)
+            scf_calc = self.calc_wf.run_scf(
+                label=labels['scf'],
+                kpts=self.kpts_scf,
+                dry_run=dry_run
+            )
             self.results['scf'] = scf_calc
-            print(f"✓ SCF completed: {scf_calc.directory}")
+            if dry_run:
+                print(f"✓ SCF input files generated: {scf_calc.directory}")
+            else:
+                print(f"✓ SCF completed: {scf_calc.directory}")
         except Exception as e:
             print(f"✗ SCF failed: {e}")
             raise
@@ -557,9 +661,15 @@ class WannierWorkflow:
                 # Update atoms for bands calculation
                 self.calc_wf.atoms = scf_calc.atoms
                 
-                bands_calc = self.calc_wf.run_bands(label=labels['bands'])
+                bands_calc = self.calc_wf.run_bands(
+                    label=labels['bands'],
+                    dry_run=dry_run
+                )
                 self.results['bands'] = bands_calc
-                print(f"✓ Band structure completed: {bands_calc.directory}")
+                if dry_run:
+                    print(f"✓ Band structure input files generated: {bands_calc.directory}")
+                else:
+                    print(f"✓ Band structure completed: {bands_calc.directory}")
                 print(f"  Essential for validating Wannier function quality")
             except Exception as e:
                 print(f"⚠ Band structure failed (non-critical): {e}")
@@ -614,18 +724,49 @@ class WannierWorkflow:
             # Update atoms for NSCF workflow
             self.calc_wf.atoms = scf_calc.atoms
             
+            # For Wannier, NSCF needs explicit uniform k-point mesh (not automatic)
+            # and must disable symmetry (nosym=True, noinv=True) since wannier90 doesn't use them
+            kpts_nscf_explicit = self._get_explicit_kpts(self.kpts_nscf, scf_calc.atoms)
+            
+            # Add nosym and noinv flags to input_data for NSCF
+            input_data_nscf = self.calc_wf.input_data.copy() if hasattr(self.calc_wf, 'input_data') else {}
+            input_data_nscf['nosym'] = True
+            input_data_nscf['noinv'] = True
+            
             nscf_calc = self.calc_wf.run_nscf(
                 label=labels['nscf'],
-                kpts=self.kpts_nscf,
+                kpts=kpts_nscf_explicit,
                 nbnd=self.nbnd,
-                wf_collect=True  # CRITICAL for Wannier
+                wf_collect=True,  # CRITICAL for Wannier
+                input_data=input_data_nscf,
+                dry_run=dry_run
             )
             self.results['nscf'] = nscf_calc
-            print(f"✓ NSCF completed: {nscf_calc.directory}")
-            print(f"  Wavefunctions available at: {nscf_calc.directory}/")
+            if dry_run:
+                print(f"✓ NSCF input files generated: {nscf_calc.directory}")
+            else:
+                print(f"✓ NSCF completed: {nscf_calc.directory}")
+                print(f"  Wavefunctions available at: {nscf_calc.directory}/")
         except Exception as e:
             print(f"✗ NSCF failed: {e}")
             raise
+        
+        # ====== STAGES 5-6: pw2wannier90 and wannier90 (SKIPPED IN DRY RUN) ======
+        if dry_run:
+            print(f"\n[DRY RUN] Skipping pw2wannier90 and wannier90 execution (input-only mode)")
+            run_dir = str(Path(nscf_calc.directory).resolve())
+            self.results['seedname'] = seedname
+            self.results['run_dir'] = run_dir
+            self.results['projections_used'] = self.projections
+            
+            print("\n" + "="*70)
+            print("WANNIER WORKFLOW INPUT GENERATION COMPLETED ✓")
+            print("="*70)
+            print(f"\nInput files generated in: {run_dir}/")
+            print(f"To run the full pipeline, call: workflow.run(dry_run=False)")
+            print("="*70 + "\n")
+            
+            return self.results
         
         # ====== STAGE 5: pw2wannier90 ======
         print(f"\n[{stage_count}/{total_stages}] Running pw2wannier90 (wavefunction conversion)...")

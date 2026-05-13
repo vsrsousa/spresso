@@ -95,13 +95,13 @@ def write_espresso_in(
     pwi.extend(section_str)
     # Pseudopotentials
     pwi.extend(atomic_species_str)
-    # KPOINTS - add a MP grid as required
-    pwi.extend(build_kpts_str(atoms, kspacing, kpts, koffset))
     # CELL block, if required
     pwi.extend(build_cell_str(atoms, input_parameters))
     # Positions - already constructed, but must appear after namelist
     engine_str = pwi.copy()
     pwi.extend(build_atomic_positions_str(atoms, crystal_coordinates))
+    # KPOINTS - add a MP grid as required (after atomic positions)
+    pwi.extend(build_kpts_str(atoms, kspacing, kpts, koffset))
     # HUBBARD card (new format for QE >= 7.0)
     hubbard_str = build_hubbard_str(input_data, species_info, qe_version)
     if hubbard_str:
@@ -177,6 +177,9 @@ def build_section_str(atoms, species_info, input_data, input_parameters, qe_vers
     # and that repr converts to a QE readable representation (except bools)
     section_str = []
     for section in input_parameters:
+        # Skip empty sections (sections with no parameters)
+        if not input_parameters[section]:
+            continue
         section_str.append("&{0}\n".format(section.upper()))
         for key, value in input_parameters[section].items():
             if value is True:
@@ -260,6 +263,92 @@ def build_cell_str(atoms, input_parameters):
     return cell_str
 
 
+def _format_bandpath_kpoints_str(kgrid, atoms):
+    """Format BandPath object with only special points and segment counts.
+    
+    Converts a BandPath object into K_POINTS crystal_b format with only the
+    special points in the path and the number of points in each segment.
+    
+    Example output:
+        K_POINTS crystal_b
+        7
+        0.000000 0.000000 0.000000 10
+        0.500000 0.000000 0.500000 10
+        0.625000 0.250000 0.625000 1
+        0.375000 0.375000 0.750000 10
+        0.000000 0.000000 0.000000 10
+        0.500000 0.500000 0.500000 10
+        0.500000 0.250000 0.750000 0
+    """
+    from ase.dft.kpoints import parse_path_string
+    
+    assert hasattr(kgrid, "path") or "path" in kgrid
+    
+    # Convert BandPath to k-points array (all interpolated points)
+    kpts_array = kpts2ndarray(kgrid, atoms=atoms)
+    
+    # Extract special points information
+    if not (hasattr(kgrid, 'special_points') and hasattr(kgrid, 'path')):
+        # Fallback: just write all k-points
+        kpts_str = ["\nK_POINTS crystal_b\n"]
+        kpts_str.append("%s\n" % len(kpts_array))
+        for k in kpts_array:
+            kpts_str.append("{k[0]:.14f} {k[1]:.14f} {k[2]:.14f} 0\n".format(k=k))
+        kpts_str.append("\n")
+        return kpts_str
+    
+    special_points = kgrid.special_points
+    path_str = kgrid.path
+    
+    # Parse path to get sequence of special points (e.g., "GXU,KGLWX" → ['G','X','U','K','G','L','W','X'])
+    path_sequence = []
+    for seg in path_str.split(','):
+        parsed = parse_path_string(seg)
+        if parsed:
+            segment_labels = parsed[0]
+            if path_sequence and path_sequence[-1] == segment_labels[0]:
+                # Skip duplicate starting point for discontinuous segments
+                path_sequence.extend(segment_labels[1:])
+            else:
+                path_sequence.extend(segment_labels)
+    
+    # Find indices of special points in the interpolated k-points array
+    eps = 1e-5
+    path_point_indices = []  # List of indices in kpts_array for each special point
+    
+    for label in path_sequence:
+        if label not in special_points:
+            continue
+        coord = special_points[label]
+        # Find which k-point is closest to this special point
+        distances = np.linalg.norm(kpts_array - coord[np.newaxis, :], axis=1)
+        min_idx = np.argmin(distances)
+        if distances[min_idx] < eps:
+            path_point_indices.append(min_idx)
+    
+    # Build output with only special points and segment counts
+    kpts_str = ["\nK_POINTS crystal_b\n"]
+    kpts_str.append("%s\n" % len(path_point_indices))
+    
+    for i, idx in enumerate(path_point_indices):
+        k = kpts_array[idx]
+        label = path_sequence[i] if i < len(path_sequence) else ""
+        
+        # Arbitrary number of divisions per segment (10 points per segment is standard)
+        # Last point doesn't need divisions
+        if i < len(path_point_indices) - 1:
+            nsegments = 10
+            kpts_str.append("{k[0]:.14f} {k[1]:.14f} {k[2]:.14f} {nsegments:d} ! {label}\n".format(
+                k=k, nsegments=nsegments, label=label))
+        else:
+            # Last point: no nsegments needed
+            kpts_str.append("{k[0]:.14f} {k[1]:.14f} {k[2]:.14f} ! {label}\n".format(
+                k=k, label=label))
+    
+    kpts_str.append("\n")
+    return kpts_str
+
+
 def build_kpts_str(atoms, kspacing, kpts, koffset):
     """ """
     from ase.io.espresso import kspacing_to_grid
@@ -285,18 +374,21 @@ def build_kpts_str(atoms, kspacing, kpts, koffset):
 
     # BandPath object or bandpath-as-dictionary:
     if isinstance(kgrid, dict) or hasattr(kgrid, "kpts"):
-        kpts_str = ["K_POINTS crystal_b\n"]
-        assert hasattr(kgrid, "path") or "path" in kgrid
-        kgrid = kpts2ndarray(kgrid, atoms=atoms)
+        kpts_str = _format_bandpath_kpoints_str(kgrid, atoms)
+    elif isinstance(kgrid, np.ndarray) and kgrid.ndim == 2 and kgrid.shape[1] == 3:
+        # Explicit k-points list (array of shape (N, 3))
+        kpts_str = ["\nK_POINTS crystal\n"]
         kpts_str.append("%s\n" % len(kgrid))
+        # Weight for each k-point: 1/total_kpts (uniform distribution)
+        weight = 1.0 / len(kgrid)
         for k in kgrid:
-            kpts_str.append("{k[0]:.14f} {k[1]:.14f} {k[2]:.14f} 0\n".format(k=k))
+            kpts_str.append("{k[0]:.14f} {k[1]:.14f} {k[2]:.14f} {weight:.14f}\n".format(k=k, weight=weight))
         kpts_str.append("\n")
     elif isinstance(kgrid, str) and (kgrid == "gamma"):
-        kpts_str = ["K_POINTS gamma\n"]
+        kpts_str = ["\nK_POINTS gamma\n"]
         kpts_str.append("\n")
     else:
-        kpts_str = ["K_POINTS automatic\n"]
+        kpts_str = ["\nK_POINTS automatic\n"]
         kpts_str.append(
             "{0[0]} {0[1]} {0[2]}  {1[0]:d} {1[1]:d} {1[2]:d}\n"
             "".format(kgrid, koffset)

@@ -14,7 +14,7 @@ from ase import Atoms
 from ase.io import read
 from ase.io.espresso import kspacing_to_grid
 from xespresso import Espresso, kpts_from_spacing
-from xespresso.tools import setup_magnetic_config
+from xespresso.tools import setup_magnetic_config, read_structure
 from xespresso.machines import load_machine
 from xespresso.pseudopotentials import load_pseudopotentials_config
 from xespresso.codes import load_codes_config
@@ -595,7 +595,7 @@ class CalculationWorkflow:
         Returns:
             CalculationWorkflow: Initialized workflow object
         """
-        atoms = read(str(cif_file))
+        atoms = read_structure(str(cif_file), primitive=True, verbose=False)
         return cls(
             atoms,
             protocol=protocol,
@@ -1425,6 +1425,7 @@ class CalculationWorkflow:
     def run_scf(
         self,
         label: str = 'scf',
+        dry_run: bool = False,
         **calc_kwargs
     ) -> Espresso:
         """
@@ -1432,6 +1433,7 @@ class CalculationWorkflow:
         
         Args:
             label: Directory/label for the calculation
+            dry_run: If True, only generate input files without running (default False)
             **calc_kwargs: Additional parameters for the Espresso calculator
             
         Returns:
@@ -1473,6 +1475,13 @@ class CalculationWorkflow:
         calc = Espresso(**params)
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
+        
+        # Dry run: only generate input files (before any other checks)
+        if dry_run:
+            calc.write_input(self.atoms)
+            calc.atoms = self.atoms  # Ensure atoms are available for downstream steps
+            logger.info(f"DRY RUN: SCF input files generated in {label}/ (no execution)")
+            return calc
         
         # Check for previous calculation (load .asei if exists)
         needs_calculation = True
@@ -1556,6 +1565,8 @@ class CalculationWorkflow:
         nbnd: int = None,
         wf_collect: bool = True,
         npools: int = None,
+        dry_run: bool = False,
+        input_data: dict = None,
         **calc_kwargs
     ) -> Espresso:
         """
@@ -1574,6 +1585,7 @@ class CalculationWorkflow:
             wf_collect: If True, collect wavefunctions on each k-point (required for Wannier)
             npools: Number of k-point pools for parallelization (e.g., -npools 4)
                     Allows distributing k-points across processes
+            dry_run: If True, only generate input files without running (default False)
             **calc_kwargs: Additional Espresso calculator parameters
             
         Returns:
@@ -1597,13 +1609,17 @@ class CalculationWorkflow:
             os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
         
         # Prepare input_data (copy from preset)
-        input_data = self.input_data.copy()
+        nscf_input_data = self.input_data.copy()
+        
+        # Merge with additional input_data if provided (e.g., nosym, noinv from Wannier workflow)
+        if input_data is not None:
+            nscf_input_data.update(input_data)
         
         # NSCF-specific parameters
-        input_data['nbnd'] = nbnd  # Override with larger value for band structure
+        nscf_input_data['nbnd'] = nbnd  # Override with larger value for band structure
         
         if wf_collect:
-            input_data['wf_collect'] = True  # Collect wavefunctions for post-processing
+            nscf_input_data['wf_collect'] = True  # Collect wavefunctions for post-processing
         
         if npools is not None:
             # Note: -npools is a command-line argument, not in &control
@@ -1615,12 +1631,12 @@ class CalculationWorkflow:
             'pseudopotentials': self.pseudopotentials,
             'label': label,
             'calculation': 'nscf',
-            'input_data': input_data,
+            'input_data': nscf_input_data,
             'kpts': kpts,
         }
         
         # Add ecutwfc and ecutrho at top level
-        params['ecutwfc'] = input_data.get('ecutwfc', 50.0)
+        params['ecutwfc'] = nscf_input_data.get('ecutwfc', 50.0)
         # Always calculate ecutrho dynamically based on current ecutwfc and pseudo type
         ratio = self._get_ecutrho_ratio_for_pseudos()
         params['ecutrho'] = params['ecutwfc'] * ratio
@@ -1641,6 +1657,13 @@ class CalculationWorkflow:
         calc = Espresso(**params)
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
+        
+        # Dry run: only generate input files (before any other checks)
+        if dry_run:
+            calc.write_input(self.atoms)
+            calc.atoms = self.atoms  # Ensure atoms are available for downstream steps
+            logger.info(f"DRY RUN: NSCF input files generated in {label}/ (no execution)")
+            return calc
         
         # Check for previous calculation (load .asei if exists)
         needs_calculation = True
@@ -1720,6 +1743,7 @@ class CalculationWorkflow:
         degauss: Optional[float] = None,
         ngauss: int = 0,
         pdos: bool = False,
+        dry_run: bool = False,
     ):
         """
         Run Density of States (DOS) calculation with spin polarization support.
@@ -1742,6 +1766,7 @@ class CalculationWorkflow:
             degauss: Gaussian broadening (eV). If None, uses preset value
             ngauss: Gaussian broadening type (0=cold, 1=Fermi-Dirac). Default 0
             pdos: If True, compute local/projected DOS by atomic site (not orbital)
+            dry_run: If True, only generate input files without running (default False)
             
         Returns:
             EspressoDos: Post-processing calculator with DOS results
@@ -1855,6 +1880,12 @@ class CalculationWorkflow:
             **dos_params
         )
         
+        # Dry run: only generate input files (before execution)
+        if dry_run:
+            dos_calc.write_input()
+            logger.info(f"DRY RUN: DOS input files generated (no execution)")
+            return dos_calc
+        
         # Execute DOS calculation
         dos_calc.run()
         
@@ -1878,6 +1909,7 @@ class CalculationWorkflow:
         label: str = 'bands',
         bandpath_type: str = 'auto',
         mode: str = 'explicit',
+        dry_run: bool = False,
         **calc_kwargs
     ):
         """
@@ -1895,6 +1927,7 @@ class CalculationWorkflow:
             mode: Calculation mode:
                 - 'explicit': Calculate at explicit k-points along path (default)
                 - 'interpolated': Interpolate from NSCF (not yet implemented)
+            dry_run: If True, only generate input files without running (default False)
             **calc_kwargs: Additional parameters for the calculator
             
         Returns:
@@ -1925,7 +1958,7 @@ class CalculationWorkflow:
             ... except:
             ...     print("Use xespresso plotting utilities")
         """
-                logger.info(f"Starting band structure calculation...")
+        logger.info(f"Starting band structure calculation...")
         
         # Generate band path from crystal symmetry using seekpath for standardization
         if bandpath_type == 'auto':
@@ -1981,6 +2014,13 @@ class CalculationWorkflow:
         calc = Espresso(**params)
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
+        
+        # Dry run: only generate input files (before any other checks)
+        if dry_run:
+            calc.write_input(self.atoms)
+            calc.atoms = self.atoms  # Ensure atoms are available for downstream steps
+            logger.info(f"DRY RUN: Band structure input files generated in {label}/ (no execution)")
+            return calc
         
         # Check for previous calculation (load .asei if exists)
         needs_calculation = True
@@ -2083,6 +2123,7 @@ class CalculationWorkflow:
         pawproj: int = 0,
         filpdos: Optional[str] = None,
         lowdin: bool = False,
+        dry_run: bool = False,
     ):
         """
         Run Projections on Atomic Wavefunctions (PROJWFC) post-processing.
@@ -2254,6 +2295,12 @@ class CalculationWorkflow:
             **projwfc_params
         )
         
+        # Dry run: only generate input files (before execution)
+        if dry_run:
+            projwfc_calc.write_input()
+            logger.info(f"DRY RUN: PROJWFC input files generated in {projwfc_label}/ (no execution)")
+            return projwfc_calc
+        
         # Execute PROJWFC calculation
         projwfc_calc.run()
         
@@ -2298,6 +2345,7 @@ class CalculationWorkflow:
         label: str = 'relax',
         relax_type: str = 'relax',
         wait_for_completion: Optional[bool] = None,
+        dry_run: bool = False,
         **calc_kwargs
     ) -> Espresso:
         """
@@ -2308,6 +2356,7 @@ class CalculationWorkflow:
             relax_type: Type of relaxation: 'relax' (ions only) or 'vc-relax' (ions + cell)
             wait_for_completion: If True, block until relaxation completes (default: uses self.queue setting)
                 If False, submit and return immediately (useful for parallel batch submission)
+            dry_run: If True, only generate input files without running (default False)
             **calc_kwargs: Additional parameters for the Espresso calculator
             
         Returns:
@@ -2354,6 +2403,13 @@ class CalculationWorkflow:
         calc = Espresso(**params)
         self.atoms.calc = calc
         self.last_calc = calc  # Track last calculator for monitoring
+        
+        # Dry run: only generate input files (before any other checks)
+        if dry_run:
+            calc.write_input(self.atoms)
+            calc.atoms = self.atoms  # Ensure atoms are available for downstream steps
+            logger.info(f"DRY RUN: Relaxation input files generated in {label}/ (no execution)")
+            return calc
         
         # Check for previous calculation (load .asei if exists)
         needs_calculation = True

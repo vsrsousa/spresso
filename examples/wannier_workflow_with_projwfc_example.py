@@ -50,7 +50,7 @@ QUEUE = {
 print("Initializing Wannier Workflow with PROJWFC analysis...")
 workflow = WannierWorkflow(
     cif_file=CIF_FILE,
-    pseudos=PSEUDOS,
+    pseudopotentials=PSEUDOS,
     protocol="moderate",  # fast, moderate, accurate
     num_wann=NUM_WANN,
     projections=PROJECTIONS,

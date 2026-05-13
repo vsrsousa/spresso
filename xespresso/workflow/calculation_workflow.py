@@ -1925,22 +1925,24 @@ class CalculationWorkflow:
             ... except:
             ...     print("Use xespresso plotting utilities")
         """
-        logger.info(f"Starting band structure calculation...")
+                logger.info(f"Starting band structure calculation...")
         
-        # Generate band path from crystal symmetry
+        # Generate band path from crystal symmetry using seekpath for standardization
         if bandpath_type == 'auto':
-            bandpath = self.atoms.cell.bandpath()
-            logger.info(f"Auto-generated band path from crystal symmetry:")
-            logger.info(f"  Path: {bandpath.path}")
+            from xespresso.utils.bandpath import get_bandpath
+            
+            # Use seekpath for standardized band path (hardcoded definitions)
+            bandpath = get_bandpath(self.atoms, with_time_reversal=True)
+            
+            logger.info(f"SeekPath band path: {bandpath.path}")
             logger.info(f"  High-symmetry points: {list(bandpath.special_points.keys())}")
-            logger.info(f"  Total k-points: {len(bandpath.kpts)}")
+            logger.info(f"  Path string: {bandpath.path}")
             kpts = bandpath
         else:
             raise NotImplementedError(
                 f"bandpath_type='{bandpath_type}' not yet implemented. "
                 f"Use 'auto' for automatic generation from cell symmetry."
-            )
-        
+            )        
         # Set ESPRESSO_PSEUDO if we have pseudopotentials_config
         if self.pseudopotentials_base_path:
             os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path

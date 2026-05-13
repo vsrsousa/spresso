@@ -1,7 +1,0 @@
-&PROJWFC
-  filpdos         = "Fe_bcc.pdos"
-  filproj         = "Fe_bcc.projwfc"
-  filowdin        = "lowdin.txt"
-  prefix          = "Fe_bcc"
-  outdir          = "../01-scf/"
-/ 

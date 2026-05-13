@@ -1,8 +1,0 @@
-#!/bin/bash
-
-
-
-# Wannier workflow for spin component: up
-wannier90.x -pp wannier_up
-pw2wannier90.x -in Fe_bcc_up.pw2wannier90i > Fe_bcc_up.pw2wannier90o
-wannier90.x wannier_up

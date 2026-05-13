@@ -899,20 +899,46 @@ class Espresso(FileIOCalculator):
 
     def clean(self):
         """
-        remove wfc, hub files
+        Remove wfc, hub files and other temporary data to keep only charge density.
+        
+        Removes:
+        - .wfc, .hub files from working directory
+        - wfc*.dat files from *.save/ directory (wavefunctions)
+        - .mix, .scf temporary files
+        
+        Keeps:
+        - data-file-schema.xml (charge density and structure info)
+        - K-points and other metadata needed for subsequent calculations
         """
-        keys = [".wfc", ".hub"]
-        files = os.listdir(self.directory)
-        for file in files:
-            for key in keys:
-                if key in file:
-                    os.remove(os.path.join(self.directory, file))
-        files = os.listdir(self.save_directory)
-        # keys = ['wfc']
-        # for file in files:
-        #     for key in keys:
-        #         if key in file:
-        #             os.remove(os.path.join(self.save_directory, file))
+        # Clean main working directory
+        keys_to_remove = [".wfc", ".hub", ".mix", ".scf"]
+        if os.path.exists(self.directory):
+            files = os.listdir(self.directory)
+            for file in files:
+                for key in keys_to_remove:
+                    if key in file:
+                        filepath = os.path.join(self.directory, file)
+                        try:
+                            if os.path.isfile(filepath):
+                                os.remove(filepath)
+                        except OSError as e:
+                            logger.debug(f"Could not remove {filepath}: {e}")
+        
+        # Clean save_directory (prefix.save/) - remove wavefunction files
+        if os.path.exists(self.save_directory):
+            files = os.listdir(self.save_directory)
+            for file in files:
+                # Remove files starting with 'wfc' (wavefunctions)
+                if file.startswith('wfc'):
+                    filepath = os.path.join(self.save_directory, file)
+                    try:
+                        if os.path.isfile(filepath):
+                            os.remove(filepath)
+                        elif os.path.isdir(filepath):
+                            import shutil
+                            shutil.rmtree(filepath)
+                    except OSError as e:
+                        logger.debug(f"Could not remove {filepath}: {e}")
 
     def get_fermi_level(self):
         # If a real parsed calculation is attached, delegate; otherwise use

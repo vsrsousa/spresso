@@ -1,0 +1,7 @@
+&inputpp
+  prefix          = "Fe_bcc"
+  outdir          = "../"
+  seedname        = "wannier_dn"
+  spin_component  = "down"
+  atom_proj       = .true.
+/ 

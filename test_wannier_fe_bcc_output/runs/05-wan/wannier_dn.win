@@ -1,0 +1,16 @@
+num_wann = 16
+
+begin projections
+  Fe: d
+end projections
+
+dis_num_iter = 1000
+dis_froz_max = 8.0
+
+# Default bands and parameters
+exclude_bands = 
+iprint = 2
+restart = default
+wvfn_formatted = .false.
+dis_mix_ratio = 0.5
+kmesh_tol = 0.0000001

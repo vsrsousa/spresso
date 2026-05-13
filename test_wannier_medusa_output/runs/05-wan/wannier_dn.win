@@ -1,0 +1,16 @@
+num_wann = 16
+
+begin projections
+  Ac: p; Ag: p; Al: p; Am: p; Ar: p; As: p; At: p; Au: p; Ba: p; Bi: p; Bk: p; C: p; Ca: p; Cd: p; Ce: p; Cf: p; Cm: p; Co: p; Cs: p; Cu: p; Dy: p; Er: p; Es: p; Eu: p; Fe: p; Fm: p; Fr: p; Ga: p; Gd: p; H: p; He: p; Hf: p; Hg: p; Ho: p; I: p; In: p; Ir: p; K: p; Kr: p; La: p; Lr: p; Lu: p; Md: p; Mg: p; Mo: p; N: p; Nb: p; Nd: p; Ne: p; No: p; Np: p; O: p; Os: p; P: p; Pa: p; Pb: p; Pd: p; Pm: p; Po: p; Pr: p; Pu: p; Ra: p; Rb: p; Re: p; Rh: p; Rn: p; Ru: p; Sc: p; Se: p; Si: p; Sm: p; Sn: p; Sr: p; Ta: p; Tb: p; Tc: p; Te: p; Th: p; Tl: p; Tm: p; U: p; W: p; Xe: p; Y: p; Yb: p; Zn: p; Zr: p; B: p; Be: p; Br: p; Cl: p; Cr: p; F: p; Ge: p; Li: p; Mn: p; Na: p; Ni: p; Pt: p; S: p; Sb: p; Ti: p; V: p
+end projections
+
+dis_num_iter = 1000
+dis_froz_max = 8.0
+
+# Default bands and parameters
+exclude_bands = 
+iprint = 2
+restart = default
+wvfn_formatted = .false.
+dis_mix_ratio = 0.5
+kmesh_tol = 0.0000001

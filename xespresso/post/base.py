@@ -3,30 +3,53 @@ from ase.calculators.calculator import FileIOCalculator, CalculationFailed
 from xespresso.xio import read_espresso_asei, write_espresso_asei
 import copy
 import logging
+from types import SimpleNamespace
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class PostCalculation:
+    """Base class for Quantum ESPRESSO post-processing tools (dos, projwfc, bands, pp, etc).
+    
+    Features:
+    - Auto-generates input files based on package_parameters
+    - Supports dry_run mode (generate inputs without execution)
+    - Scheduler-based execution (local/remote)
+    - Returns serializable Dict for workflow integration
+    - Compatible with ASE calculator pattern via return self
+    
+    Subclasses (EspressoDos, EspressoProjwfc, etc) should define:
+        package: str - tool name ('dos', 'projwfc', 'bands', 'pp', etc)
+        package_parameters: Dict - parameter definitions for write_package_input()
+    """
 
     package = "dos"
     package_parameters = {}
 
     def __init__(
-        self, parent_directory, prefix, queue=False, parallel="", debug=False, **kwargs
+        self, parent_directory, prefix, queue=False, parallel="", debug=False, dry_run=False, directory=None, **kwargs
     ) -> None:
         if debug:
             logger.setLevel(debug)
         self.parent_directory = parent_directory
-        self.prefix = prefix
+        self.prefix = prefix  # Used for files, command, and parameters - follows scheduler logic (like Espresso)
         self.queue = queue
         self.parallel = parallel
+        self.debug = debug
+        self.dry_run = dry_run  # Support dry_run mode
         self.parameters = kwargs
-        self.directory = os.path.join(self.parent_directory, "%s/" % self.package)
+        # Use explicit directory if provided, otherwise compute from parent_directory
+        if directory is not None:
+            self.directory = directory
+        else:
+            self.directory = os.path.join(self.parent_directory, "%s/" % self.package)
         self.set_label(self.directory, self.prefix)
         self.parameters["prefix"] = self.prefix
         self.parameters["outdir"] = "../"
         self.state_info = None
+        self.results = {}  # For storing calculation results
+        self.scheduler = None  # For scheduler-based execution
 
     def set_label(self, label, prefix):
         """Set directory and prefix from label"""
@@ -42,20 +65,109 @@ class PostCalculation:
         self.asei_temp = os.path.join(self.directory, ".%s.asei_temp" % self.prefix)
         self.post_asei = os.path.join(self.directory, "%s.post_asei" % self.prefix)
         self.save_directory = os.path.join(self.directory, "%s.save" % self.prefix)
+        self._command = None  # For storing scheduler-provided command via setter
         logger.debug("Directory: %s" % (self.directory))
         logger.debug("Prefix: %s" % (self.prefix))
 
-    def run(self):
-        """todo:"""
-        from xespresso.scheduler import set_queue
+    @property
+    def command(self) -> str:
+        """Generate command string for post-processing tool execution.
+        
+        Returns:
+            str: Command like 'dos.x -in prefix.dosi' or 'projwfc.x -in prefix.projwfci'
+        """
+        # Return stored command if set by scheduler, otherwise generate default
+        if self._command is not None:
+            return self._command
+        return f"{self.package}.x -in {self.prefix}.{self.package}i"
+    
+    @command.setter
+    def command(self, value: str):
+        """Set the command string (used by scheduler)."""
+        self._command = value
+
+    def run(self, dry_run: Optional[bool] = None, blocking: bool = True) -> Dict:
+        """Execute post-processing calculation, following Espresso.run() pattern.
+        
+        Parameters:
+            dry_run: If True, only generate input files without execution (default: self.dry_run)
+            blocking: If True, wait for job to complete (default: True)
+            
+        Returns:
+            Dict: Serializable result dict with keys:
+                  - status: 'input_files_generated', 'finished', 'submitted', 'error'
+                  - run_dir: directory where files were created
+                  - outputs: dict of output file paths (if finished)
+                  - job_id: job identifier (if submitted remotely)
+                  - message: status message
+                  Also returns 'self' for backwards compatibility with ASE calculator pattern
+        """
+        if dry_run is None:
+            dry_run = self.dry_run
 
         print("{0:=^60}".format(self.package))
-        if self.check_state() == 0:
-            return
+        
+        # Check state and potentially skip if unchanged
+        state_check = self.check_state()
+        if state_check == 0 and not dry_run:
+            logger.info(f"Skipping {self.package} (no state changes)")
+            return {"status": "skipped", "run_dir": self.directory, "message": "No changes detected"}
+        
+        # Generate input files AND job script (via write_input → set_queue)
         self.write_input()
-        set_queue(self, package=self.package, parallel=self.parallel, queue=self.queue)
-        self.post_calculate()
-        self.post_read_results()
+        logger.info(f"{self.package} input files generated in {self.directory}")
+        
+        # Dry run: return early after generating inputs (but job_file was already created in write_input)
+        if dry_run:
+            input_file = os.path.join(self.directory, f"{self.prefix}.{self.package}i")
+            return {
+                "status": "input_files_generated",
+                "run_dir": self.directory,
+                "message": f"{self.package} input files generated (dry_run mode)",
+                "input_file": input_file if os.path.exists(input_file) else None,
+            }
+        
+        # Non-dry-run: execute the calculation (scheduler already created in write_input)
+        try:
+            # Scheduler was already initialized in write_input via set_queue
+            self.scheduler.run()
+            
+            job_id = getattr(self.scheduler, 'last_job_id', None)
+            
+            # Read convergence/completion status from output file
+            success, message = self.read_convergence_post(package=self.package)
+            
+            if success or not blocking:
+                # Call post-processing to read results
+                self.post_read_results()
+                
+                return {
+                    "status": "finished" if success else "submitted",
+                    "run_dir": self.directory,
+                    "job_id": job_id,
+                    "message": f"{self.package} calculation completed" if success else f"{self.package} submitted",
+                    "outputs": self.results.get('outputs', {}),
+                }
+            else:
+                # Job ran but may not have completed
+                logger.warning(f"{self.package} may not have completed: {message}")
+                return {
+                    "status": "warning",
+                    "run_dir": self.directory,
+                    "job_id": job_id,
+                    "message": str(message),
+                    "outputs": self.results.get('outputs', {}),
+                }
+            
+        except Exception as e:
+            logger.error(f"{self.package} execution failed: {e}")
+            return {
+                "status": "error",
+                "run_dir": self.directory,
+                "message": str(e),
+            }
+        finally:
+            print("Done: %s" % self.package)
 
     def check_state(self):
         from xespresso.utils import get_hash
@@ -91,11 +203,27 @@ class PostCalculation:
             return False
 
     def write_input(self):
+        from xespresso.scheduler import set_queue
+        
         self.write_package_input()
         write_espresso_asei(self.post_asei, self.state_info, self.parameters)
+        
+        # Generate job script (same as Espresso.write_input does via set_queue)
+        # This ensures job_file is created for both dry_run and actual execution
+        set_queue(self)
+    
+    def get_defaults(self) -> Dict:
+        """Get default values for this package. Subclasses should override.
+        
+        Returns:
+            Dict: Mapping of parameter names to their default values
+                  Only parameters in this dict will be excluded from input file if they match defaults
+        """
+        return {}
 
     def write_package_input(self):
         filename = os.path.join(self.directory, "%s.%si" % (self.prefix, self.package))
+        defaults = self.get_defaults()
         with open(filename, "w") as f:
             for section, parameters in self.package_parameters.items():
                 logger.debug(f"section: {section}")
@@ -103,6 +231,11 @@ class PostCalculation:
                     f.write("&%s\n" % section)
                     for key, value in self.parameters.items():
                         if key in parameters:
+                            # Skip parameters that match their default value
+                            if key in defaults and defaults[key] == value:
+                                logger.debug(f"Skipping {key} (matches default: {defaults[key]})")
+                                continue
+                            
                             logger.debug(f"key: {key}")
                             if isinstance(value, dict):
                                 for subkey, subvalue in value.items():
@@ -128,6 +261,12 @@ class PostCalculation:
                             f.write("  %s \n" % (value))
 
     def post_calculate(self):
+        """Execute calculation using scheduler.
+        
+        Deprecated: Use run() method instead which handles scheduler integration.
+        Kept for backwards compatibility.
+        """
+        logger.warning("post_calculate() is deprecated, use run() instead")
         import subprocess
 
         command = self.command

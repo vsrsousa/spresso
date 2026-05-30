@@ -1,0 +1,6 @@
+&inputpp
+  prefix          = "Si"
+  outdir          = "../"
+  seedname        = "wannier"
+  atom_proj       = .true.
+/ 

@@ -1,0 +1,7 @@
+&PROJWFC
+  filpdos         = "Si.pdos"
+  filproj         = "Si.projwfc"
+  filowdin        = "lowdin.txt"
+  prefix          = "Si"
+  outdir          = "../01-scf/"
+/ 

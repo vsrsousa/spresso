@@ -158,6 +158,14 @@ class CalculationWorkflow:
         self.expand_cell = expand_cell
         self.pseudopotentials_base_path = None  # Will be set if loading from config
         self._pseudo_config = None  # Will store config object if loaded from config
+        self.machine = machine  # Store machine name for later reference
+        self.code_version = code_version  # Store code version for later reference
+        
+        # Add machine and code_version to extra_kwargs so they're propagated to Espresso
+        if machine is not None:
+            self.extra_kwargs['machine'] = machine
+        if code_version is not None:
+            self.extra_kwargs['code_version'] = code_version
         
         # Handle pseudopotentials: either config name or explicit dict (config takes precedence)
         if pseudopotentials_config is not None:
@@ -1171,6 +1179,8 @@ class CalculationWorkflow:
                     kspacing=params.get('kspacing', self.preset.get('kspacing')),
                     input_data=input_data_override,
                     queue=self.queue,
+                    machine=self.machine,
+                    code_version=self.code_version,
                     **self.extra_kwargs
                 )
                 
@@ -1347,32 +1357,53 @@ class CalculationWorkflow:
                     else:
                         # SLURM scheduler
                         if not stdout.strip():
-                            # Job completed, check final status with sacct
+                            # Job NOT in queue anymore - check final status with sacct
+                            logger.debug(f"Job {job_id} not in queue, checking final status with sacct...")
                             stdout_sacct, _ = remote_conn.run_command(
                                 f"sacct -j {job_id} --format=State -n -P"
                             )
                             
-                            lines = stdout_sacct.strip().split('\n') if stdout_sacct.strip() else []
-                            state = lines[-1].split('|')[0].strip() if lines else 'UNKNOWN'
+                            if not stdout_sacct.strip():
+                                logger.warning(f"Job {job_id} not found in sacct either")
+                                state = 'UNKNOWN'
+                            else:
+                                lines = stdout_sacct.strip().split('\n')
+                                state = lines[-1].split('|')[0].strip() if lines else 'UNKNOWN'
+                            
+                            logger.debug(f"Job {job_id} final state: {state}")
                             success = state == 'COMPLETED'
                             
-                            # Try to retrieve output and extract energy
+                            # Try to retrieve output and extract energy (only if job succeeded)
                             energy = None
-                            try:
-                                output_file = f"{calc.prefix}.{calc.package}o"
-                                remote_path = getattr(calc, 'last_remote_path', None)
-                                if remote_path:
-                                    remote_output = f"{remote_path}/{output_file}"
-                                    local_output = os.path.join(calc.directory, output_file)
-                                    remote_conn.retrieve_file(remote_output, local_output)
-                                    
-                                    if hasattr(calc, 'read_results'):
-                                        calc.read_results()
-                                        energy = calc.results.get('energy')
-                            except Exception as e:
-                                logger.debug(f"Could not retrieve results for {label}: {e}")
+                            if success:
+                                try:
+                                    output_file = f"{calc.prefix}.{calc.package}o"
+                                    remote_path = getattr(calc, 'last_remote_path', None)
+                                    if remote_path:
+                                        remote_output = f"{remote_path}/{output_file}"
+                                        local_output = os.path.join(calc.directory, output_file)
+                                        remote_conn.retrieve_file(remote_output, local_output)
+                                        
+                                        if hasattr(calc, 'read_results'):
+                                            try:
+                                                calc.read_results()
+                                                energy = calc.results.get('energy')
+                                                if energy is None:
+                                                    logger.debug(f"Energy not found in results for {label}")
+                                            except Exception as read_err:
+                                                logger.debug(f"Error reading results for {label}: {read_err}")
+                                        else:
+                                            logger.debug(f"Calculator doesn't have read_results method for {label}")
+                                except Exception as e:
+                                    logger.debug(f"Could not retrieve results for {label}: {e}")
+                            else:
+                                logger.debug(f"Skipping retrieval (state={state}, success=False)")
                             
                             idx = job_info['idx']
+                            error_msg = None
+                            if not success:
+                                error_msg = f"Job failed with state: {state}"
+                            
                             results[idx] = {
                                 'label': label,
                                 'job_id': job_id,
@@ -1380,6 +1411,7 @@ class CalculationWorkflow:
                                 'success': success,
                                 'state': state,
                                 'energy': energy,
+                                'error': error_msg,
                             }
                             
                             jobs_to_remove.append(job_id)
@@ -1389,10 +1421,11 @@ class CalculationWorkflow:
                                 print(f"  {status} {label}: {state}")
                         else:
                             # Still in queue, not finished yet
+                            logger.debug(f"Job {job_id} ({label}) still in queue")
                             continue
                 
                 except Exception as e:
-                    logger.warning(f"Error checking status for {label}: {e}")
+                    logger.warning(f"Error checking status for {label} (job_id={job_id}): {e}", exc_info=True)
             
             # Remove completed jobs
             for job_id in jobs_to_remove:

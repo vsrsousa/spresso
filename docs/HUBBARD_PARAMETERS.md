@@ -296,6 +296,177 @@ input_data["hubbard"]["u"] = {
 }
 ```
 
+## J and J0 Parameters: Exchange Interactions
+
+### Overview
+
+In addition to the on-site Coulomb repulsion (U parameter), Quantum ESPRESSO supports exchange interaction parameters:
+
+- **J (exchange parameter)**: Used with `lda_plus_u_kind = 2` for rotationally invariant DFT+U
+  - Typically: J ≈ U / 10 to U / 13
+  - Affects inter-orbital interactions
+
+- **J0 (alternative exchange formulation)**: New format in QE 7.x+
+  - May be simpler or use different parameterization than J
+  - Use one or the other, not both
+
+### Using J and J0 in xespresso
+
+#### Simple J Example (New Format)
+
+```python
+from xespresso.tools import setup_magnetic_config
+
+config = setup_magnetic_config(
+    atoms,
+    magnetic_config={
+        'Fe': {
+            'mag': [1, -1],           # AFM configuration
+            'U': {'3d': 4.3},         # Hubbard U
+            'J': {'3d': 0.4}          # Exchange parameter (NEW!)
+        }
+    },
+    qe_version='7.2'
+)
+
+# Generates HUBBARD card:
+# HUBBARD {ortho-atomic}
+#   U Fe1-3d 4.3
+#   U Fe2-3d 4.3
+#   J Fe1-3d 0.4
+#   J Fe2-3d 0.4
+```
+
+#### Using J0 as Alternative
+
+```python
+config = setup_magnetic_config(
+    atoms,
+    magnetic_config={
+        'Fe': {
+            'mag': [1, -1],
+            'U': {'3d': 4.3},
+            'J0': {'3d': 0.4}         # Alternative to J
+        }
+    },
+    qe_version='7.2'
+)
+```
+
+#### Different J per Species
+
+```python
+config = setup_magnetic_config(
+    atoms,
+    magnetic_config={
+        'Fe': {
+            'mag': [1, -1],
+            'U': {'3d': [4.3, 4.5]},   # Different U per species
+            'J': {'3d': [0.4, 0.45]}   # Different J per species
+        }
+    },
+    qe_version='7.2'
+)
+
+# Generates:
+#   U Fe1-3d 4.3
+#   J Fe1-3d 0.4
+#   U Fe2-3d 4.5
+#   J Fe2-3d 0.45
+```
+
+#### Old Format (QE < 7.0)
+
+```python
+config = setup_magnetic_config(
+    atoms,
+    magnetic_config={
+        'Fe': {
+            'mag': [1, -1],
+            'U': 4.3,      # Scalar (old format)
+            'J': 0.4       # Scalar (old format)
+        }
+    },
+    hubbard_format='old'
+)
+
+# Generates in SYSTEM namelist:
+#   Hubbard_U(1) = 4.3
+#   Hubbard_J(1) = 0.4
+```
+
+### Complex Example: U + V + J
+
+```python
+config = setup_magnetic_config(
+    atoms,
+    magnetic_config={
+        'Fe': {
+            'mag': [1, -1],
+            'U': {'3d': 4.3},
+            'J': {'3d': 0.4},          # Exchange parameter
+            'V': [                      # Inter-site interactions
+                {
+                    'species2': 'O',
+                    'orbital1': '3d',
+                    'orbital2': '2p',
+                    'value': 1.0
+                }
+            ]
+        },
+        'O': {'mag': [0]}
+    },
+    qe_version='7.2'
+)
+
+# Generates:
+# HUBBARD {ortho-atomic}
+#   U Fe1-3d 4.3
+#   U Fe2-3d 4.3
+#   J Fe1-3d 0.4
+#   J Fe2-3d 0.4
+#   V Fe1-3d O-2p 1 1 1.0
+#   V Fe2-3d O-2p 1 1 1.0
+```
+
+### Format Support
+
+| Feature | New Format (QE 7.x) | Old Format (QE < 7) |
+|---------|---|---|
+| J parameter | ✅ | ✅ |
+| J0 parameter | ✅ | ❌ |
+| Orbital specification | ✅ Required | ❌ |
+| Multiple J per species | ✅ | ✅ (limited) |
+| Integration with U+V | ✅ | ✅ |
+
+### J Parameter Guidelines
+
+1. **When to use J**:
+   - DFT+U calculations with `lda_plus_u_kind = 2`
+   - When you need rotationally invariant formulation
+   - Transition metals and lanthanides
+
+2. **Recommended J/U ratios**:
+   - Transition metals: J ≈ U / 10 to U / 13
+   - Lanthanides: J ≈ U / 10 to U / 12
+   - Start conservative, adjust based on results
+
+3. **J vs J0**:
+   - J: Standard exchange parameter
+   - J0: Simplified alternative in newer QE versions
+   - Choose one based on your QE version and needs
+
+### Common Issues
+
+**Q: Can I use both J and J0?**
+A: No, they are mutually exclusive. QE will error if both are specified.
+
+**Q: Why is J parameter not showing in the output?**
+A: Check that `lda_plus_u = .true.` is set in your input.
+
+**Q: Old format doesn't recognize J0?**
+A: J0 is only available in new format (QE 7.x+). Use `qe_version='7.1'` or later and new format.
+
 ## References
 
 - [QE 7.0 Release Notes](https://www.quantum-espresso.org)

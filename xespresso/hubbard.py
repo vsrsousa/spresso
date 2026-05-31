@@ -112,7 +112,8 @@ class HubbardConfig:
         # Parameters storage
         self.u_params = {}  # {species-orbital: value} or {species: value} for old format
         self.v_params = []  # [(species1-orbital1, species2-orbital2, i, j, value)] or old format
-        self.j_params = {}
+        self.j_params = {}  # {species-orbital: value} or {species: value} for both formats
+        self.j0_params = {}  # {species-orbital: value} - alternative to J (new format)
         self.alpha_params = {}
         self.beta_params = {}
     
@@ -154,9 +155,19 @@ class HubbardConfig:
             # Old format - store as tuple
             self.v_params.append((species1, species2, i, j, value))
     
-    def add_j(self, species: str, value: float, ityp: Optional[int] = None):
-        """Add J parameter (old format only)."""
-        if ityp:
+    def add_j(self, species: str, value: float, orbital: Optional[str] = None, ityp: Optional[int] = None):
+        """
+        Add a J parameter (exchange interaction).
+        
+        Args:
+            species: Species name (e.g., 'Fe1', 'Mn')
+            value: J value in eV
+            orbital: Orbital specification for new format (e.g., '3d', '4f')
+            ityp: (deprecated) For old format compatibility
+        """
+        if orbital and self.use_new_format is not False:
+            key = f"{species}-{orbital}"
+        elif ityp:
             key = (species, ityp)
         else:
             key = species
@@ -169,6 +180,23 @@ class HubbardConfig:
     def add_beta(self, species: str, value: float):
         """Add beta parameter (old format only)."""
         self.beta_params[species] = value
+    
+    def add_j0(self, species: str, value: float, orbital: Optional[str] = None):
+        """
+        Add a J0 parameter (alternative exchange formulation, new format).
+        
+        Note: J0 and J are typically mutually exclusive. Use one or the other.
+        
+        Args:
+            species: Species name (e.g., 'Fe1', 'Mn')
+            value: J0 value in eV
+            orbital: Orbital specification (e.g., '3d', '4f')
+        """
+        if orbital and self.use_new_format is not False:
+            key = f"{species}-{orbital}"
+        else:
+            key = species
+        self.j0_params[key] = value
     
     def should_use_new_format(self) -> bool:
         """
@@ -222,11 +250,27 @@ class HubbardConfig:
                 # In practice, you'd need to map to actual atom indices
                 params[f'Hubbard_V({i},{j},1)'] = value
         
-        # J parameters
-        for (species, ityp), value in self.j_params.items():
-            if species in species_info:
-                idx = species_info[species]['index']
-                params[f'Hubbard_J({ityp},{idx})'] = value
+        # J parameters - now handles both old and new format keys
+        for key, value in self.j_params.items():
+            if isinstance(key, tuple):
+                # Old format: (species, ityp)
+                species, ityp = key
+                if species in species_info:
+                    idx = species_info[species]['index']
+                    params[f'Hubbard_J({ityp},{idx})'] = value
+            else:
+                # New format key: 'species-orbital' or 'species'
+                species_base = key.split('-')[0]
+                if species_base in species_info:
+                    idx = species_info[species_base]['index']
+                    params[f'Hubbard_J({idx})'] = value
+        
+        # J0 parameters - typically new format, but include if present
+        for key, value in self.j0_params.items():
+            species_base = key.split('-')[0]
+            if species_base in species_info:
+                idx = species_info[species_base]['index']
+                params[f'Hubbard_J0({idx})'] = value
         
         # Alpha parameters
         for species, value in self.alpha_params.items():
@@ -276,6 +320,24 @@ class HubbardConfig:
                     spec2_orb = f"{spec2_orb}-{_get_default_orbital(spec2_orb)}"
                 
                 lines.append(f"  V {spec1_orb} {spec2_orb} {i} {j} {value}\n")
+        
+        # J parameters
+        for species_orbital, value in self.j_params.items():
+            # If species_orbital doesn't have '-', add default orbital
+            if '-' not in species_orbital:
+                default_orb = _get_default_orbital(species_orbital)
+                species_orbital = f"{species_orbital}-{default_orb}"
+            
+            lines.append(f"  J {species_orbital} {value}\n")
+        
+        # J0 parameters
+        for species_orbital, value in self.j0_params.items():
+            # If species_orbital doesn't have '-', add default orbital
+            if '-' not in species_orbital:
+                default_orb = _get_default_orbital(species_orbital)
+                species_orbital = f"{species_orbital}-{default_orb}"
+            
+            lines.append(f"  J0 {species_orbital} {value}\n")
         
         return lines
     
@@ -327,6 +389,24 @@ class HubbardConfig:
                     else:
                         config.add_u(spec_orb, value)
             
+            # J parameters (NEW format)
+            if 'j' in hubbard_data:
+                for spec_orb, value in hubbard_data['j'].items():
+                    parts = spec_orb.split('-')
+                    if len(parts) == 2:
+                        config.add_j(parts[0], value, parts[1])
+                    else:
+                        config.add_j(spec_orb, value)
+            
+            # J0 parameters (NEW format)
+            if 'j0' in hubbard_data:
+                for spec_orb, value in hubbard_data['j0'].items():
+                    parts = spec_orb.split('-')
+                    if len(parts) == 2:
+                        config.add_j0(parts[0], value, parts[1])
+                    else:
+                        config.add_j0(spec_orb, value)
+            
             # V parameters
             if 'v' in hubbard_data:
                 for v_spec in hubbard_data['v']:
@@ -351,6 +431,10 @@ class HubbardConfig:
             if 'Hubbard_J' in input_ntyp:
                 for species, value in input_ntyp['Hubbard_J'].items():
                     config.add_j(species, value)
+            
+            if 'Hubbard_J0' in input_ntyp:
+                for species, value in input_ntyp['Hubbard_J0'].items():
+                    config.add_j0(species, value)
             
             if 'Hubbard_alpha' in input_ntyp:
                 for species, value in input_ntyp['Hubbard_alpha'].items():
@@ -446,12 +530,16 @@ def remap_hubbard_config(hubbard_config: Dict[str, Any],
     (e.g., Gd → Gd1, Gd2 for antiferromagnetic), Hubbard parameters specified
     as lists are distributed to species in the order they were created.
     
+    Supports U, V, J, and J0 parameters with scalar, list, and orbital dict formats.
+    
     Args:
         hubbard_config: Hubbard configuration dict. Supports:
             - Simple scalar: {'Gd': 6.0} → applies to all Gd species
             - List: {'Gd': [5.0, 6.5]} → Gd1=5.0, Gd2=6.5 (in species_order)
             - Orbital dict: {'Gd': {'3d': 4.3}} → same orbital value for all Gd
             - Orbital list: {'Gd': {'3d': [4.3, 4.5]}} → different U per species
+            
+            Can include 'J' and 'J0' keys with same format as 'U'
         
         species_order: List of species labels in creation order.
             Example: ['Gd1', 'Gd2', 'Ni', 'Si']

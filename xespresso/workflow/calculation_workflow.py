@@ -103,10 +103,12 @@ class CalculationWorkflow:
         kspacing: Optional[float] = None,
         input_data: Optional[Dict] = None,
         magnetic_config: Optional[Union[str, Dict]] = None,
+        hubbard_config: Optional[Union[str, Dict]] = None,
         expand_cell: bool = False,
         queue: Optional[Dict] = None,
         machine: Optional[str] = None,
         code_version: Optional[str] = None,
+        enhance_nbands: bool = False,
         **kwargs
     ):
         """
@@ -135,6 +137,8 @@ class CalculationWorkflow:
                            - 'antiferro' or 'antiferromagnetic': Alternating spin
                            - Dict: Element-based config, e.g. {'Fe': [1, -1], 'O': [0]}
                            Also supports Hubbard parameters in the dict format
+            hubbard_config: Hubbard parameter configuration (alternative to including in magnetic_config).
+                           Example: {'Fe': {'3d': 4.3, '4s': 0.0}} or {'Fe': 4.3} for simple values
             expand_cell: If True, expand cell to accommodate magnetic configuration
             queue: Queue configuration dictionary for job submission (local or remote).
                    This is directly passed to the Espresso calculator.
@@ -146,6 +150,12 @@ class CalculationWorkflow:
                          for that version from ~/.xespresso/codes/ and extracts modules to add to queue.
                          This enables using different QE versions on the same machine.
                          Example: code_version='7.2' loads modules like 'quantum-espresso/7.2'
+            enhance_nbands: If True, automatically calculates nbnd as the exact total number of 
+                           valence electrons in the structure (sum of valence electrons per atom).
+                           Formula: nbnd = Σ(N_atoms[element] × valence[element])
+                           This is useful for band structure calculations where you want nbnd
+                           to exactly match the electron count.
+                           Default False uses traditional estimation with buffer.
             **kwargs: Additional parameters. Special handling for:
                      - ecutwfc (float): Plane-wave cutoff in Ry (overrides preset)
                      - ecutrho (float): Density cutoff in Ry (overrides preset)
@@ -154,12 +164,20 @@ class CalculationWorkflow:
         """
         self.atoms = atoms.copy()  # Work with a copy to avoid modifying original
         self.protocol = protocol
-        self.extra_kwargs = kwargs
         self.expand_cell = expand_cell
-        self.pseudopotentials_base_path = None  # Will be set if loading from config
+        
+        # Extract pseudopotentials_base_path from kwargs if provided (from parent workflows)
+        self.pseudopotentials_base_path = kwargs.pop('pseudopotentials_base_path', None)
+        
+        # Store enhance_nbands option for automatic nbnd calculation from structure
+        self.enhance_nbands = enhance_nbands
+        
         self._pseudo_config = None  # Will store config object if loaded from config
         self.machine = machine  # Store machine name for later reference
         self.code_version = code_version  # Store code version for later reference
+        
+        # Store remaining kwargs for passing to Espresso
+        self.extra_kwargs = kwargs
         
         # Add machine and code_version to extra_kwargs so they're propagated to Espresso
         if machine is not None:
@@ -222,9 +240,15 @@ class CalculationWorkflow:
         if 'ecutrho' in kwargs:
             self.input_data['ecutrho'] = kwargs.pop('ecutrho')
         
+        # Store hubbard_config for later use
+        self.hubbard_config = hubbard_config
+        
         # Handle magnetic configuration if provided
         if magnetic_config is not None:
-            self._apply_magnetic_config(magnetic_config)
+            self._apply_magnetic_config(magnetic_config, hubbard_config)
+        elif hubbard_config is not None:
+            # Apply hubbard_config only (without magnetization)
+            self._apply_magnetic_config(None, hubbard_config)
         else:
             self.pseudopotentials = pseudopotentials
         
@@ -449,9 +473,60 @@ class CalculationWorkflow:
             self.queue['use_modules'] = True
             self.queue['modules'] = modules
     
-    def _apply_magnetic_config(self, magnetic_config: Union[str, Dict]):
-        """Apply magnetic configuration using setup_magnetic_config."""
+    def _apply_magnetic_config(self, magnetic_config: Union[str, Dict], hubbard_config: Optional[Union[str, Dict]] = None):
+        """Apply magnetic configuration using setup_magnetic_config.
+        
+        If both magnetic_config and hubbard_config are provided as dicts,
+        they are merged (hubbard_config takes precedence for Hubbard parameters).
+        """
         from xespresso.tools import set_ferromagnetic, set_antiferromagnetic
+        
+        if magnetic_config is None:
+            # Only hubbard_config provided (no magnetization)
+            if hubbard_config is None:
+                # Nothing to do
+                self.pseudopotentials = self.original_pseudopotentials
+                return
+            
+            # Apply only Hubbard parameters without magnetization
+            # Create minimal config for setup_magnetic_config
+            if isinstance(hubbard_config, dict):
+                # Convert hubbard_config to magnetic_config format
+                minimal_config = {}
+                for element, hubbard_params in hubbard_config.items():
+                    # Each element with just Hubbard params (no magnetization)
+                    minimal_config[element] = hubbard_params
+                
+                config = setup_magnetic_config(
+                    self.atoms,
+                    minimal_config,
+                    pseudopotentials=self.original_pseudopotentials,
+                    expand_cell=self.expand_cell
+                )
+                self.atoms = config['atoms']
+                self.pseudopotentials = config.get('pseudopotentials', self.original_pseudopotentials)
+                
+                # Merge special input_data from magnetic config
+                if 'input_ntyp' in config:
+                    if 'input_ntyp' not in self.input_data:
+                        self.input_data['input_ntyp'] = {}
+                    self.input_data['input_ntyp'].update(config['input_ntyp'])
+                
+                # Handle Hubbard parameters in new format
+                if 'hubbard' in config:
+                    self.input_data['hubbard'] = config['hubbard']
+                if 'hubbard_v' in config:
+                    self.input_data['hubbard_v'] = config['hubbard_v']
+                if 'qe_version' in config:
+                    self.input_data['qe_version'] = config.get('qe_version')
+                if 'lda_plus_u' in config:
+                    self.input_data['lda_plus_u'] = config['lda_plus_u']
+            else:
+                # hubbard_config is a string (config name) - not supported yet
+                logger.warning("hubbard_config as string not yet supported. Skipping.")
+                self.pseudopotentials = self.original_pseudopotentials
+            
+            return
         
         if isinstance(magnetic_config, str):
             magnetic_config = magnetic_config.lower()
@@ -535,9 +610,40 @@ class CalculationWorkflow:
                 )
         elif isinstance(magnetic_config, dict):
             # Element-based configuration with possible Hubbard parameters
+            # Merge with hubbard_config if provided separately
+            merged_config = magnetic_config.copy()
+            if hubbard_config is not None and isinstance(hubbard_config, dict):
+                # Merge Hubbard parameters into magnetic config
+                # hubbard_config takes precedence
+                for element, hubbard_params in hubbard_config.items():
+                    if element not in merged_config:
+                        # Element only in hubbard_config, not in magnetic_config
+                        # Create entry with default magnetization
+                        merged_config[element] = {'mag': [1]}  # Default magnetization
+                    
+                    # Now merge Hubbard params
+                    mag_or_config = merged_config[element]
+                    
+                    if isinstance(mag_or_config, dict):
+                        # Already a dict, just update with Hubbard params
+                        # This handles case where magnetic_config has dict format
+                        merged_config[element].update(hubbard_params)
+                    else:
+                        # magnetic_config[element] is a scalar or list (just magnetization)
+                        # Convert to dict format with 'mag' key
+                        if isinstance(mag_or_config, list):
+                            mag_value = mag_or_config
+                        else:
+                            mag_value = [mag_or_config]
+                        
+                        # Create new dict with magnetization and Hubbard params
+                        merged_config[element] = {'mag': mag_value}
+                        # Add Hubbard parameters (U, J, J0, V)
+                        merged_config[element].update(hubbard_params)
+            
             config = setup_magnetic_config(
                 self.atoms,
-                magnetic_config,
+                merged_config,
                 pseudopotentials=self.original_pseudopotentials,
                 expand_cell=self.expand_cell
             )
@@ -1501,6 +1607,13 @@ class CalculationWorkflow:
         ratio = self._get_ecutrho_ratio_for_pseudos()
         params['ecutrho'] = params['ecutwfc'] * ratio
         
+        # Add nbnd at top level if enhance_nbands is enabled
+        # This ensures it gets properly routed to &SYSTEM section by sort_qe_input
+        if self.enhance_nbands and 'nbnd' not in params.get('input_data', {}).get('SYSTEM', {}):
+            nbnd = self._estimate_nbnd()
+            params['nbnd'] = nbnd
+            logger.info(f"Adding nbnd={nbnd} to input (enhance_nbands=True)")
+        
         # Set pseudo_dir when using pseudopotentials_config
         if self.pseudopotentials_base_path and 'pseudo_dir' not in params['input_data']:
             params['input_data']['pseudo_dir'] = './pseudo'
@@ -2364,16 +2477,29 @@ class CalculationWorkflow:
         """
         Estimate number of bands needed for band structure calculations.
         
-        Uses pseudopotential valence electrons + buffer for unoccupied states.
+        If enhance_nbands=True: Uses exact valence electron count from structure and pseudopotentials.
+            Formula: nbnd = sum(atoms_i × valence_i) for all elements
+            
+        Otherwise: Uses pseudopotential valence electrons + buffer for unoccupied states.
         
         Returns:
             int: Recommended nbnd value
         """
-        from xespresso.workflow.wannier_workflow import suggest_nbnd_from_pseudos
-        
-        # Use the existing helper from wannier_workflow
-        nbnd = suggest_nbnd_from_pseudos(self.pseudopotentials, buffer=20)
-        logger.info(f"Estimated nbnd: {nbnd}")
+        if self.enhance_nbands:
+            # Use exact calculation from structure composition + pseudopotential valence
+            from xespresso.utils.pseudo_utils import calculate_nbnd_from_structure
+            nbnd = calculate_nbnd_from_structure(
+                self.atoms,
+                self.pseudopotentials,
+                self.pseudopotentials_base_path,
+                buffer=0  # Use exact count, no buffer
+            )
+            logger.info(f"Enhanced nbnd (from structure): {nbnd}")
+        else:
+            # Use the traditional helper from wannier_workflow (with buffer)
+            from xespresso.workflow.wannier_workflow import suggest_nbnd_from_pseudos
+            nbnd = suggest_nbnd_from_pseudos(self.pseudopotentials, buffer=20)
+            logger.info(f"Estimated nbnd (default): {nbnd}")
         
         return nbnd
     

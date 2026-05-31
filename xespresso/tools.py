@@ -316,6 +316,8 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
     # Parse magnetic configuration
     element_mags = {}
     element_hubbard = {}
+    element_hubbard_j = {}
+    element_hubbard_j0 = {}
     element_hubbard_v = {}
     
     for element, config in magnetic_config.items():
@@ -324,6 +326,10 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
             element_mags[element] = config.get('mag', config.get('magnetization', [0]))
             if 'U' in config:
                 element_hubbard[element] = config['U']
+            if 'J' in config:
+                element_hubbard_j[element] = config['J']
+            if 'J0' in config:
+                element_hubbard_j0[element] = config['J0']
             if 'V' in config:
                 element_hubbard_v[element] = config['V']
             
@@ -420,13 +426,15 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
     result = set_magnetic_moments(atoms, mag_dict, pseudopotentials)
     
     # Add Hubbard parameters if specified
-    if element_hubbard or element_hubbard_v:
+    if element_hubbard or element_hubbard_j or element_hubbard_j0 or element_hubbard_v:
         if use_new_hubbard_format:
             # NEW FORMAT: Use HUBBARD card (QE 7.x+)
             # Build hubbard dict for new format
             hubbard_dict = {
                 'projector': projector,  # Use user-provided projector
                 'u': {},
+                'j': {},
+                'j0': {},
                 'v': []
             }
             
@@ -457,6 +465,56 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
                         f"Element {element}: New Hubbard format requires orbital specification. "
                         f"Use 'U': {{'3d': {u_value}}} instead of 'U': {u_value}"
                     )
+            
+            # Process J parameters
+            for element, j_value in element_hubbard_j.items():
+                # Find all species for this element
+                element_species = [sp for sp in result['species_map'].keys() 
+                                 if result['species_map'][sp] == element]
+                
+                if isinstance(j_value, dict):
+                    # New format: {'3d': 0.4} or {'3d': [0.4, 0.45]}
+                    for orbital, val in j_value.items():
+                        if isinstance(val, (list, tuple)):
+                            # Different J for each species
+                            for i, species in enumerate(element_species):
+                                if i < len(val):
+                                    hubbard_dict['j'][f"{species}-{orbital}"] = val[i]
+                                else:
+                                    hubbard_dict['j'][f"{species}-{orbital}"] = val[-1]
+                        else:
+                            # Same J for all species of this element
+                            for species in element_species:
+                                hubbard_dict['j'][f"{species}-{orbital}"] = val
+                else:
+                    # Scalar value - apply to all species with default orbital
+                    for species in element_species:
+                        hubbard_dict['j'][species] = j_value
+            
+            # Process J0 parameters
+            for element, j0_value in element_hubbard_j0.items():
+                # Find all species for this element
+                element_species = [sp for sp in result['species_map'].keys() 
+                                 if result['species_map'][sp] == element]
+                
+                if isinstance(j0_value, dict):
+                    # New format: {'3d': 0.4} or {'3d': [0.4, 0.45]}
+                    for orbital, val in j0_value.items():
+                        if isinstance(val, (list, tuple)):
+                            # Different J0 for each species
+                            for i, species in enumerate(element_species):
+                                if i < len(val):
+                                    hubbard_dict['j0'][f"{species}-{orbital}"] = val[i]
+                                else:
+                                    hubbard_dict['j0'][f"{species}-{orbital}"] = val[-1]
+                        else:
+                            # Same J0 for all species of this element
+                            for species in element_species:
+                                hubbard_dict['j0'][f"{species}-{orbital}"] = val
+                else:
+                    # Scalar value - apply to all species with default orbital
+                    for species in element_species:
+                        hubbard_dict['j0'][species] = j0_value
             
             # Process V parameters
             for element, v_list in element_hubbard_v.items():
@@ -504,6 +562,10 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
             # OLD FORMAT: Use input_ntyp (QE < 7.0)
             if 'Hubbard_U' not in result['input_ntyp']:
                 result['input_ntyp']['Hubbard_U'] = {}
+            if 'Hubbard_J' not in result['input_ntyp']:
+                result['input_ntyp']['Hubbard_J'] = {}
+            if 'Hubbard_J0' not in result['input_ntyp']:
+                result['input_ntyp']['Hubbard_J0'] = {}
             
             # Map Hubbard U to species
             for element, u_value in element_hubbard.items():
@@ -529,6 +591,56 @@ def setup_magnetic_config(atoms, magnetic_config, pseudopotentials=None, expand_
                     # Same U for all species of this element
                     for species in element_species:
                         result['input_ntyp']['Hubbard_U'][species] = u_value
+            
+            # Map Hubbard J to species
+            for element, j_value in element_hubbard_j.items():
+                # Find all species for this element
+                element_species = [sp for sp in result['species_map'].keys() 
+                                 if result['species_map'][sp] == element]
+                
+                if isinstance(j_value, dict):
+                    # User specified orbital but we're in old format
+                    # Extract first value and warn
+                    first_orbital, first_val = next(iter(j_value.items()))
+                    print(f"Warning: Orbital specification ('{first_orbital}') ignored in old Hubbard J format")
+                    j_value = first_val
+                
+                if isinstance(j_value, (list, tuple)):
+                    # Different J for each species
+                    for i, species in enumerate(element_species):
+                        if i < len(j_value):
+                            result['input_ntyp']['Hubbard_J'][species] = j_value[i]
+                        else:
+                            result['input_ntyp']['Hubbard_J'][species] = j_value[-1]
+                else:
+                    # Same J for all species of this element
+                    for species in element_species:
+                        result['input_ntyp']['Hubbard_J'][species] = j_value
+            
+            # Map Hubbard J0 to species
+            for element, j0_value in element_hubbard_j0.items():
+                # Find all species for this element
+                element_species = [sp for sp in result['species_map'].keys() 
+                                 if result['species_map'][sp] == element]
+                
+                if isinstance(j0_value, dict):
+                    # User specified orbital but we're in old format
+                    # Extract first value and warn
+                    first_orbital, first_val = next(iter(j0_value.items()))
+                    print(f"Warning: Orbital specification ('{first_orbital}') ignored in old Hubbard J0 format")
+                    j0_value = first_val
+                
+                if isinstance(j0_value, (list, tuple)):
+                    # Different J0 for each species
+                    for i, species in enumerate(element_species):
+                        if i < len(j0_value):
+                            result['input_ntyp']['Hubbard_J0'][species] = j0_value[i]
+                        else:
+                            result['input_ntyp']['Hubbard_J0'][species] = j0_value[-1]
+                else:
+                    # Same J0 for all species of this element
+                    for species in element_species:
+                        result['input_ntyp']['Hubbard_J0'][species] = j0_value
             
             # V parameters in old format
             if element_hubbard_v:

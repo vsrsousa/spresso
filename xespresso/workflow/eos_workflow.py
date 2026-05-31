@@ -73,6 +73,14 @@ from ase.io import read as ase_read
 
 from xespresso.workflow.calculation_workflow import CalculationWorkflow
 from xespresso import Espresso
+from xespresso.pseudopotentials.detector import (
+    get_suggested_min_ecutwfc_from_pseudos,
+    get_ecutrho_ratio_from_pseudos
+)
+from xespresso.utils.pseudo_utils import (
+    discover_pseudopotential_directory,
+    get_ecutrho_ratio
+)
 
 
 logger = logging.getLogger(__name__)
@@ -331,9 +339,11 @@ class EOSWorkflow:
         kspacing: Optional[float] = None,
         input_data: Optional[Dict] = None,
         magnetic_config: Optional[Union[str, Dict]] = None,
+        hubbard_config: Optional[Union[str, Dict]] = None,
         queue: Optional[Dict] = None,
         machine: Optional[str] = None,
         code_version: Optional[str] = None,
+        enhance_nbands: bool = False,
         debug: bool = False,
         **kwargs
     ):
@@ -351,9 +361,13 @@ class EOSWorkflow:
             kspacing: K-point spacing in Ų⁻¹ (overrides preset if provided)
             input_data: Additional input parameters (merged with preset)
             magnetic_config: Magnetic configuration specification
+            hubbard_config: Hubbard parameter configuration (alternative to including in magnetic_config)
             queue: Queue/scheduler configuration for job submission
             machine: Machine configuration name to load
             code_version: Quantum ESPRESSO version to use
+            enhance_nbands: If True, automatically calculates nbnd as the exact total number of 
+                           valence electrons in the structure. Default False uses traditional 
+                           estimation with buffer.
             debug: Enable debug logging
             **kwargs: Additional parameters passed to CalculationWorkflow
             
@@ -378,15 +392,84 @@ class EOSWorkflow:
         self.v0_original = self.atoms.get_volume()
         
         # Initialize workflow parameters
-        self.pseudopotentials = pseudopotentials
-        self.pseudopotentials_config = pseudopotentials_config
+        # Process pseudopotentials (following ConvergenceWorkflow pattern)
+        self.pseudopotentials = {}
+        self.pseudopotentials_base_path = None
+        self._pseudo_config_name = pseudopotentials_config
+        
+        if pseudopotentials_config is not None:
+            from xespresso.pseudopotentials.manager import load_pseudopotentials_config
+            
+            cfg = load_pseudopotentials_config(pseudopotentials_config, verbose=False)
+            if cfg is None:
+                raise ValueError(f"Pseudopotentials configuration '{pseudopotentials_config}' not found")
+            
+            # Store base path for use in EOS calculations
+            self.pseudopotentials_base_path = cfg.base_path if hasattr(cfg, 'base_path') else None
+            
+            # Only load pseudopotentials for elements present in the structure
+            required_elements = set(self.atoms.get_chemical_symbols())
+            for el, pseudo in cfg.pseudopotentials.items():
+                if el in required_elements:
+                    filename = pseudo.filename if hasattr(pseudo, 'filename') else str(pseudo)
+                    # Store FILENAME only (not full path) - CalculationWorkflow will resolve via config
+                    self.pseudopotentials[el] = filename
+            
+            # Calculate ecutrho ratio once, to be used for all calculations in this EOS study
+            self.ecutrho_ratio = get_ecutrho_ratio(required_elements, cfg)
+            logger.info(f"Loaded pseudopotentials config '{pseudopotentials_config}' with ecutrho_ratio={self.ecutrho_ratio:.1f}")
+        else:
+            if pseudopotentials is None:
+                raise ValueError("Must provide 'pseudopotentials' mapping or 'pseudopotentials_config' name")
+            
+            # Discover the base directory for pseudopotentials if not absolute paths
+            try:
+                resolved_pseudos, self.pseudopotentials_base_path = discover_pseudopotential_directory(pseudopotentials)
+                # Extract FILENAMES from resolved absolute paths (same as pseudoconfig logic)
+                # This matches the pseudoconfig behavior: store filenames, not full paths
+                self.pseudopotentials = {}
+                for element, full_path in resolved_pseudos.items():
+                    filename = os.path.basename(full_path)
+                    self.pseudopotentials[element] = filename
+                    logger.info(f"  Discovered {element}: {filename} from {self.pseudopotentials_base_path}")
+            except FileNotFoundError as e:
+                raise FileNotFoundError(str(e))
+            
+            # Auto-detect ecutrho_ratio from pseudopotential types
+            self.ecutrho_ratio = get_ecutrho_ratio_from_pseudos(
+                self.pseudopotentials,
+                self.pseudopotentials_base_path
+            )
+            if self.ecutrho_ratio == 4.0:
+                logger.info(f"Auto-detected ecutrho_ratio = {self.ecutrho_ratio:.1f} (Norm-Conserving pseudos)")
+            else:
+                logger.info(f"Auto-detected ecutrho_ratio = {self.ecutrho_ratio:.1f} (Ultrasoft/PAW or mixed pseudos)")
+        
+        # Set ESPRESSO_PSEUDO environment variable if we discovered a base path
+        # This ensures CalculationWorkflow can find pseudopotentials via env var
+        if self.pseudopotentials_base_path:
+            os.environ['ESPRESSO_PSEUDO'] = self.pseudopotentials_base_path
+            logger.info(f"Set ESPRESSO_PSEUDO={self.pseudopotentials_base_path}")
+        
+        # Auto-detect min_ecutwfc from pseudopotentials if not provided by workflow
+        self.min_ecutwfc = 30.0  # Default fallback
+        detected_min = get_suggested_min_ecutwfc_from_pseudos(
+            self.pseudopotentials,
+            self.pseudopotentials_base_path
+        )
+        if detected_min is not None:
+            self.min_ecutwfc = detected_min
+            logger.info(f"Auto-detected min_ecutwfc = {detected_min:.1f} Ry from UPF headers")
+        
         self.protocol = protocol
         self.kspacing = kspacing
         self.input_data = input_data or {}
         self.magnetic_config = magnetic_config
+        self.hubbard_config = hubbard_config
         self.queue = queue
         self.machine = machine
         self.code_version = code_version
+        self.enhance_nbands = enhance_nbands
         self.workflow_kwargs = kwargs
         
         # Convert machine to queue if provided
@@ -655,14 +738,17 @@ class EOSWorkflow:
             workflow = CalculationWorkflow(
                 atoms=atoms_scaled,
                 pseudopotentials=self.pseudopotentials,
-                pseudopotentials_config=self.pseudopotentials_config,
+                pseudopotentials_config=self._pseudo_config_name,
                 protocol=self.protocol,
                 kspacing=self.kspacing,
                 input_data=self.input_data,
                 magnetic_config=self.magnetic_config,
+                hubbard_config=self.hubbard_config,
                 queue=self.queue,
                 machine=self.machine,
                 code_version=self.code_version,
+                enhance_nbands=self.enhance_nbands,
+                pseudopotentials_base_path=self.pseudopotentials_base_path,
                 **self.workflow_kwargs
             )
             
@@ -833,14 +919,17 @@ class EOSWorkflow:
             workflow = CalculationWorkflow(
                 atoms=atoms_scaled,
                 pseudopotentials=self.pseudopotentials,
-                pseudopotentials_config=self.pseudopotentials_config,
+                pseudopotentials_config=self._pseudo_config_name,
                 protocol=self.protocol,
                 kspacing=self.kspacing,
                 input_data=self.input_data,
                 magnetic_config=self.magnetic_config,
+                hubbard_config=self.hubbard_config,
                 queue=self.queue,
                 machine=self.machine,
                 code_version=self.code_version,
+                enhance_nbands=self.enhance_nbands,
+                pseudopotentials_base_path=self.pseudopotentials_base_path,
                 **self.workflow_kwargs
             )
             
@@ -902,14 +991,17 @@ class EOSWorkflow:
         shared_workflow = CalculationWorkflow(
             atoms=list(self.eos_structures.values())[0],
             pseudopotentials=self.pseudopotentials,
-            pseudopotentials_config=self.pseudopotentials_config,
+            pseudopotentials_config=self._pseudo_config_name,
             protocol=self.protocol,
             kspacing=self.kspacing,
             input_data=self.input_data,
             magnetic_config=self.magnetic_config,
+            hubbard_config=self.hubbard_config,
             queue=self.queue,
             machine=self.machine,
             code_version=self.code_version,
+            enhance_nbands=self.enhance_nbands,
+            pseudopotentials_base_path=self.pseudopotentials_base_path,
             **self.workflow_kwargs
         )
         

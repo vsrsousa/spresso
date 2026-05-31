@@ -200,6 +200,7 @@ class ConvergenceWorkflow:
         code_version: Optional[str] = None,
         magnetic_config: Optional[Union[str, Dict]] = None,
         hubbard_config: Optional[Union[str, Dict]] = None,
+        enhance_nbands: bool = False,
         **kwargs
     ):
         """
@@ -257,6 +258,9 @@ class ConvergenceWorkflow:
                           For QE >= 7.0, can be a dict with orbital-specific U values:
                           Example: {'Fe': {'3d': 4.3, '4s': 0.0}}
                           (optional)
+            enhance_nbands: If True, automatically calculates nbnd as the exact total number of 
+                           valence electrons in the structure. Default False uses traditional 
+                           estimation with buffer.
             **kwargs: Additional parameters passed to CalculationWorkflow
         """
         self.atoms = atoms.copy()
@@ -323,6 +327,13 @@ class ConvergenceWorkflow:
         self.protocol = protocol
         self.precision = precision
         self.initial_kspacing = initial_kspacing
+        self.magnetic_config = magnetic_config
+        self.hubbard_config = hubbard_config
+        self.queue = queue
+        self.machine = machine
+        self.code_version = code_version
+        self.enhance_nbands = enhance_nbands
+        self.workflow_kwargs = kwargs
         
         # Auto-detect min_ecutwfc from pseudopotentials if not provided by user
         if min_ecutwfc is None:
@@ -2048,6 +2059,7 @@ class ConvergenceWorkflow:
             if self.hubbard_config is not None:
                 wf_kwargs['hubbard_config'] = self.hubbard_config
             
+            wf_kwargs['enhance_nbands'] = self.enhance_nbands
             wf_kwargs.update(self.extra_kwargs)
             wf1 = CalculationWorkflow(**wf_kwargs)
             
@@ -2425,6 +2437,7 @@ class ConvergenceWorkflow:
                     wf_kwargs['hubbard_config'] = self.hubbard_config
                 
                 # Pass extra kwargs (e.g., nbnd, conv_thr) to CalculationWorkflow
+                wf_kwargs['enhance_nbands'] = self.enhance_nbands
                 wf_kwargs.update(self.extra_kwargs)
                 wf2 = CalculationWorkflow(**wf_kwargs)
                 
